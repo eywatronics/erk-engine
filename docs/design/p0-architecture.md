@@ -66,12 +66,26 @@ değiştirilebilir duruma dayanıyordu.
 Önlem tek bir disiplin: **kabuk ile renderer arasında paylaşılan değiştirilebilir
 durum yok.** Renderer M0'dan itibaren kendi iş parçacığında çalışır, kabukla
 yalnızca tipli mesajlarla konuşur. Mesaj tipleri sahip oldukları veriyi taşır —
-referans, `Arc`, `Mutex` yok. M3'te `mpsc::channel` yerine IPC kanalı takılır;
-mesajlar zaten sahipli veri olduğu için serileştirilebilir hale gelmeleri bir
-türetme satırıdır.
+referans, `Arc`, `Mutex` yok. Kare de düz veridir (genişlik, yükseklik, RGBA
+baytları, display list metni), vello'nun `Pixmap`'i değil: `Pixmap`'in serde
+desteği yok. M3'te `mpsc::channel` yerine IPC kanalı takılır; mesajlar düz
+sahipli veri olduğu için serileştirilebilir hale gelmeleri bir türetme
+satırıdır.
 
-Bu disiplin CI'da zorlanır: `erk-shell`'in doğrudan bağımlılıkları arasında
-`erk-dom` yok ve `erk-renderer` DOM tiplerini dışa açmaz. DOM'a dokunamayan bir
+Bu disiplin CI'da zorlanır (`guards` job'ı):
+
+- `erk-shell`'in doğrudan bağımlılıkları arasında `erk-dom` ve `erk-style` yok
+  (`cargo tree --depth 1`, tüm hedefler ve özelliklerle).
+- `erk-renderer`'ın dış yüzeyi gözden geçirilmiş bir listeye birebir eşit: iş
+  parçacığı, üç mesaj tipi, `to_png` ve renderer'ın kendi testleri için
+  `render_html`. Mesaj tiplerine başka modülden `impl` eklenemez.
+- Mesajlar `messages.rs`'te durur ve bu dosya yalnızca prelude tiplerini
+  kullanabilir: hiçbir yol (`::`) yok, dolayısıyla motor ya da üçüncü taraf
+  tipi adı geçemez; `Arc`, `Rc`, `Mutex`, `Cell`, `Box`, `dyn` ve ödünç
+  referans yok.
+- Kabuk `render_html` çağırmaz; kare yalnızca renderer iş parçacığından gelir.
+
+Betik: `.github/scripts/check-renderer-surface.sh`. DOM'a dokunamayan bir
 kabuk, DOM'u paylaşamaz.
 
 ### 2.3 Reddedilen alternatifler
@@ -139,12 +153,12 @@ erk-shell ──► erk-renderer ──► erk-style ──► erk-dom
 | Crate | Sorumluluk | Bugün |
 |---|---|---|
 | `erk-dom` | Arena DOM, `NodeId`, html5ever `TreeSink` | M0 Task 2 |
-| `erk-style` | Stylo adaptörü: `TElement` ve arkadaşları, yan tablo, `StyleEngine`. Tek `unsafe` istisnası (§6.1) | M0 Task 3 |
+| `erk-style` | Stylo adaptörü: `TElement` ve arkadaşları, yan tablo, `StyleEngine`. Bugünkü tek `unsafe` istisnası (§6.1) | M0 Task 3 |
 | `erk-renderer` | Layout (Taffy + Parley), display list, boyama | M0 Task 4–6 |
 | `erk-shell` | Pencere, olay döngüsü, renderer iş parçacığıyla mesajlaşma | M0 Task 7 |
 | `erk-network` | Ağ arayüzü; M2'de reqwest, M6'da kendi Fetch | Boş |
 | `erk-ipc` | Süreçler arası taşıma | M3 |
-| `erk-sandbox` | İşletim sistemi kum havuzu API'leri (tek `unsafe` istisnası) | M3 |
+| `erk-sandbox` | İşletim sistemi kum havuzu API'leri (`erk-style`'dan sonra ikinci `unsafe` istisnası) | M3 |
 | `erk-js` | JS motoru bağlama | M4 |
 
 `erk-dom` yapraktır: projeden hiçbir şey import etmez. `erk-shell`, `erk-dom`'a
@@ -258,8 +272,9 @@ görselleri bilmez. Bunu Erk yazar. Referanslar: Servo'nun `layout` crate'i
   referans testi buldu).
 - **M0'da** tam IFC yok: bir paragraf Taffy'de ölçüm fonksiyonlu bir yapraktır.
   Parley paragrafı şekillendirip satırlara böler, Taffy'ye yalnızca
-  `(genişlik, yükseklik)` döner; aynı Parley layout'u boyamada tekrar
-  kullanılır.
+  `(genişlik, yükseklik)` döner. Ölçümün layout'u saklanmaz: Taffy bitince
+  paragraf son içerik genişliğinde bir kez daha şekillenir ve boyama o
+  layout'u kullanır.
 - **M1'de** tam IFC.
 
 **Ölçülerek verilecek karar — akış layout'unun sahibi.** Taffy block layout ile

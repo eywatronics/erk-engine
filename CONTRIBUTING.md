@@ -22,6 +22,7 @@ By participating you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 | `refactor/` | Code restructuring       | `refactor/dom-arena`       |
 | `docs/`     | Documentation            | `docs/architecture-update` |
 | `chore/`    | Tooling, deps, CI        | `chore/update-wgpu`        |
+| `m0/`, `m1/`, ... | Milestone work     | `m0/first-pixel`           |
 
 ## Commit messages
 
@@ -39,6 +40,10 @@ Common types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`.
 The scope is usually a crate or subsystem (`dom`, `css`, `ipc`, `network`, `shell`, ...).
 
 A clean, meaningful history matters: it makes `git bisect` usable on a codebase this large.
+With a squash merge the PR title becomes the commit subject, so it follows the same format.
+
+Commit messages and pull requests do not name AI tools and carry no co-author trailer other
+than the maintainer's; CI checks this.
 
 ## Before you push
 
@@ -46,12 +51,17 @@ Run the same checks CI runs:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo build --workspace
-cargo test --workspace
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo build --workspace --locked
+cargo test --workspace --locked
 ```
 
-Clippy warnings are treated as errors.
+Clippy warnings are treated as errors. For a change that affects rendering, put the
+Chrome reference scores in the PR description:
+
+```sh
+cargo test -p erk-renderer --test chrome_reference -- --nocapture
+```
 
 ## License
 

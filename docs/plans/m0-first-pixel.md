@@ -565,14 +565,14 @@ olarak her zaman görünür; yasak olan doğrudan bağımlılık. Kasıtlı ihla
 
 ### Task 8: Kabul
 
-- [ ] `examples/merhaba.html`: Türkçe bir `<h1>` ve iki paragraf, bir arka plan
+- [x] `examples/merhaba.html`: Türkçe bir `<h1>` ve iki paragraf, bir arka plan
   rengi, bir `<style>` bloğu.
-- [ ] `cargo run -p erk-shell -- examples/merhaba.html` pencerede biçimli metni
+- [x] `cargo run -p erk-shell -- examples/merhaba.html` pencerede biçimli metni
   gösteriyor (elle doğrulanır; ekran görüntüsü PR'a eklenir).
-- [ ] `cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html`
+- [x] `cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html`
   altın PNG ile aynı.
-- [ ] README'ye çalıştırma komutları; `roadmap.md`'de M0 durumu "Bitti".
-- [ ] [p0-verification.md](../design/p0-verification.md) tablosunda M0
+- [x] README'ye çalıştırma komutları; `roadmap.md`'de M0 durumu "Bitti".
+- [x] [p0-verification.md](../design/p0-verification.md) tablosunda M0
   satırlarının "Denendi" sütunu dolduruldu.
 
 ---
@@ -904,3 +904,86 @@ başlıksız bir ara pencere bildiriyor.
 Kasıtlı ihlal: `erk-shell`'e `erk-dom` bağımlılığı eklendi → muhafız
 `erk-dom`'u basıp 1 ile çıktı. Geri alınınca 0. Muhafız `erk-style`'ı da
 kapsıyor: kabuk stil tiplerine de erişmemeli.
+
+### Task 8 tamamlandı (2026-09-28)
+
+Task 1–7, PR #2 ile `main`'e squash olarak birleşti (`c57c77c`). Kural
+setindeki zorunlu kontrol adı `rust-checks` idi ve hiç raporlanmıyordu; matris
+yüzünden kontroller `rust-checks (ubuntu-latest)`, `rust-checks
+(windows-latest)` ve `guards` adıyla geliyor (Task 1 notu). Kural seti bu üçüne
+çevrildi.
+
+**Kabul maddeleri:**
+
+- `examples/merhaba.html`: Türkçe `<h1>`, iki paragraf, arka plan rengi,
+  `<style>` bloğu.
+- Pencere: `erk examples/merhaba.html` açıldı, istemci alanı DPI farkında bir
+  süreçle `PrintWindow` ile yakalandı: 1000×750 (%125 ölçek). Başlık, iki
+  paragraf, beyaz kutu ve bütün Türkçe karakterler (İ ı Ş ş Ğ ğ Ü ü Ö ö Ç ç)
+  doğru. Görüntü PR açıklamasında.
+- `cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html`
+  çıktısı altın PNG ile aynı: çözülmüş piksel verisi bayt bayt eşit. Aynı şeyi
+  `erk-shell/tests/screenshot.rs` her çalıştırmada doğruluyor.
+- README'de çalıştırma komutları (Task 7) ve M0'ın bittiği; `roadmap.md`'de M0
+  "Bitti".
+- `p0-verification.md`'nin boş iki "Denendi" hücresi dolduruldu: tutamağa
+  ikinci alan → E0080; kabuğun ekran görüntüsü yüksekliği 601 → test kırmızı.
+- `cargo test --workspace --locked`: 67 test yeşil. Chrome skorları ve altın
+  görüntü değişmedi.
+
+**Kabul denetimi.** Maddeleri işaretlemekle yetinilmedi; bağımsız bir denetim
+yapıldı. Üç salt okunur denetçi kabul kriterlerine, CI muhafızlarına ve
+belgelerin doğruluğuna baktı. Her denetçinin bulgularını bir şüpheci
+çürütmeye çalıştı, son olarak bir eleştirmen denetimin bakmadığı alanları
+aradı. 35 bulgudan 28'i doğrulandı; eleştirmenin 11 bulgusu uygulanırken tek
+tek doğrulandı. Sonuç: M0'ın "Bitti" sayılmasından önce kapanması gereken
+gerçek açıklar vardı. En önemlisi, beş muhafız kendi kasıtlı ihlalini
+yakalıyor ama eşdeğer bir ihlali geçiriyordu.
+
+| Bulgu | Düzeltme | Nerede |
+|---|---|---|
+| "Kabuk ile renderer yalnızca mesajla konuşur" yalnızca `cargo tree` ile korunuyordu: renderer'ın bir DOM tipini yeniden dışa açması, mesaja `Arc<Mutex>` eklemek, kabuğun `render_html` çağırması geçiyordu | Mesajlar `messages.rs`'te, yalnızca prelude tipleri; `check-renderer-surface.sh` | PR #3, `refactor(renderer)` |
+| `Frame` vello'nun `Pixmap`'ini taşıyordu; `Pixmap`'in serde desteği yok, "M3'te bir türetme satırı" iddiası tutmuyordu | `Frame` düz veri (genişlik, yükseklik, RGBA, display list); `to_png` pixmap'i yeniden kurar, PNG baytları aynı | PR #3, `refactor(renderer)` |
+| Pencere modunda renderer paniği sessizdi: pencere son kareyle açık kalıyor, çıkış kodu 0 | Kanal kapanınca pencere kapanır, çıkış 1; `finish` testi | PR #3, `fix(shell)` |
+| `cargo tree` yalnızca host platformu ve varsayılan özellikleri çözüyor: Windows'a özgü ya da isteğe bağlı bir `erk-dom` bağımlılığı Linux'taki `guards`'ta görünmüyordu; `if cargo tree \| grep` hatayı "eşleşme yok" sayıyordu | `--target all --all-features`; ağaç önce bir değişkene | `ci:` commit'i |
+| Rc yasağı `#![allow(clippy::all)]`, workspace tablosunda `allow` ve silinen `clippy.toml` ile kapanabiliyordu | Grup araması ve kanarya tipi; `Arc` da yasak | `ci:` commit'i |
+| `erk-style` sayımı `expect(unsafe_code)`, gerekçeli `allow`, `tests/` ve `unsafe impl`'i görmüyordu | Tüm crate, tüm `unsafe` belirteçleri; `unsafe_op_in_unsafe_fn = "forbid"` | `ci:` commit'i |
+| CI `--locked` değildi, zaman aşımı yoktu, Python sürümünü yazdırıyor deniyordu ama yazdırmıyordu | Üçü de eklendi | `ci:` commit'i |
+| Commit mesajı ve PR'da yapay zekâ aracı adı yasağı yazılıydı ama denetlenmiyordu | `check-commit-messages.sh` | `ci:` commit'i |
+| Beklenti betiği: gerekçesi zaten yazılı satır eski gerekçeyle yeniden düşürülebiliyordu, boş gerekçe kabul ediliyordu, ikinci bir satır dizgi karşılaştırmasıyla geçiyordu, yeniden adlandırılan sayfa serbest skorla giriyordu | Betik ve test ikisi de reddediyor | `test:` commit'i |
+| Sayfa değişince skor eski sayfanın Chrome görüntüsüyle ölçülüyordu | `chrome/pages.txt` özeti | `test:` commit'i |
+| Tolerans kuralı (en küçük düz renk farkının altında) yalnızca yorumdu | Chrome görüntülerinin düz renklerinden hesaplayan test | `test:` commit'i |
+| Boyama sırası testi boşa geçiyordu: sarının mavi kanalı 0 olduğu için metin altta kalsa da her piksel "koyu" sayılıyordu | Kırmızı kanal; glifleri önce boyayan mutasyon eskisini geçiyor, yenisinde kırmızı | `test:` commit'i |
+| Thread testleri: boyutsuz boyama testi zamanlamaya bağlıydı, son boyut testi askıda kalabiliyordu | Zaman aşımlı bekleme | `test:` commit'i |
+| `bgcolor` ve `align` eşlemelerinin testi yoktu | `computed.rs` testleri | `test:` commit'i |
+| Belgelerde eskimiş ya da yanlış ifadeler: "tek `unsafe` istisnası" `erk-sandbox` için, "skor yalnızca yükselir", Parley layout'unun boyamada yeniden kullanıldığı, `--screenshot` testinin "Task 7'de geleceği", M1 lisans satırının zamanı, `Cargo.toml` üye yorumu, README durumu ve WPT ile ölçüm, ARCHITECTURE'ın CI listesi, katkı rehberinde `m0/` öneki ve `--locked` | Düzeltildi | `docs: accept M0` |
+
+**Task 7 notunun düzeltmesi:** Task 7 tablosu "renderer panikler ise kanal
+kapanır ve kabuk bunu görür" diyordu. Bu yalnızca ekran görüntüsü yolu için
+doğruydu; pencere modu PR #3'te (`fix(shell)`) düzeltildi.
+
+**Yeni kontroller ilk çalıştırmada da iş gördü:** `messages.rs` muhafızı,
+yeni yazılan `messages.rs`'teki bir `usize::from` çağrısını yakaladı (yol
+yasak). `cargo tree` denemeleri `--locked` olmadan `Cargo.lock`'u sessizce
+güncelledi; `--locked`'ın neden gerekli olduğunu bu gösterdi.
+
+Kasıtlı ihlallerin tamamı `p0-verification.md` tablosunda; her biri önce
+yakalandı, geri alınınca geçti.
+
+**Bilerek yapılmayanlar:**
+
+- `CODE_OF_CONDUCT.md`'deki `[INSERT CONTACT METHOD]`: bildirim kanalını
+  bakımcı seçer, depoda yayımlanmış bir adres yok.
+- Commit mesajı muhafızı, squash birleştirmede GitHub'ın PR'dan sonra
+  oluşturduğu mesajı göremez. `main`'deki `c57c77c`'nin gövdesi proje
+  kuralları dosyasının adını içeriyor (28cb12e'den taşındı); `main` korumalı
+  olduğu için düzeltilemez.
+- Yaprak kontrolü dev-dependency'leri bilerek dışarıda tutar: yalnızca
+  testlere girerler, katman yönünü kütüphane düzeyinde bozmazlar.
+- Lint devralma döngüsü yalnızca `crates/*`'e bakar; bugün her üye orada.
+  `xtask` M3'te kendi muhafızıyla gelir.
+- Bir sayfa hem yeniden adlandırılıp hem yeniden yakalanırsa git bunu
+  yeniden adlandırma olarak tanımaz; eski ad "görüntüsü de gitti" dalına
+  düşer. Bu, bilerek yeniden yakalama gerektirir ve diff'te görünür.
+- `align` → `text-align` stile giriyor ama çizilmiyor: hizalama M1'in inline
+  layout'unda.

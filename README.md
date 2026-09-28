@@ -5,16 +5,18 @@
 - Built on mature Rust components: html5ever, Stylo, Taffy, Parley, Vello
 - Original work where none of them reach: inline layout, the process model and
   sandbox, networking and security policy, and the browser shell
-- Progress measured with the [Web Platform Tests](https://web-platform-tests.org/),
-  not calendar dates
+- Progress measured by tests, not calendar dates: a pixel comparison with
+  Chrome today, the [Web Platform Tests](https://web-platform-tests.org/)
+  from M1
 
 > Erk is at the very beginning. It cannot browse the web yet.
 
 ## Status
 
-The current milestone is **M0 — first pixel**: open a local HTML file in a
-single process and paint it in a window or to a PNG. Multi-process isolation
-and sandboxing come in M3, JavaScript in M4. See the
+**M0 — first pixel** is done: Erk opens a local HTML file in a single process
+and paints it in a window or to a PNG. The next milestone is **M1 — static
+document engine**, with Erk's own inline layout and the Web Platform Tests.
+Multi-process isolation and sandboxing come in M3, JavaScript in M4. See the
 [roadmap](docs/plans/roadmap.md) (Turkish) for every milestone and its
 acceptance criterion.
 
@@ -44,7 +46,7 @@ cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html
 ```
 crates/
   erk-shell/     window, event loop, messaging with the renderer
-  erk-renderer/  layout, display list, paint
+  erk-renderer/  layout, display list, paint; the renderer thread
   erk-style/     CSS styling with Stylo
   erk-network/   network interface (from M2)
   erk-dom/       arena DOM and HTML parsing
