@@ -23,9 +23,12 @@ url = "2.5"
 # declares five methods as `unsafe fn`, and implementing an unsafe method is
 # itself an `unsafe_code` violation even with a safe body, so `forbid` cannot
 # be used here. `deny` plus an allow on exactly those five signatures keeps
-# the exception as narrow as the trait forces; CI counts them.
+# the exception as narrow as the trait forces; CI counts them. Their bodies
+# stay safe: an unsafe operation inside one is an error that no attribute
+# can allow.
 [lints.rust]
 unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "forbid"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
