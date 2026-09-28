@@ -32,14 +32,20 @@ cargo build
 cargo test
 ```
 
-Run instructions will be added when M0 is complete.
+Open a local HTML file in a window, or paint it to a PNG:
+
+```sh
+cargo run -p erk-shell -- examples/merhaba.html
+cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html
+```
 
 ## Project layout
 
 ```
 crates/
   erk-shell/     window, event loop, messaging with the renderer
-  erk-renderer/  style, layout, display list, paint
+  erk-renderer/  layout, display list, paint
+  erk-style/     CSS styling with Stylo
   erk-network/   network interface (from M2)
   erk-dom/       arena DOM and HTML parsing
 docs/
@@ -62,6 +68,9 @@ Erk Engine is dual-licensed under either:
 * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 
 at your option.
+
+The embedded Noto Sans font files in `crates/erk-renderer/assets/fonts` are
+licensed under the [SIL Open Font License 1.1](crates/erk-renderer/assets/fonts/OFL.txt).
 
 ### Contribution
 

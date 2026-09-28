@@ -1,15 +1,23 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
-    "crates/erk-shell",    # OS window (winit) and broker process
-    "crates/erk-renderer", # HTML/CSS rendering engine, sandboxed process
-    "crates/erk-network",  # Networking and Fetch rules
-    "crates/erk-dom",      # DOM tree management
+    "crates/erk-shell",    # window, event loop, messaging with the renderer
+    "crates/erk-renderer", # style, layout, display list, paint
+    "crates/erk-network",  # network interface (from M2)
+    "crates/erk-dom",      # arena DOM and HTML parsing
+    "crates/erk-style",    # Stylo adapter (the one crate that may declare unsafe fns)
 ]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.98"
 authors = ["ismet kabatepe", "Erk Engine Contributors"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/eywatronics/erk-engine-browser"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

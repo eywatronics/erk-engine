@@ -59,6 +59,9 @@ Tek süreç, ağ yok, yerel dosya. Amaç yalnızca pikseli görmek.
 - Erk display list (dikdörtgen + glyph run) → `vello_cpu`
 - winit + softbuffer penceresi; renderer ayrı iş parçacığında, tipli mesajlarla
 - `--screenshot out.png` başsız mod
+- **Chrome referans testi:** aynı sayfalar Chrome'da ve Erk'te çizilip
+  karşılaştırılır; sayfa başına içerik skoru yalnızca yükselir (kural
+  CLAUDE.md'de)
 
 Uygulama planı: [m0-first-pixel.md](m0-first-pixel.md).
 

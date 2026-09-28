@@ -1,0 +1,155 @@
+/* Erk's user agent stylesheet.
+ *
+ * Written from the "Rendering" section of the HTML Standard
+ * (https://html.spec.whatwg.org/multipage/rendering.html), not copied from a
+ * browser: Firefox's html.css and Blitz's derivative of it are MPL-2.0, and
+ * this crate is MIT OR Apache-2.0. M0 covers what a static document of
+ * headings, paragraphs and inline formatting needs; M1 grows it.
+ */
+
+@namespace url(http://www.w3.org/1999/xhtml);
+
+/* 15.3.1 Hidden elements */
+area, base, basefont, datalist, head, link, meta, noembed,
+noframes, param, rp, script, style, template, title {
+  display: none;
+}
+
+[hidden] {
+  display: none;
+}
+
+/* 15.3.3 Flow content */
+html, body {
+  display: block;
+}
+
+address, blockquote, center, dialog, div, figure, figcaption, footer, form,
+header, hr, legend, listing, main, p, plaintext, pre, search, xmp {
+  display: block;
+}
+
+blockquote, figure, listing, p, plaintext, pre, xmp {
+  margin-block: 1em;
+}
+
+blockquote, figure {
+  margin-inline: 40px;
+}
+
+address {
+  font-style: italic;
+}
+
+listing, plaintext, pre, xmp {
+  font-family: monospace;
+  white-space: pre;
+}
+
+/* 15.3.4 Phrasing content */
+cite, dfn, em, i, var {
+  font-style: italic;
+}
+
+b, strong {
+  font-weight: bolder;
+}
+
+code, kbd, samp, tt {
+  font-family: monospace;
+}
+
+small {
+  font-size: smaller;
+}
+
+sub {
+  vertical-align: sub;
+}
+
+sup {
+  vertical-align: super;
+}
+
+sub, sup {
+  line-height: normal;
+  font-size: smaller;
+}
+
+u, ins {
+  text-decoration: underline;
+}
+
+s, strike, del {
+  text-decoration: line-through;
+}
+
+mark {
+  background: yellow;
+  color: black;
+}
+
+/* 15.3.6 Sections and headings */
+article, aside, h1, h2, h3, h4, h5, h6, hgroup, nav, section {
+  display: block;
+}
+
+h1 {
+  margin-block: 0.67em;
+  font-size: 2em;
+}
+
+h2 {
+  margin-block: 0.83em;
+  font-size: 1.5em;
+}
+
+h3 {
+  margin-block: 1em;
+  font-size: 1.17em;
+}
+
+h4 {
+  margin-block: 1.33em;
+  font-size: 1em;
+}
+
+h5 {
+  margin-block: 1.67em;
+  font-size: 0.83em;
+}
+
+h6 {
+  margin-block: 2.33em;
+  font-size: 0.67em;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: bold;
+}
+
+/* 15.3.7 Lists */
+dir, dd, dl, dt, menu, ol, ul {
+  display: block;
+}
+
+li {
+  display: list-item;
+}
+
+dir, dl, menu, ol, ul {
+  margin-block: 1em;
+}
+
+dd {
+  margin-inline-start: 40px;
+}
+
+dir, menu, ol, ul {
+  padding-inline-start: 40px;
+}
+
+/* 15.3.2 The page */
+body {
+  margin: 8px;
+}

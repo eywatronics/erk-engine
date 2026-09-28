@@ -11,14 +11,20 @@ env:
 
 jobs:
   rust-checks:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the primary development platform; Linux is the second
+        # target. macOS joins in M2, when the window layer needs checking there.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # With no argument, rustup installs the toolchain named in
+      # rust-toolchain.toml, so CI and local builds use the same compiler.
+      - name: Install Rust from rust-toolchain.toml
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
 
@@ -34,4 +40,95 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose
 
-      # TODO: add Web Platform Tests (WPT) step
+  # Architecture guards. Each one arrives in the same pull request as the thing
+  # it protects; see docs/design/p0-verification.md for the schedule and the
+  # deliberate violation each was tested with.
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The expectations check compares with the base commit.
+          fetch-depth: 0
+
+      - name: Install Rust from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # The Chrome reference test fails if a score moves in either direction;
+      # what it cannot see is an expectation lowered next to a regression.
+      # A lowered score must say why on its own line.
+      - name: Reference expectations only go down with a written reason
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/check-reference-expectations.sh "$BASE"
+
+      # unsafe_code = "forbid" lives in [workspace.lints]; a crate that drops
+      # `[lints] workspace = true` silently opts out of it. The named
+      # exceptions must still deny unsafe code.
+      - name: Every crate inherits the workspace lints
+        run: |
+          exceptions="erk-style"
+          fail=0
+          for f in crates/*/Cargo.toml; do
+            crate=$(basename "$(dirname "$f")")
+            if [[ " $exceptions " == *" $crate "* ]]; then
+              if ! grep -Pzq '\[lints\.rust\]\s*\nunsafe_code = "deny"' "$f"; then
+                echo "$f is a lint exception but does not deny unsafe_code"
+                fail=1
+              fi
+            elif ! grep -Pzq '\[lints\]\s*\nworkspace = true' "$f"; then
+              echo "$f does not inherit [workspace.lints]"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # erk-style may only implement the five `unsafe fn`s Stylo's TElement
+      # declares, with safe bodies. Any other unsafe code shows up as a sixth
+      # allow or as an unsafe block.
+      - name: erk-style's unsafe surface is exactly the five TElement signatures
+        run: |
+          allows=$(grep -rn 'allow(unsafe_code)' crates/erk-style/src | wc -l)
+          blocks=$(grep -rnE 'unsafe \{' crates/erk-style/src | wc -l)
+          echo "allow(unsafe_code): $allows, unsafe blocks: $blocks"
+          if [ "$allows" -ne 5 ] || [ "$blocks" -ne 0 ]; then
+            echo "expected 5 allows and 0 unsafe blocks in erk-style"
+            exit 1
+          fi
+
+      # html5ever and Stylo must agree on the atom crates; two versions would
+      # give element names that never compare equal.
+      - name: html5ever and Stylo share one atom crate version
+        run: |
+          if cargo tree -d -e normal | grep -E '^(web_atoms|string_cache) '; then
+            echo "duplicate atom crates: upgrade html5ever and stylo together"
+            exit 1
+          fi
+
+      # The DOM is the bottom layer: everything above may depend on it, it
+      # depends on no other workspace crate.
+      - name: erk-dom depends on no other workspace crate
+        run: |
+          if cargo tree -p erk-dom -e normal --prefix none | grep -E '^erk-' | grep -v '^erk-dom '; then
+            echo "erk-dom must stay a leaf crate"
+            exit 1
+          fi
+
+      # The shell talks to the renderer through messages and must not be able
+      # to reach the DOM. --depth 1 on purpose: erk-shell -> erk-renderer ->
+      # erk-dom is always there indirectly; a direct dependency is the breach.
+      - name: erk-shell does not depend on erk-dom
+        run: |
+          if cargo tree -p erk-shell -e normal --depth 1 --prefix none | grep -E '^erk-(dom|style) '; then
+            echo "the shell talks to the renderer through messages, not the DOM or styles"
+            exit 1
+          fi
+
+      # clippy's disallowed_types can be silenced with an allow attribute,
+      # which would quietly bring reference-counted nodes back.
+      - name: The Rc ban in erk-dom is not silenced
+        run: |
+          if grep -rn 'disallowed_types' crates/erk-dom/src crates/erk-dom/tests; then
+            echo "do not allow clippy::disallowed_types in erk-dom"
+            exit 1
+          fi

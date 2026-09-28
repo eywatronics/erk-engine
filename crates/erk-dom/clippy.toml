@@ -1,0 +1,4 @@
+disallowed-types = [
+    { path = "std::rc::Rc", reason = "DOM nodes are owned by the arena and addressed by NodeId (docs/design/p0-architecture.md §5)" },
+    { path = "std::rc::Weak", reason = "see std::rc::Rc" },
+]

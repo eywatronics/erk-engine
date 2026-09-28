@@ -39,7 +39,7 @@ HTML ─► html5ever ─► erk-dom ─► Stylo ─► Taffy + Parley ─► d
 |---|---|---|
 | Parsing | `html5ever` (pinned to 0.39.0) | Upgraded together with Stylo; both must share one atom crate version |
 | DOM | `erk-dom` | Arena of nodes addressed by `NodeId` (u32 index + u32 generation); no reference counting |
-| Style | Stylo | Servo's and Firefox's CSS engine; sequential traversal for now |
+| Style | Stylo, via `erk-style` | Servo's and Firefox's CSS engine; sequential traversal for now |
 | Layout | Taffy + Erk's inline layout | Taffy handles block, flexbox, grid and floats. Inline formatting (line boxes, spans across lines, justification) is Erk's own work |
 | Text | Parley | HarfRust shaping, ICU4X segmentation, fontique font fallback |
 | Paint | Erk display list → `vello_cpu` | CPU rendering is the default and the reference for tests; a GPU path (`vello_hybrid` on wgpu) comes in M2 |
@@ -74,7 +74,8 @@ A crash in a renderer must never take down the shell.
 | Crate | Responsibility | Arrives in |
 |---|---|---|
 | `erk-dom` | Arena DOM and the html5ever tree sink. Depends on no other `erk-*` crate | M0 |
-| `erk-renderer` | Style, layout, display list, paint | M0 |
+| `erk-style` | Stylo adapter and style engine. The one crate allowed to declare `unsafe fn`s, because Stylo's `TElement` requires five | M0 |
+| `erk-renderer` | Layout, display list, paint | M0 |
 | `erk-shell` | Window, event loop, messaging with the renderer. Does not depend on `erk-dom` | M0 |
 | `erk-network` | Network interface: a temporary HTTP client in M2, Erk's own Fetch implementation in M6 | M2 |
 | `erk-ipc` | Cross-process transport | M3 |
@@ -91,8 +92,10 @@ by its own event listener's closure must be collected.
 
 ## Rules enforced in CI
 
-- `unsafe` is forbidden workspace-wide; exceptions are named FFI crates only
-  (none today).
+- `unsafe` is forbidden workspace-wide. The only exception is `erk-style`:
+  Stylo's `TElement` declares five methods as `unsafe fn`, and implementing
+  them violates the lint even with safe bodies. CI checks that exactly those
+  five signatures are allowed and that no unsafe block exists.
 - `erk-dom` uses no `std::rc::Rc`.
 - `erk-dom` is a leaf; `erk-shell` does not depend on `erk-dom` directly.
 - html5ever and Stylo resolve to a single version of their atom crates.

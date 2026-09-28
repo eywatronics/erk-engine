@@ -1,10 +1,42 @@
 [package]
 name = "erk-renderer"
-description = "Erk Engine renderer: HTML/CSS rendering in a sandboxed process."
+description = "Erk Engine renderer: layout, display list and paint."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+# The code is MIT OR Apache-2.0 like the rest of Erk; the embedded Noto Sans
+# font files in assets/fonts are OFL-1.1 (see assets/fonts/OFL.txt).
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
 repository.workspace = true
+rust-version.workspace = true
 
 [dependencies]
+erk-dom = { path = "../erk-dom" }
+erk-style = { path = "../erk-style" }
+# No system fonts: M0 renders with the embedded Noto Sans so that output is
+# identical on every machine.
+parley = { version = "=0.11.1", default-features = false, features = ["std"] }
+# Font metrics for Stylo's font-relative units, read from the embedded fonts.
+# Same version Parley uses.
+skrifa = { version = "=0.44.0", default-features = false, features = ["std"] }
+# stylo_taffy is triple-licensed (MIT OR Apache-2.0 OR MPL-2.0); Erk uses it
+# under MIT OR Apache-2.0. Its version is the one blitz-dom 0.3.0-beta.2 uses,
+# matching Stylo 0.20.
+stylo_taffy = { version = "=0.3.0-beta.2", default-features = false, features = ["std", "block", "flexbox", "grid", "floats"] }
+# `calc` is required by stylo_taffy, which hands calc() values to Taffy as
+# pointers. Erk never dereferences them; see layout/calc.rs.
+taffy = { version = "=0.14.0", default-features = false, features = ["std", "block_layout", "flexbox", "grid", "float_layout", "calc", "content_size"] }
+# Only for `force_support_fallback`, which provides the scalar
+# `Level::fallback()` that paint.rs pins rendering to. Same version as
+# vello_cpu uses.
+fearless_simd = { version = "=0.4.1", features = ["force_support_fallback"] }
+# CPU rasterizer: the reference renderer and the source of golden images.
+# Single-threaded (no `multithreading` feature) so output is deterministic.
+vello_cpu = "=0.2.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+png = "0.18"
+url = "2.5"

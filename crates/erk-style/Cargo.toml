@@ -1,0 +1,31 @@
+[package]
+name = "erk-style"
+description = "Erk Engine style: the Stylo adapter for the arena DOM."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+app_units = "0.7.5"
+erk-dom = { path = "../erk-dom" }
+euclid = "0.22"
+selectors = "=0.40.0"
+style = { version = "=0.20.0", package = "stylo" }
+style_config = { version = "=0.20.0", package = "stylo_static_prefs" }
+style_dom = { version = "=0.20.0", package = "stylo_dom" }
+style_traits = { version = "=0.20.0", package = "stylo_traits" }
+url = "2.5"
+
+# The one crate that does not inherit the workspace lints. Stylo's TElement
+# declares five methods as `unsafe fn`, and implementing an unsafe method is
+# itself an `unsafe_code` violation even with a safe body, so `forbid` cannot
+# be used here. `deny` plus an allow on exactly those five signatures keeps
+# the exception as narrow as the trait forces; CI counts them.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

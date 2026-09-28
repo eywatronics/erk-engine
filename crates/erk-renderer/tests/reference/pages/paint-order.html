@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!-- CSS 2 Appendix E: every block background before any text. Each paragraph
+     is shorter than its text, which overflows into the coloured block after
+     it; the text must stay visible on top. The hidden box paints nothing. -->
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: "Noto Sans"; margin: 16px; background: #ffffff; color: #1a202c; }
+  p { margin: 0; height: 6px; font-size: 28px; }
+  .sari { background: #f6e05e; height: 60px; }
+  .mavi { background: #90cdf4; height: 60px; }
+  .gizli { visibility: hidden; background: #e53e3e; height: 40px; }
+</style>
+</head>
+<body>
+  <p>Taşan metin görünür kalır</p>
+  <div class="sari"></div>
+  <p>İkinci kardeş, yine üstte</p>
+  <div class="mavi"></div>
+  <div class="gizli">gizli kutu</div>
+  <div class="sari"></div>
+</body>
+</html>
