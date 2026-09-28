@@ -26,13 +26,20 @@ fn text_is_painted_after_every_background() {
     );
     let list = frame.display_list();
     let lines: Vec<&str> = list.lines().collect();
-    let last_rect = lines.iter().rposition(|line| line.starts_with("rect"));
-    let first_glyphs = list.lines().position(|line| line.starts_with("glyphs"));
+    let (Some(last_rect), Some(first_glyphs)) = (
+        lines.iter().rposition(|line| line.starts_with("rect")),
+        lines.iter().position(|line| line.starts_with("glyphs")),
+    ) else {
+        panic!("expected both a rect and glyphs:\n{list}");
+    };
     assert!(last_rect < first_glyphs, "rects must come first:\n{list}");
 
+    // The list order alone does not prove the pixels: count text over the
+    // yellow. Red tells them apart (yellow has 255, the black text ~0);
+    // blue would not, since yellow has none.
     let dark = (4..40)
         .flat_map(|y| (0..WIDTH as usize).map(move |x| (x, y)))
-        .filter(|&(x, y)| pixel(&frame, x, y)[2] < 128)
+        .filter(|&(x, y)| pixel(&frame, x, y)[0] < 128)
         .count();
     assert!(
         dark > 100,

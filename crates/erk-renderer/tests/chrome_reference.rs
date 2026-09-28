@@ -21,6 +21,9 @@
 //! Run with `-- --nocapture` for the score table. Diff images go to
 //! `target/reference-diff/`.
 //!
+//! `chrome/pages.txt` records a hash of each page as it was captured; a
+//! page edited since fails the test until its reference is captured again.
+//!
 //! To capture Chrome references for pages that have none yet:
 //! `cargo test -p erk-renderer --test chrome_reference -- --ignored capture_chrome_references`
 //! After a Chrome upgrade, set `ERK_RECAPTURE_ALL=1` to recapture every page.
@@ -41,7 +44,13 @@ const HEIGHT: u16 = 600;
 /// any reference page (17: the white box on blocks.html's canvas), or a
 /// missing background could pass as antialiasing. At 24 a missing white box
 /// on merhaba.html (difference 21) went unnoticed.
+/// `the_tolerance_cannot_hide_a_missing_background` checks this.
 const TOLERANCE: u8 = 12;
+
+/// A colour covering at least this many pixels of a Chrome reference is a
+/// flat colour (a background, a box), not antialiasing: about a 32 × 32
+/// box. No antialiasing shade on the current pages comes close.
+const FLAT_PIXELS: u32 = 1000;
 
 fn manifest() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -199,6 +208,28 @@ fn hundredths(score: f64) -> i64 {
     (score * 100.0).round() as i64
 }
 
+/// FNV-1a of a page, with line endings normalised: enough to notice a page
+/// that changed after its Chrome reference was captured.
+fn page_hash(html: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in html.bytes().filter(|&byte| byte != b'\r') {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// `chrome/pages.txt`: `name hash` of each page as it was when its Chrome
+/// reference was captured.
+fn captured_hashes() -> Vec<(String, String)> {
+    std::fs::read_to_string(reference_dir().join("chrome/pages.txt"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .map(|(name, hash)| (name.to_owned(), hash.trim().to_owned()))
+        .collect()
+}
+
 /// `name score` per line; `#` starts a comment, also at the end of a line.
 fn expectations() -> Vec<(String, f64)> {
     std::fs::read_to_string(reference_dir().join("expectations.txt"))
@@ -227,9 +258,22 @@ fn erk_matches_its_recorded_distance_from_chrome() {
     // Nothing may be checked by name without a page behind it: a removed or
     // renamed page must not leave an expectation that is silently skipped.
     let has_page = |name: &str| pages.iter().any(|(page, _)| page == name);
-    for (name, _) in &expected {
+    for (i, (name, _)) in expected.iter().enumerate() {
         if !has_page(name) {
             failures.push(format!("expectation for `{name}`, which has no page"));
+        }
+        // Only the first would count, so a second, lower line would hide a
+        // regression.
+        if expected[..i].iter().any(|(earlier, _)| earlier == name) {
+            failures.push(format!("more than one expectation for `{name}`"));
+        }
+    }
+    let hashes = captured_hashes();
+    for (name, _) in &hashes {
+        if !has_page(name) {
+            failures.push(format!(
+                "chrome/pages.txt lists `{name}`, which has no page"
+            ));
         }
     }
     for entry in std::fs::read_dir(reference_dir().join("chrome")).unwrap() {
@@ -252,6 +296,14 @@ fn erk_matches_its_recorded_distance_from_chrome() {
             continue;
         };
         let html = std::fs::read_to_string(path).unwrap();
+        // A score against a picture of another page means nothing.
+        let captured = hashes.iter().find(|(n, _)| n == name).map(|(_, h)| h);
+        if captured != Some(&page_hash(&html)) {
+            failures.push(format!(
+                "{name}: the page changed after its Chrome reference was captured; \
+                 delete chrome/{name}.png and capture it again (see module docs)"
+            ));
+        }
         let erk_png = erk_renderer::render_html(&html, WIDTH, HEIGHT)
             .to_png()
             .expect("non-empty frame");
@@ -290,6 +342,42 @@ fn erk_matches_its_recorded_distance_from_chrome() {
     std::fs::write(out.join("report.txt"), &report).unwrap();
     println!("\n{report}");
     assert!(failures.is_empty(), "\n{report}\n{}", failures.join("\n"));
+}
+
+/// Two flat colours closer than the tolerance would let one stand in for
+/// the other: a box that is not drawn at all would still score as a match.
+#[test]
+fn the_tolerance_cannot_hide_a_missing_background() {
+    let mut failures = Vec::new();
+    for (name, _) in pages() {
+        let Ok(png) = std::fs::read(reference_dir().join("chrome").join(format!("{name}.png")))
+        else {
+            continue; // reported by the main test
+        };
+        let image = decode(&png);
+        let mut counts: HashMap<[u8; 3], u32> = HashMap::new();
+        for p in image.pixels.as_chunks::<4>().0 {
+            *counts.entry([p[0], p[1], p[2]]).or_default() += 1;
+        }
+        let mut flat: Vec<[u8; 3]> = counts
+            .into_iter()
+            .filter(|&(_, count)| count >= FLAT_PIXELS)
+            .map(|(colour, _)| colour)
+            .collect();
+        flat.sort();
+        for (i, a) in flat.iter().enumerate() {
+            for b in &flat[i + 1..] {
+                let difference = channel_diff(a, b);
+                if difference <= TOLERANCE {
+                    failures.push(format!(
+                        "{name}: flat colours {a:?} and {b:?} differ by {difference}, \
+                         within the tolerance of {TOLERANCE}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 fn find_chrome() -> PathBuf {
@@ -411,8 +499,11 @@ fn capture_chrome_references() {
         file_url(&fonts.join("NotoSans-Bold.ttf")),
     );
 
+    let mut hashes = captured_hashes();
     for (name, path) in todo {
         let html = std::fs::read_to_string(&path).unwrap();
+        hashes.retain(|(n, _)| *n != name);
+        hashes.push((name.clone(), page_hash(&html)));
         let page = work.join(format!("{name}.html"));
         // Inside <head>, after the doctype: anything before `<!DOCTYPE html>`
         // puts Chrome into quirks mode, where the body's first child loses
@@ -443,6 +534,12 @@ fn capture_chrome_references() {
         assert!(status.success(), "Chrome failed on {name}");
         println!("captured {name}");
     }
+    hashes.sort();
+    let listing: String = hashes
+        .iter()
+        .map(|(name, hash)| format!("{name} {hash}\n"))
+        .collect();
+    std::fs::write(chrome_dir.join("pages.txt"), listing).unwrap();
 
     std::fs::write(
         version_file,
