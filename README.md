@@ -32,7 +32,12 @@ cargo build
 cargo test
 ```
 
-Run instructions will be added when M0 is complete.
+Open a local HTML file in a window, or paint it to a PNG:
+
+```sh
+cargo run -p erk-shell -- examples/merhaba.html
+cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html
+```
 
 ## Project layout
 

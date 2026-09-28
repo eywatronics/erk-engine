@@ -1,6 +1,6 @@
 [package]
 name = "erk-shell"
-description = "Erk Engine shell: OS window and broker process."
+description = "Erk Engine shell: the window, and the broker that owns disk access."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,7 +8,19 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "erk"
+path = "src/main.rs"
+
 [dependencies]
+# The only engine crate the shell may depend on directly; it must not reach
+# the DOM (checked in CI). The renderer is talked to through messages.
+erk-renderer = { path = "../erk-renderer" }
+softbuffer = "=0.4.8"
+winit = "=0.30.13"
+
+[dev-dependencies]
+png = "0.18"
 
 [lints]
 workspace = true

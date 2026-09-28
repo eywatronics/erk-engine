@@ -114,6 +114,16 @@ jobs:
             exit 1
           fi
 
+      # The shell talks to the renderer through messages and must not be able
+      # to reach the DOM. --depth 1 on purpose: erk-shell -> erk-renderer ->
+      # erk-dom is always there indirectly; a direct dependency is the breach.
+      - name: erk-shell does not depend on erk-dom
+        run: |
+          if cargo tree -p erk-shell -e normal --depth 1 --prefix none | grep -E '^erk-(dom|style) '; then
+            echo "the shell talks to the renderer through messages, not the DOM or styles"
+            exit 1
+          fi
+
       # clippy's disallowed_types can be silenced with an allow attribute,
       # which would quietly bring reference-counted nodes back.
       - name: The Rc ban in erk-dom is not silenced

@@ -1,14 +1,19 @@
 //! Erk Engine renderer: layout, display list and paint.
 //!
-//! The public surface is deliberately small: HTML goes in, pixels come out.
-//! DOM, style and layout types stay inside the crate, so the shell cannot
-//! come to depend on them before the renderer moves into its own process.
+//! The public surface is deliberately small: HTML goes in, pixels come out,
+//! either directly ([`render_html`]) or through the renderer thread
+//! ([`spawn`]). DOM, style and layout types stay inside the crate, so the
+//! shell cannot come to depend on them before the renderer moves into its
+//! own process.
 
 mod color;
 mod display;
 mod layout;
 mod paint;
 mod text;
+mod thread;
+
+pub use thread::{FromRenderer, ToRenderer, spawn};
 
 use std::sync::Arc;
 

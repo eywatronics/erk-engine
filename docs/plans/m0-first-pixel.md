@@ -534,14 +534,14 @@ eşitliği**, referans testi **Chrome'a yakınlığı** korur.
 - `ToRenderer::{Load { path: PathBuf }, Resize { width, height, scale }, Shutdown}`
 - `FromRenderer::{Frame { width, height, pixels: Vec<u32> }, Error { message: String }}`
 
-- [ ] **Step 1:** Renderer kendi iş parçacığında döngüde mesaj bekler. Genel yüzey
+- [x] **Step 1:** Renderer kendi iş parçacığında döngüde mesaj bekler. Genel yüzey
   yalnızca `spawn` ve mesaj tipleri; `erk-dom` tipleri dışa açılmaz.
-- [ ] **Step 2:** `erk-shell`: winit 0.30 `ApplicationHandler` + softbuffer 0.4.
+- [x] **Step 2:** `erk-shell`: winit 0.30 `ApplicationHandler` + softbuffer 0.4.
   Renderer'dan gelen kareler için kabukta ayrı bir iş parçacığı `Receiver`'da
   bekler ve winit'i `EventLoopProxy` ile uyandırır. Renderer winit'i bilmez.
-- [ ] **Step 3:** CLI: `erk <dosya>` pencere; `erk --screenshot <çıktı.png>
+- [x] **Step 3:** CLI: `erk <dosya>` pencere; `erk --screenshot <çıktı.png>
   <dosya>` pencere açmadan aynı yoldan PNG yazar.
-- [ ] **Step 4: Kabuk muhafızı**
+- [x] **Step 4: Kabuk muhafızı**
 
 ```yaml
 - name: erk-shell does not depend on erk-dom
@@ -556,9 +556,9 @@ eşitliği**, referans testi **Chrome'a yakınlığı** korur.
 olarak her zaman görünür; yasak olan doğrudan bağımlılık. Kasıtlı ihlal:
 `erk-shell`'e `erk-dom` ekle → hata. Geri al.
 
-- [ ] **Step 5: Test:** Renderer'a `Load` + `Resize` gönder, bir `Frame` gelsin;
+- [x] **Step 5: Test:** Renderer'a `Load` + `Resize` gönder, bir `Frame` gelsin;
   boyutu istenenle aynı. `Shutdown` sonrası iş parçacığı sonlanıyor.
-- [ ] **Step 6:** Commit: `feat(shell): window driven by a renderer thread over
+- [x] **Step 6:** Commit: `feat(shell): window driven by a renderer thread over
   messages`.
 
 ---
@@ -872,3 +872,35 @@ sürüm okunamayınca komut "unknown" yazmak yerine durdu (yeni güvenlik
 kontrolü), yol betiğe tırnaklı değişmez olarak gömüldü.
 
 Mevcut sayfaların skorları ve altın görüntü değişmedi.
+
+### Task 7 tamamlandı (2026-09-28)
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| `ToRenderer::Load { path: PathBuf }` | **`Load { html: String }`.** Dosyayı kabuk okur, renderer yalnızca metni alır. Hedef mimaride renderer kum havuzunda ve diske erişimi yok; bu ayrım şimdiden o şekilde, M3'te değişecek bir şey kalmıyor. |
+| `spawn() -> (Sender, Receiver)` | `JoinHandle` de dönüyor: kabuk kapanırken iş parçacığını bekliyor, testler kapanışı doğruluyor. |
+| `FromRenderer::Error` | Yok. `render_html` hata veremiyor; renderer panikler ise kanal kapanır ve kabuk bunu görür. Gerçek hata durumları ağla (M2) gelecek. |
+| `Resize { width, height, scale }` | `scale` yok: M0'da 1 CSS pikseli = 1 cihaz pikseli. %125 ölçekli bu makinede pencere fiziksel olarak 1000×750 ve sayfa o genişlikte akıyor; içerik Chrome'dakinden küçük görünüyor. Cihaz ölçeği M2'de. |
+| — | Renderer, kuyruktaki tüm mesajları uygulayıp **sonra** çiziyor: pencere sürüklenirken gelen onlarca boyut değişikliğinden yalnızca sonuncusu çiziliyor. |
+| — | Kareler renderer kanalından küçük bir iletici iş parçacığıyla winit'e (`EventLoopProxy`) aktarılıyor; renderer winit'i bilmiyor. |
+| — | Pencere, renderer yeni boyuta yetişene kadar karenin sığan kısmını gösteriyor, kalanı beyaz. |
+| — | İkili `erk` adıyla üretiliyor (`[[bin]]`); başlık `Erk — <dosya>`. |
+
+**Kabuğun `--screenshot` yolu gerçek ikiliyle test ediliyor**
+(`erk-shell/tests/screenshot.rs`): `erk --screenshot` çıktısı renderer'ın
+altın görüntüsüyle piksel piksel aynı. Bu, boyama incelemesinin "altın test
+kabuğun yolunu hiç görmüyor" notunu kapatıyor. Aynı dosyada eksik dosyanın
+panik değil hata (çıkış kodu 1), yanlış argümanların kullanım mesajı (çıkış
+kodu 2) verdiği de doğrulanıyor.
+
+**Pencere elle doğrulandı:** `erk examples/merhaba.html` başlatılıp yalnızca
+pencerenin istemci alanı `PrintWindow` ile yakalandı (ekranın geri kalanı
+değil). İlk açılışta 1000×750, sayfa doğru. Pencere 600px genişliğe
+çekilince 582×453'te sayfa yeniden aktı (paragraf üç satıra, kutudaki metin
+iki satıra kırıldı). Yakalama betiğinin iki tuzağı: DPI farkında olmayan
+bir süreç %125 ölçekli pencereyi 800×600 görüp kırpıyor, ve süreç ilk anda
+başlıksız bir ara pencere bildiriyor.
+
+Kasıtlı ihlal: `erk-shell`'e `erk-dom` bağımlılığı eklendi → muhafız
+`erk-dom`'u basıp 1 ile çıktı. Geri alınınca 0. Muhafız `erk-style`'ı da
+kapsıyor: kabuk stil tiplerine de erişmemeli.
