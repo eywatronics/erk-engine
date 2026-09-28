@@ -124,6 +124,12 @@ jobs:
             exit 1
           fi
 
+      # The dependency check above cannot see a DOM type re-exported by the
+      # renderer, shared state in a message, or the shell painting through
+      # render_html instead of the renderer thread.
+      - name: The renderer's surface is its thread and plain-data messages
+        run: bash .github/scripts/check-renderer-surface.sh
+
       # clippy's disallowed_types can be silenced with an allow attribute,
       # which would quietly bring reference-counted nodes back.
       - name: The Rc ban in erk-dom is not silenced

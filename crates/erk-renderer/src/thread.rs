@@ -1,33 +1,16 @@
 //! The renderer as a thread that talks only through messages.
 //!
 //! The shell and the renderer share no mutable state: the shell sends
-//! [`ToRenderer`] and receives [`FromRenderer`], both of which own their
-//! data. When the renderer moves into its own process (M3), the channel
-//! becomes IPC and nothing else changes; see docs/design/p0-architecture.md
-//! §2.2.
+//! [`ToRenderer`] and receives [`FromRenderer`], both plain owned data (see
+//! messages.rs). When the renderer moves into its own process (M3), the
+//! channel becomes IPC and the messages gain a serialization derive; see
+//! docs/design/p0-architecture.md §2.2.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 
-use crate::{Frame, render_html};
-
-/// Messages from the shell to the renderer.
-#[derive(Debug)]
-pub enum ToRenderer {
-    /// Show this document. The shell reads files, not the renderer: in the
-    /// target architecture the renderer is sandboxed and has no disk access.
-    Load { html: String },
-    /// The viewport is now `width` × `height` device pixels.
-    Resize { width: u16, height: u16 },
-    /// Stop the renderer thread.
-    Shutdown,
-}
-
-/// Messages from the renderer to the shell.
-pub enum FromRenderer {
-    /// A newly painted frame of the current document at the current size.
-    Frame(Frame),
-}
+use crate::messages::{FromRenderer, ToRenderer};
+use crate::render_html;
 
 /// Start the renderer on its own thread.
 pub fn spawn() -> (Sender<ToRenderer>, Receiver<FromRenderer>, JoinHandle<()>) {

@@ -193,9 +193,25 @@ impl ApplicationHandler<UserEvent> for App {
 mod tests {
     use super::*;
 
+    const PAGE: &str = r#"<html style="background: #123456"></html>"#;
+
+    /// A frame from the renderer thread, the only way the shell gets one.
+    fn frame(width: u16, height: u16) -> Frame {
+        let (to, from, renderer) = erk_renderer::spawn();
+        to.send(ToRenderer::Load {
+            html: PAGE.to_owned(),
+        })
+        .unwrap();
+        to.send(ToRenderer::Resize { width, height }).unwrap();
+        let FromRenderer::Frame(frame) = from.recv().unwrap();
+        to.send(ToRenderer::Shutdown).unwrap();
+        renderer.join().unwrap();
+        frame
+    }
+
     #[test]
     fn blit_converts_to_xrgb_and_clips_to_the_buffer() {
-        let frame = erk_renderer::render_html(r#"<html style="background: #123456"></html>"#, 4, 4);
+        let frame = frame(4, 4);
         let mut buffer = vec![0u32; 3 * 2];
         blit(&frame, &mut buffer, 3, 2);
         assert!(
@@ -206,7 +222,7 @@ mod tests {
 
     #[test]
     fn blit_leaves_the_rest_of_a_larger_buffer_alone() {
-        let frame = erk_renderer::render_html(r#"<html style="background: #123456"></html>"#, 2, 1);
+        let frame = frame(2, 1);
         let mut buffer = vec![0x00ff_ffffu32; 3 * 2];
         blit(&frame, &mut buffer, 3, 2);
         assert_eq!(
