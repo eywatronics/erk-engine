@@ -23,11 +23,16 @@ const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(800.0, 600.0);
 
 enum UserEvent {
     Frame(Frame),
+    /// The renderer's channel closed while the window was open: the
+    /// renderer has stopped, and the window would only show a stale frame.
+    RendererGone,
 }
 
 /// Open `page` (already read as `html`) in a window and run until it closes.
-pub(crate) fn run(page: &Path, html: String) -> Result<(), winit::error::EventLoopError> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
+    let event_loop = EventLoop::<UserEvent>::with_user_event()
+        .build()
+        .map_err(|e| e.to_string())?;
 
     let (to_renderer, from_renderer, renderer) = erk_renderer::spawn();
     let proxy = event_loop.create_proxy();
@@ -36,14 +41,17 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), winit::error::EventLo
         .spawn(move || {
             for FromRenderer::Frame(frame) in from_renderer {
                 if proxy.send_event(UserEvent::Frame(frame)).is_err() {
-                    break; // the event loop has exited
+                    return; // the event loop has exited
                 }
             }
+            // Fails harmlessly when the event loop has already exited, as it
+            // has after a normal shutdown.
+            let _ = proxy.send_event(UserEvent::RendererGone);
         })
         .expect("the frame forwarding thread starts");
 
     // A send only fails if the renderer is gone, which the forwarder and
-    // join below report.
+    // `finish` below report.
     let _ = to_renderer.send(ToRenderer::Load { html });
     let title = format!(
         "Erk — {}",
@@ -61,9 +69,21 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), winit::error::EventLo
     let result = event_loop.run_app(&mut app);
 
     let _ = app.to_renderer.send(ToRenderer::Shutdown);
-    let _ = renderer.join();
+    let renderer = renderer.join();
     let _ = forwarder.join();
-    result
+    finish(result, renderer)
+}
+
+/// The window's outcome. A renderer that panicked is an error even though
+/// the event loop, which it closed, ended cleanly.
+fn finish(
+    event_loop: Result<(), winit::error::EventLoopError>,
+    renderer: std::thread::Result<()>,
+) -> Result<(), String> {
+    if renderer.is_err() {
+        return Err("the renderer thread panicked".to_owned());
+    }
+    event_loop.map_err(|e| e.to_string())
 }
 
 struct WindowState {
@@ -177,7 +197,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Frame(frame) => {
                 self.frame = Some(frame);
@@ -185,6 +205,7 @@ impl ApplicationHandler<UserEvent> for App {
                     state.window.request_redraw();
                 }
             }
+            UserEvent::RendererGone => event_loop.exit(),
         }
     }
 }
@@ -193,9 +214,35 @@ impl ApplicationHandler<UserEvent> for App {
 mod tests {
     use super::*;
 
+    const PAGE: &str = r#"<html style="background: #123456"></html>"#;
+
+    /// A frame from the renderer thread, the only way the shell gets one.
+    fn frame(width: u16, height: u16) -> Frame {
+        let (to, from, renderer) = erk_renderer::spawn();
+        to.send(ToRenderer::Load {
+            html: PAGE.to_owned(),
+        })
+        .unwrap();
+        to.send(ToRenderer::Resize { width, height }).unwrap();
+        let FromRenderer::Frame(frame) = from.recv().unwrap();
+        to.send(ToRenderer::Shutdown).unwrap();
+        renderer.join().unwrap();
+        frame
+    }
+
+    #[test]
+    fn a_renderer_panic_is_an_error_after_a_clean_event_loop_exit() {
+        let panicked: std::thread::Result<()> = Err(Box::new("renderer panic"));
+        assert_eq!(
+            finish(Ok(()), panicked),
+            Err("the renderer thread panicked".to_owned())
+        );
+        assert_eq!(finish(Ok(()), Ok(())), Ok(()));
+    }
+
     #[test]
     fn blit_converts_to_xrgb_and_clips_to_the_buffer() {
-        let frame = erk_renderer::render_html(r#"<html style="background: #123456"></html>"#, 4, 4);
+        let frame = frame(4, 4);
         let mut buffer = vec![0u32; 3 * 2];
         blit(&frame, &mut buffer, 3, 2);
         assert!(
@@ -206,7 +253,7 @@ mod tests {
 
     #[test]
     fn blit_leaves_the_rest_of_a_larger_buffer_alone() {
-        let frame = erk_renderer::render_html(r#"<html style="background: #123456"></html>"#, 2, 1);
+        let frame = frame(2, 1);
         let mut buffer = vec![0x00ff_ffffu32; 3 * 2];
         blit(&frame, &mut buffer, 3, 2);
         assert_eq!(
