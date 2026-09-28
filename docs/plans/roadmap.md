@@ -17,7 +17,7 @@ gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
 
 | KT | Kapsam | Durum |
 |---|---|---|
-| **M0** | İlk piksel | Başladı |
+| **M0** | İlk piksel | Bitti |
 | **M1** | Statik belge motoru | Yeni |
 | **M2** | Ağdan okuma ve gezinme | Yeni |
 | **M3** | Süreç ayrımı ve kum havuzu | Yeni |
@@ -60,7 +60,8 @@ Tek süreç, ağ yok, yerel dosya. Amaç yalnızca pikseli görmek.
 - winit + softbuffer penceresi; renderer ayrı iş parçacığında, tipli mesajlarla
 - `--screenshot out.png` başsız mod
 - **Chrome referans testi:** aynı sayfalar Chrome'da ve Erk'te çizilip
-  karşılaştırılır; sayfa başına içerik skoru yalnızca yükselir (kural
+  karşılaştırılır; sayfa başına içerik skoru kayıtlı beklentiye eşit kalır,
+  yükselirse beklenti yükseltilir, yalnızca yazılı gerekçeyle düşer (kural
   CLAUDE.md'de)
 
 Uygulama planı: [m0-first-pixel.md](m0-first-pixel.md).
@@ -131,8 +132,8 @@ geliyor.
 - Renderer ayrı süreç. Aynı ikili, `--type=renderer` ile başlar
 - `mpsc` yerine IPC. Karar ölçülerek: `ipc-channel` + serde ile `rkyv` (güvenilmeyen
   girdiyi doğrulama maliyeti dahil), 1 MB gidiş-dönüş ve küçük mesaj gecikmesi
-- Windows kum havuzu: restricted token, job object, AppContainer (`erk-sandbox`,
-  tek `unsafe` istisnası)
+- Windows kum havuzu: restricted token, job object, AppContainer (`erk-sandbox`;
+  `erk-style`'dan sonra ikinci `unsafe` istisnası)
 - Çökme izolasyonu
 - Muhafızlar: `cargo deny` `wrappers`, `xtask arch-check`, kum havuzu testi
   zorunlu check
