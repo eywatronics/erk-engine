@@ -89,6 +89,36 @@ fn class_and_id_selectors_match() {
 }
 
 #[test]
+fn bgcolor_sets_the_background_colour() {
+    let (doc, styles) = style(r##"<table bgcolor="#336699"><tr><td>x</td></tr></table>"##);
+    let table = computed(&doc, &styles, "table");
+    let colour = table.resolve_color(&table.get_background().background_color);
+    let [r, g, b] = [
+        colour.components.0,
+        colour.components.1,
+        colour.components.2,
+    ];
+    assert_eq!(
+        [r, g, b].map(|c| (c * 255.0).round() as u8),
+        [0x33, 0x66, 0x99]
+    );
+}
+
+#[test]
+fn align_sets_text_align() {
+    use erk_style::style::values::computed::TextAlign;
+    let (doc, styles) = style(r#"<p align="center">x</p><div align="right">y</div>"#);
+    let align = |tag| {
+        computed(&doc, &styles, tag)
+            .get_inherited_text()
+            .clone_text_align()
+    };
+    // Styled only: text-align is not laid out until inline layout (M1).
+    assert_eq!(align("p"), TextAlign::MozCenter);
+    assert_eq!(align("div"), TextAlign::MozRight);
+}
+
+#[test]
 fn elements_inside_display_none_are_not_styled() {
     let (doc, styles) = style("<div style=\"display: none\"><p>x</p></div>");
     assert!(styles.computed(find(&doc, "div")).is_some());
