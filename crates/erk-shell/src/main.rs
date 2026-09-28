@@ -53,9 +53,7 @@ fn main() -> ExitCode {
         }
     };
     let result = match command {
-        Command::Window { page } => {
-            read_page(&page).and_then(|html| window::run(&page, html).map_err(|e| e.to_string()))
-        }
+        Command::Window { page } => read_page(&page).and_then(|html| window::run(&page, html)),
         Command::Screenshot { out, page } => {
             read_page(&page).and_then(|html| screenshot(html, &out))
         }
