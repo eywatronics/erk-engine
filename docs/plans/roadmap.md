@@ -115,24 +115,22 @@ inline metin, flex, absolute positioning. **Float, clear ve tablo düzeni yok**
 (css-support.md "Not planned"); `float` hesaplanmış stilde kalsa da layout'ta
 `none` sayılır ve metni düşürmez.
 
-- İlk görev M0'ın bilinen eksikleri, her biri bir testle: blok ve metin karışık
-  ebeveynde metin düşüyor, span stilleri tek dizeye düzleşiyor, `text-align`
-  hep başa hizalı
-- İlk ölçüm M0'ın yayın taban çizgisi: ikili boyutu, 1000 düğümlü bir sayfada
-  boştaki bellek, ilk kare süresi. Bütçe bu ölçümden konur
-- Tam IFC: inline kutular, satırlar arasında span kırılması, `text-align`
-  (justify dahil), temel `vertical-align`, satır içi görseller. Blitz
-  0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc
-  değerleri Erk'in `CalcTable`'ından geçer. Anonim blok kutularının yeri ilk
-  adımda kararlaştırılır
-- Kenarlık, yuvarlak köşe, gölge, görüntü (png, jpeg) display list öğeleri
-- Flexbox ve absolute positioning doğrulaması (Taffy)
-- Sistem fontları ve fallback (fontique); gömülü font yalnızca testlerde
-- HiDPI: cihaz ölçeği
-- `text-transform`, elemanın `lang`'ına göre `icu_casemap` ile: Türkçede
-  `i → İ`, `ı → I`
-- Görüntüler ve CSS `url()` host'un kaynak sağlayıcısından (demo kabukta bir
-  kök dizin ve `memory://`)
+Layout tek PR'a sığmaz. M1 sırayla adımlara bölünür; her adım kendi PR'ı,
+kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla gelir.
+
+| Adım | Kapsam | Durum |
+|---|---|---|
+| M1.0 | Ölçüm ve M0 eksikleri: yayın ikilisinin boyutu, 1000 düğümlü bir sayfada boştaki bellek, ilk kare süresi (bütçe buradan konur). Bilinen eksikler, her biri bir testle: blok ve metin karışık ebeveynde metin düşüyor, span stilleri tek dizeye düzleşiyor | Yeni |
+| M1.1 | Tek satır metin: Parley ile şekillenen bir Taffy yaprağı | M0'da var (`a_paragraph_is_one_line_high`) |
+| M1.2 | Satır kırma: daralan kutuda metin alt satıra iner | M0'da var (`narrow_width_breaks_into_more_lines`) |
+| M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Yeni |
+| M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Yeni |
+| M1.5 | Flexbox doğrulaması (Taffy) | Yeni |
+| M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Yeni |
+| M1.7 | Sistem fontları ve fallback (fontique; gömülü font yalnızca testlerde), HiDPI cihaz ölçeği, `lang`'a göre `text-transform` (`icu_casemap`: Türkçede `i → İ`, `ı → I`) | Yeni |
+
+Adımlar boyunca, ilk gerektiği adımda:
+
 - WPT altyapısı: wptrunner'a `--screenshot` üzerinden koşan "erk" ürünü,
   yalnızca CSS dizinleri
 - Sağlamlık: `render_html` hiçbir girdide paniklemez. `cargo test` içinde
@@ -140,6 +138,7 @@ inline metin, flex, absolute positioning. **Float, clear ve tablo düzeni yok**
   cargo-fuzz, ayrı ve zaman sınırlı bir CI job'ı
 - Lisans denetimi (`cargo deny check licenses`): ilk MPL-2.0 bağımlılıklar
   M0'da girdi; liste gömülü fontların OFL-1.1'ini de kapsar
+- `erk-renderer` pencere katmanını bilmez (p1-contract §11)
 
 Referanslar: Blitz `packages/blitz-dom/src/layout/inline.rs`, `construct.rs`
 (0.3.0-beta.2, MIT OR Apache-2.0). Servo `layout` crate'i yalnızca okunur:
@@ -209,8 +208,11 @@ döndürüyor (test). Her muhafız kasıtlı bir ihlalle denenmiş.
   gönderim, klavye, odak
 - `querySelector` ve `querySelectorAll` (selectors crate'i)
 - `Mutation` dizileri fuzz'lanır (eski `NodeId`'ler dahil)
+- İlk demo bir sayaç: Rust host ve HTML/CSS, düğmeye basıldıkça sayı artıyor.
+  Tıklama olayını, metin değişikliğini ve yeniden çizimi uçtan uca bağlayan en
+  küçük uygulama
 
-**Kabul:** JS'siz, Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil
+**Kabul:** Sayaç demosu ve JS'siz, Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil
 döngüsünde bellek büyümüyor. Mutation fuzz'ı yeşil.
 
 ---
