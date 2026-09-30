@@ -123,7 +123,7 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
   kurulumu, `build_inline_layout_into`) ve `layout/inline.rs`
   (`compute_inline_layout`) dosyaları okunur; Erk'in yan tablosuna ve
   `CalcTable`'ına uyarlama planı yürütme notlarına yazılır.
-- [ ] **Step 2: Stil aralıkları.** Bir bloğun inline içeriği tek bir Parley
+- [x] **Step 2: Stil aralıkları.** Bir bloğun inline içeriği tek bir Parley
   layout'u olur; her inline elemanın stili (renk, kalınlık, italik, boyut,
   font ailesi, `line-height`) kendi metin aralığına uygulanır. Test: `<p>a
   <b>b</b> c</p>`'de "b" kalın yüzle, "a" ve "c" normal.
@@ -264,3 +264,28 @@ yakalandı. 154, beş sayfanın beşini de bayt bayt aynı çizdi; yalnızca
 - Boyut bütçesi: tavanın üstündeki, altındaki, bütçesiz dosya ve eksik
   ikili sahte bir dosyayla denendi (1, 0, 1, 1). Bütçe yükseltmenin
   gerekçe istediği CI'daki ilk gerçek ölçümden sonra denenir.
+
+### M1.3 yürütme notları (2026-09-30, sürüyor)
+
+**Step 2 tamam, stil aralıkları.** Paragraf artık tek bir metin ve ondan
+farklı stildeki aralıklar. Her metin düğümü içinde durduğu elemanın stilini
+alır; boyut, kalınlık, renk ya da satır yüksekliği bloktan farklı olan her
+aralık Parley'ye `push(özellik, aralık)` ile verilir. Boşluk parçalar
+boyunca çöker ve çöken boşluk önceki parçaya aittir (`a <b>b</b>`'deki boşluk
+kalın değil).
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Stil aralıkları Blitz'in `construct.rs`'inden uyarlanacak | Önce Erk'in kendi yapısıyla yazıldı: aralıklar metin düğümlerinden doğrudan çıkıyor, Blitz'in inline ağacı henüz gerekmedi. Blitz'e inline kutular (Step 3) için dönülecek; Step 1 o işin başında |
+| — | Parley glyph run'ları stile göre bölüyor, ama renk değişimi şekillendirme run'ını bölmüyor ve dışarı açılan metin aralığı bütün run'ınki. Her glyph run'ın kendi aralığı, run'ın kümeleri sırayla tüketilerek çıkarılıyor (`glyph_run_ranges`). Display list dökümü de her glyph run için bütün run'ın metnini yazıyordu; o da düzeldi |
+| — | İtalik yok: gömülü fontlarda italik yüz yok, sentetik eğim testlerde belirleyiciliği bozmasın diye bilerek uygulanmadı; sistem fontlarıyla (M1.7) gelir |
+
+Mutasyonlar: aralıklar hiç uygulanmayınca iki test de kırmızı; çöken boşluk
+sonraki parçaya verilince kalınlık testi kırmızı.
+
+Referans sayfaları: `mixed-content` %97,95'ten %98,33'e çıktı (kalın kelime
+artık kalın). Yeni `inline-styles` %48,60: renkler, kalınlıklar, boyutlar ve
+satır sonları Chrome'la örtüşüyor; skor, metinle dolu sayfalarda glif
+kenarlarındaki kenar yumuşatma farkı yüzünden `paragraphs` gibi düşük.
+
+1000 elemanlı sayfanın süresi değişmedi (sıcak medyan 68,5 ms).
