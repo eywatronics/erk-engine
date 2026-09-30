@@ -7,6 +7,6 @@
 blocks 100.00
 canvas-alpha 97.81
 merhaba 91.26
-mixed-content 97.95
+mixed-content 98.33
 paint-order 98.61
 paragraphs 48.27  # lowered: metric tightened (tolerance 24 to 12), not a rendering change

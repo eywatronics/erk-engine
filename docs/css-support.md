@@ -41,7 +41,8 @@ does not lay out or paint is not supported.
 | `calc()` lengths | Supported | `calc_widths_resolve_against_the_container` |
 | `ex`, `ch` units | Supported | `ex_and_ch_come_from_the_embedded_font` |
 | `display: none`, `visibility: hidden` | Supported | `display_none_generates_no_box`, `visibility_hidden_paints_neither_background_nor_text` |
-| Inline formatting context: spans across lines, mixed styles, inline images | M1 | Today a paragraph is laid out as one run of text in one style |
+| Inline elements keep their own colour, weight, size and line height within a paragraph | Supported | `an_inline_element_keeps_its_own_weight`, `an_inline_element_keeps_its_own_colour` |
+| Inline boxes: borders, padding and backgrounds on inline elements, inline images, `inline-block` | M1 | |
 | Flexbox | M1 | Laid out by Taffy today, not yet verified |
 | `position: absolute`, `relative`, `fixed` | M1 | |
 | `overflow: auto`, `scroll`, scroll containers | M2 | |

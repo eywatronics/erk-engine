@@ -6,10 +6,11 @@
 //! erk-style. The trait implementations follow blitz-dom 0.3.0-beta.2,
 //! src/layout/mod.rs (MIT OR Apache-2.0).
 //!
-//! There is no inline formatting context yet (M1.3). A block whose children
-//! are only text and inline elements becomes a paragraph leaf: Parley shapes
-//! its whole text with the block's style and Taffy sees only the resulting
-//! width and height. In a block that mixes block children with text, each run
+//! A block whose children are only text and inline elements becomes a
+//! paragraph leaf: Parley shapes its text as one layout, each inline
+//! element's text in its own style, and Taffy sees only the resulting width
+//! and height. Inline boxes (borders, padding, images inside a line) come
+//! later in M1.3. In a block that mixes block children with text, each run
 //! of inline content becomes an anonymous paragraph box (CSS 2 §9.2.1.1).
 //! Anonymous boxes live only in this side table, at indices past the arena's
 //! slots: the DOM, and the NodeIds a host sees, never contain them.
@@ -182,7 +183,11 @@ impl<'t> LayoutTree<'t> {
             let mut has_blocks = false;
             for child in doc.children(parent) {
                 match doc.node(child).map(|node| &node.data) {
-                    Some(NodeData::Text(text)) => entries.push(Entry::Inline(text.clone())),
+                    Some(NodeData::Text(text)) => {
+                        if let Some(style) = styles.computed(parent) {
+                            entries.push(Entry::Inline(vec![(text.clone(), style)]));
+                        }
+                    }
                     Some(NodeData::Element(_)) => {
                         // Elements inside display:none are not styled, so a
                         // missing style means no box.
@@ -190,7 +195,9 @@ impl<'t> LayoutTree<'t> {
                             continue;
                         };
                         if is_inline_level(&computed) {
-                            entries.push(Entry::Inline(inline_text(doc, styles, child)));
+                            let mut pieces = Vec::new();
+                            inline_pieces(doc, styles, child, &computed, &mut pieces);
+                            entries.push(Entry::Inline(pieces));
                         } else {
                             has_blocks = true;
                             entries.push(Entry::Block(child, computed));
@@ -203,27 +210,27 @@ impl<'t> LayoutTree<'t> {
 
             // A paragraph leaf: only inline content, laid out as one run.
             if !has_blocks && parent != doc.root() {
-                let content: String = entries
+                let pieces: Vec<Piece> = entries
                     .into_iter()
-                    .filter_map(|entry| match entry {
-                        Entry::Inline(text) => Some(text),
-                        Entry::Block(..) => None,
+                    .flat_map(|entry| match entry {
+                        Entry::Inline(pieces) => pieces,
+                        Entry::Block(..) => Vec::new(),
                     })
                     .collect();
-                if let Some(computed) = parent_style
-                    && !content.trim_ascii().is_empty()
-                {
-                    nodes[parent.index() as usize].paragraph =
-                        Some(Paragraph::new(&content, &computed));
+                if let Some(computed) = parent_style {
+                    let paragraph = Paragraph::new(&pieces, &computed);
+                    if !paragraph.text.is_empty() {
+                        nodes[parent.index() as usize].paragraph = Some(paragraph);
+                    }
                 }
                 continue;
             }
 
             let mut children = Vec::new();
-            let mut run = String::new();
+            let mut run: Vec<Piece> = Vec::new();
             for entry in entries {
                 match entry {
-                    Entry::Inline(text) => run.push_str(&text),
+                    Entry::Inline(pieces) => run.extend(pieces),
                     Entry::Block(child, computed) => {
                         let style = stylo_taffy::to_taffy_style(&computed);
                         if style.display == Display::None {
@@ -283,11 +290,16 @@ impl<'t> LayoutTree<'t> {
     }
 }
 
+type StyleArc = erk_style::style::servo_arc::Arc<ComputedValues>;
+
+/// A piece of inline text with the style of the element it belongs to.
+type Piece = (String, StyleArc);
+
 /// A child of a block, as layout sees it.
 enum Entry {
-    Block(NodeId, erk_style::style::servo_arc::Arc<ComputedValues>),
-    /// The text of a text node or of an inline element.
-    Inline(String),
+    Block(NodeId, StyleArc),
+    /// The text of a text node, or everything inside an inline element.
+    Inline(Vec<Piece>),
 }
 
 /// Close the current run of inline content: unless it is only whitespace,
@@ -297,14 +309,15 @@ fn push_anonymous(
     nodes: &mut Vec<LayoutNode>,
     children: &mut Vec<taffy::NodeId>,
     parent: NodeId,
-    parent_style: &Option<erk_style::style::servo_arc::Arc<ComputedValues>>,
-    run: &mut String,
+    parent_style: &Option<StyleArc>,
+    run: &mut Vec<Piece>,
 ) {
-    let text = std::mem::take(run);
+    let pieces = std::mem::take(run);
     let Some(style) = parent_style else {
         return;
     };
-    if text.trim_ascii().is_empty() {
+    let paragraph = Paragraph::new(&pieces, style);
+    if paragraph.text.is_empty() {
         return;
     }
     nodes.push(LayoutNode {
@@ -313,7 +326,7 @@ fn push_anonymous(
             display: Display::Block,
             ..Style::DEFAULT
         },
-        paragraph: Some(Paragraph::new(&text, style)),
+        paragraph: Some(paragraph),
         anonymous_parent: Some(parent.index() as usize),
         ..LayoutNode::default()
     });
@@ -324,20 +337,26 @@ fn is_inline_level(style: &ComputedValues) -> bool {
     style.get_box().clone_display().outside() == DisplayOutside::Inline
 }
 
-/// The text of `id`'s children, descending into inline elements, in tree
-/// order.
-fn inline_text(doc: &Document, styles: &Styles, id: NodeId) -> String {
-    let mut text = String::new();
+/// The text inside inline element `id`, descending into nested inline
+/// elements, in tree order: each text node with the style of its element.
+fn inline_pieces(
+    doc: &Document,
+    styles: &Styles,
+    id: NodeId,
+    style: &StyleArc,
+    out: &mut Vec<Piece>,
+) {
     for child in doc.children(id) {
         match doc.node(child).map(|node| &node.data) {
-            Some(NodeData::Text(content)) => text.push_str(content),
-            Some(NodeData::Element(_)) if styles.computed(child).is_some() => {
-                text.push_str(&inline_text(doc, styles, child));
+            Some(NodeData::Text(content)) => out.push((content.clone(), style.clone())),
+            Some(NodeData::Element(_)) => {
+                if let Some(child_style) = styles.computed(child) {
+                    inline_pieces(doc, styles, child, &child_style, out);
+                }
             }
             _ => {}
         }
     }
-    text
 }
 
 fn taffy_id(id: NodeId) -> taffy::NodeId {
