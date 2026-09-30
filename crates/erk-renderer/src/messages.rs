@@ -9,8 +9,8 @@
 /// Messages from the shell to the renderer.
 #[derive(Debug)]
 pub enum ToRenderer {
-    /// Show this document. The shell reads files, not the renderer: in the
-    /// target architecture the renderer is sandboxed and has no disk access.
+    /// Show this document. The host reads files, not the renderer: the
+    /// engine core does no I/O (.github/scripts/check-core-io.sh).
     Load { html: String },
     /// The viewport is now `width` × `height` device pixels.
     Resize { width: u16, height: u16 },

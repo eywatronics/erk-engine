@@ -155,6 +155,11 @@ jobs:
       - name: The renderer's surface is its thread and plain-data messages
         run: bash .github/scripts/check-renderer-surface.sh
 
+      # The engine is embedded: all I/O, the environment and the clock
+      # belong to the host application.
+      - name: The engine core does no I/O and reads no environment or clock
+        run: bash .github/scripts/check-core-io.sh
+
       # clippy's disallowed_types can be silenced with an attribute or
       # switched off in configuration, which would quietly bring
       # reference-counted nodes back.

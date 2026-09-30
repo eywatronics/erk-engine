@@ -6,10 +6,9 @@
 //! erk --screenshot <out.png> <file.html>
 //! ```
 //!
-//! The shell reads the file; the renderer, on its own thread, only ever
-//! receives the document's text. In the target architecture the renderer is
-//! a sandboxed process with no disk access, and this split is already that
-//! shape.
+//! The shell is the host: it reads the file, and the renderer, on its own
+//! thread, only ever receives the document's text. The engine core does no
+//! I/O of its own; resources, time and configuration come from the host.
 
 mod window;
 
