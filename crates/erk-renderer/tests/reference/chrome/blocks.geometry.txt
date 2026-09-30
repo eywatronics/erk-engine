@@ -1,0 +1,7 @@
+0 body block 20 20 760 305
+1 div block 20 20 300 40
+2 div block 20 90 760 40
+3 div block 20 155 380 40
+4 div block 80 195 640 40
+5 div block 20 255 760 70
+6 div block 45 270 200 40

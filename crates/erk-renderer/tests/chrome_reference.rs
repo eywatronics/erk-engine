@@ -47,6 +47,32 @@ const HEIGHT: u16 = 600;
 /// `the_tolerance_cannot_hide_a_missing_background` checks this.
 const TOLERANCE: u8 = 12;
 
+/// Largest difference, in CSS pixels, between an edge of an Erk box and
+/// Chrome's. Erk rounds boxes to whole pixels; Chrome's are fractional.
+const GEOMETRY_TOLERANCE: f32 = 1.0;
+
+/// Added to a copy of each page when capturing Chrome's geometry: once the
+/// fonts have loaded, it writes the border box of the body and every element
+/// in it, in document order, into a `<pre>`. Only the capture tool runs this,
+/// in Chrome; Erk never runs scripts. The first line reports the viewport:
+/// with --dump-dom, Chrome's viewport is the window minus its frame, unlike
+/// with --screenshot.
+const GEOMETRY_SCRIPT: &str = r#"<script id="erk-geometry-script">
+window.addEventListener('load', () => document.fonts.ready.then(() => {
+  const elements = [document.body, ...document.body.querySelectorAll('*')]
+    .filter((e) => e.id !== 'erk-geometry-script');
+  const lines = elements.map((e, i) => {
+    const r = e.getBoundingClientRect();
+    return [i, e.localName, getComputedStyle(e).display, r.x, r.y, r.width, r.height].join(' ');
+  });
+  const pre = document.createElement('pre');
+  pre.id = 'erk-geometry';
+  pre.textContent = ['viewport ' + innerWidth + ' ' + innerHeight, ...lines].join('\n');
+  document.body.appendChild(pre);
+}));
+</script>
+"#;
+
 /// A colour covering at least this many pixels of a Chrome reference is a
 /// flat colour (a background, a box), not antialiasing: about a 32 × 32
 /// box. No antialiasing shade on the current pages comes close.
@@ -532,6 +558,24 @@ fn capture_chrome_references() {
             .status()
             .expect("Chrome runs");
         assert!(status.success(), "Chrome failed on {name}");
+
+        // Geometry: the same page with the measuring script before </body>.
+        let with_fonts = format!("{}{font_face}{}", &html[..at], &html[at..]);
+        let end = with_fonts
+            .rfind("</body>")
+            .expect("reference pages have a </body>");
+        let measured = work.join(format!("{name}.geometry.html"));
+        std::fs::write(
+            &measured,
+            format!(
+                "{}{GEOMETRY_SCRIPT}{}",
+                &with_fonts[..end],
+                &with_fonts[end..]
+            ),
+        )
+        .unwrap();
+        let geometry = measure_geometry(&chrome, &work, &measured, &name);
+        std::fs::write(chrome_dir.join(format!("{name}.geometry.txt")), geometry).unwrap();
         println!("captured {name}");
     }
     hashes.sort();
@@ -549,4 +593,132 @@ fn capture_chrome_references() {
         ),
     )
     .unwrap();
+}
+
+/// Chrome's boxes for a page carrying the measuring script, measured in a
+/// viewport of exactly WIDTH x HEIGHT: the window is enlarged by whatever its
+/// frame takes, which depends on the operating system.
+fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str) -> String {
+    let (mut window_width, mut window_height) = (i32::from(WIDTH), i32::from(HEIGHT));
+    for _ in 0..2 {
+        let output = Command::new(chrome)
+            .args([
+                "--headless",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--force-device-scale-factor=1",
+                "--allow-file-access-from-files",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--virtual-time-budget=5000",
+                &format!("--window-size={window_width},{window_height}"),
+                &format!("--user-data-dir={}", work.join("profile").display()),
+                "--dump-dom",
+                &file_url(page),
+            ])
+            .output()
+            .expect("Chrome runs");
+        assert!(output.status.success(), "Chrome failed measuring {name}");
+        let dom = String::from_utf8_lossy(&output.stdout);
+        let open = r#"<pre id="erk-geometry">"#;
+        let start = dom.find(open).expect("the measuring script ran") + open.len();
+        let len = dom[start..].find("</pre>").expect("the <pre> is closed");
+        let text = dom[start..start + len].replace("\r\n", "\n");
+        let text = text.trim();
+        let (viewport, boxes) = text.split_once('\n').unwrap_or((text, ""));
+        let size: Vec<i32> = viewport
+            .strip_prefix("viewport ")
+            .unwrap_or_else(|| panic!("{name}: the first line is not the viewport: {viewport:?}"))
+            .split_whitespace()
+            .map(|v| {
+                v.parse()
+                    .unwrap_or_else(|_| panic!("{name}: viewport {viewport:?}"))
+            })
+            .collect();
+        if size == [i32::from(WIDTH), i32::from(HEIGHT)] {
+            return format!("{boxes}\n");
+        }
+        window_width += i32::from(WIDTH) - size[0];
+        window_height += i32::from(HEIGHT) - size[1];
+    }
+    panic!("{name}: could not get a {WIDTH}x{HEIGHT} viewport in Chrome");
+}
+
+/// Every element's box as Erk lays it out, against Chrome's. Unlike the pixel
+/// score this does not depend on antialiasing: it measures the layout itself,
+/// line heights included. Inline elements (no box of their own in Erk yet)
+/// and elements without a box are skipped, and counted.
+#[test]
+fn erk_boxes_match_chrome() {
+    let chrome_dir = reference_dir().join("chrome");
+    let pages = pages();
+    let mut failures = Vec::new();
+
+    for entry in std::fs::read_dir(&chrome_dir).unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if let Some(name) = file.strip_suffix(".geometry.txt")
+            && !pages.iter().any(|(page, _)| page == name)
+        {
+            failures.push(format!("Chrome geometry {file} has no page"));
+        }
+    }
+
+    let mut report = String::from("page            boxes  matched  skipped\n");
+    for (name, path) in &pages {
+        let Ok(chrome) = std::fs::read_to_string(chrome_dir.join(format!("{name}.geometry.txt")))
+        else {
+            failures.push(format!(
+                "{name}: no Chrome geometry; capture it (see module docs)"
+            ));
+            continue;
+        };
+        let html = std::fs::read_to_string(path).unwrap();
+        let erk = erk_renderer::element_boxes(&html, WIDTH, HEIGHT);
+        let (mut compared, mut matched, mut skipped) = (0, 0, 0);
+        for line in chrome.lines().filter(|line| !line.trim().is_empty()) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [index, tag, display, x, y, width, height] = fields[..] else {
+                panic!("{name}: malformed geometry line {line:?}");
+            };
+            let index: usize = index.parse().expect("index");
+            let [x, y, width, height] =
+                [x, y, width, height].map(|v| v.parse::<f32>().expect("number"));
+            if matches!(display, "inline" | "none" | "contents") {
+                skipped += 1;
+                continue;
+            }
+            compared += 1;
+            let Some(erk_box) = erk.iter().find(|b| b.index == index) else {
+                failures.push(format!(
+                    "{name}: <{tag}> #{index} has a box in Chrome ({display}) but not in Erk"
+                ));
+                continue;
+            };
+            assert_eq!(
+                erk_box.tag, tag,
+                "{name}: element #{index} differs between Erk and Chrome; the DOMs do not line up"
+            );
+            let close = [
+                erk_box.x - x,
+                erk_box.y - y,
+                erk_box.width - width,
+                erk_box.height - height,
+            ]
+            .iter()
+            .all(|d| d.abs() <= GEOMETRY_TOLERANCE);
+            if close {
+                matched += 1;
+            } else {
+                failures.push(format!(
+                    "{name}: <{tag}> #{index}: Erk {} {} {}x{}, Chrome {x} {y} {width}x{height}",
+                    erk_box.x, erk_box.y, erk_box.width, erk_box.height
+                ));
+            }
+        }
+        report.push_str(&format!(
+            "{name:<15} {compared:>5}  {matched:>7}  {skipped:>7}\n"
+        ));
+    }
+    println!("\n{report}");
+    assert!(failures.is_empty(), "\n{report}\n{}", failures.join("\n"));
 }
