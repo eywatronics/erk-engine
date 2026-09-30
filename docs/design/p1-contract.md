@@ -1,8 +1,9 @@
 # Erk Engine — P1: Gömme sözleşmesi (M0.5)
 
 - **Tarih:** 2026-09-30
-- **Durum:** Taslak; M3'te koda dönüşür, o zamana kadar değişiklik bu belgede
-  yapılır ve gerekçesi yazılır.
+- **Durum:** ABI v0.1, taslak. M3'te koda dönüşür; o zamana kadar değişiklik
+  bu belgede, gerekçesiyle yapılır. M1–M5 boyunca öğrenilenlerle v0.2, v0.3
+  diye ilerler; 1.0'a (M8) kadar kırıcı değişiklik hakkı saklıdır.
 - **Üst belge:** [p1-embedded.md](p1-embedded.md)
 
 Bu belge, host uygulamayla Erk arasındaki sınırın kurallarını kod yazılmadan
@@ -69,6 +70,12 @@ dışında) ve onu da `now_ns` olarak verir.
 - **`ErkNodeId`**: opak `uint64_t`, `index | (generation << 32)`. Nesil
   hiçbir zaman 0 olmadığı için 0 "düğüm yok" demektir (`ERK_NODE_NONE`).
   Host bu sayıyı yorumlamaz, yalnızca saklar ve geri verir.
+- **Başka uygulamanın id'si:** iki `ErkApp`'in arenası aynı indeks ve nesli
+  üretebilir; bir uygulamanın id'si ötekinde başka bir düğümü göstermemeli.
+  Neslin üst 8 biti uygulama etiketidir (süreçteki her `ErkApp`'e ayrı), alt
+  24 biti sayaçtır. Başka bir uygulamanın id'si `ERK_ERR_WRONG_APP` döner.
+  Sayacı tükenen slot, bugünkü gibi emekliye ayrılır. 0 her zaman
+  `ERK_ERR_INVALID_ARGUMENT`'tır.
 - **Eski id:** silinmiş bir düğümün id'si hiçbir zaman başka bir düğümü
   göstermez; her çağrı `ERK_ERR_STALE_NODE` döner, çökmez. `erk_load_html`
   yeni bir arena kurmaz: eski düğümleri siler (nesilleri artar), böylece
@@ -206,6 +213,17 @@ okunur sorgularıyla bakar; aynı API'yi host da kullanabilir.
   Ayrı süreçte bir DevTools ancak host açıkça etkinleştirirse ve yerel bir
   kanal üzerinden bağlanır; motor varsayılan olarak hiçbir portu dinlemez.
 
+## 8.2 Surface (M10, yalnızca yön)
+
+Host'un belgenin içindeki bir bölgeye kendi GPU çizimini yapması. Bugün
+sabitlenen tek kural: **bir pencere yüzeyinin tek çizicisi vardır, Erk.**
+Host aynı yüzeye kendi başına yazmaz; Erk kareyi kurarken surface bölgesi için
+ya host'un çizim callback'ini (paylaşılan wgpu cihazı ve komut kodlayıcı)
+çağırır ya da host'un dokusunu bölgeye yerleştirir. Hangisi olacağı M2'nin GPU
+yolu ve M3'ün API'si oturduktan sonra ölçülerek seçilir. Bölgeyi host bir
+düğümle kaydeder (`erk_surface_create(node)`); konumu, kaydırması ve kırpması
+layout'tan gelir.
+
 ## 9. Sürümleme
 
 - `erk_abi_version()` → `(major << 16) | minor`. Bir ana sürüm içinde
@@ -238,6 +256,7 @@ typedef int32_t ErkStatus;
 #define ERK_ERR_REENTRANT         6        /* not allowed inside a callback */
 #define ERK_ERR_PANIC             7        /* the call panicked; the app is now poisoned */
 #define ERK_ERR_POISONED          8        /* an earlier call panicked; only destroy works */
+#define ERK_ERR_WRONG_APP         9        /* the node id belongs to another ErkApp */
 
 /* ---- Basic types ------------------------------------------------------- */
 
@@ -395,6 +414,7 @@ Bu tablo hangi kuralın ne zaman ve nasıl zorlanacağını söyler.
 | Yanlış iş parçacığı (§4) | Başka iş parçacığından çağıran test; `erk_app_post` testi | M3 |
 | Dizeler kopyalanır, tampon yarım yazılmaz (§3) | Girdiyi çağrıdan hemen sonra ezen test; `BUFFER_TOO_SMALL` testi; C örneği Linux'ta AddressSanitizer ile | M3 |
 | `destroy` tam bir kez (§5) | Sayaçlı test: `erk_off`, düğüm silme ve `erk_app_destroy` yollarının üçü | M3, M4 |
+| Başka uygulamanın id'si reddedilir (§2) | İki `ErkApp`, birinin id'si ötekine verilince `ERK_ERR_WRONG_APP` | M3 |
 | Eski id hiçbir düğümü göstermez (§2) | Birim testi; `Mutation` fuzz'ı; `erk_load_html` sonrası eski id testi | M3, M4 |
 | Yanlış türde kaynak reddedilir (§6) | Görüntü isteğine stil sayfası verisiyle yanıt veren test | M1 (görüntüler gelince) |
 | Kaynak yalnızca callback'ten (§6) | `url("file:///...")` içeren sayfada hiçbir dosyanın okunmadığını ve sağlayıcının çağrıldığını doğrulayan test | M1 (görüntüler gelince) |
