@@ -43,6 +43,22 @@ değişkeni ve saat yoktur; hepsi host'tan gelir. Gerekçe:
   `m1/`, ...
 - PR açıklamalarında da yapay zekâ aracı adı veya imzası bulunmaz.
 - **Yarım kalmış bir kilometre taşının üzerine bir sonraki başlamaz.**
+- **Çakışmasız PR kuralı.** PR'lar squash ile birleşir: bir dalın commit'leri
+  `main`'e başka bir commit olarak girer. Açık bir PR'ın dalı üzerine kurulan
+  yeni dal (yığılmış dal), o PR birleşince çakışır. Bu yüzden:
+  1. Açık bir PR'ın dalına ait bir düzeltme o dala commit'lenir ve **hemen
+     push edilir**; PR birleşmeden önce CI'da görünmesi gerekir.
+  2. Sonraki iş mümkünse `main`'den açılır. Önceki PR'a dayanmak zorundaysa
+     onun dalından açılabilir, ama o dalın PR'ı açılmadan önce:
+  3. Taban PR birleşir birleşmez yığılmış dal yeni `main`'e taşınır:
+     `git rebase --onto origin/main <eski taban dalın ucu> <dal>`. Yalnızca
+     dalın kendi commit'leri taşınır; tabanın commit'leri `main`'de zaten
+     squash olarak durur. Taşınan dalın içeriği, taşımadan önceki haliyle
+     `git diff` ile karşılaştırılır; fark yalnızca bilerek eklenen olmalı.
+  4. Taşınmış dal `--force-with-lease` ile gönderilir; yalnızca özellik
+     dallarına, hiçbir zaman `main`'e.
+  5. Yığılmış bir dalın PR'ı, tabanı birleşmeden açılmaz; açıldıysa birleşme
+     sonrası 3. adım hemen uygulanır ve PR'ın çakışmasız olduğu denetlenir.
 
 ## Dil
 

@@ -51,6 +51,15 @@ Erk hiçbir zaman betik çalıştırmaz. Satır içi elemanlar (Erk'te henüz ke
 kutuları yok) ve kutusu olmayanlar karşılaştırılmaz; karşılaştırılan ve
 atlanan kutuların sayısı rapora yazılır.
 
+## Chrome yalnızca test kâhinidir
+
+Chrome, Erk'in doğru çizip çizmediğini söyleyen bir **test kâhini** (test
+oracle): yakalama aracı Chrome'u çalıştırır, görüntüsünü ve kutularını depoya
+koyar. Erk, Chrome'un koduna ya da çalışma zamanına hiçbir biçimde bağlı
+değildir; CI Chrome gerektirmez. Kutuları ölçen JavaScript de yalnızca bu
+araçta, Chrome'un içinde çalışır; Erk'in çalışma zamanında betik yoktur. İki
+kural arasında çelişki yok: JavaScript test aracında olabilir, motorda olmaz.
+
 ## Kapsamı büyütmek
 
 Her yeni CSS özelliği kendi referans sayfasıyla gelir (proje kuralları). Hedef

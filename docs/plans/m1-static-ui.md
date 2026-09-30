@@ -185,6 +185,20 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1 kabulü
 
+**Chrome uyumluluk kapısı.** M1'in sorusu "Chrome'la aynı PNG'yi üretebiliyor
+muyuz" değil, "Chrome referansına karşı kaç HTML/CSS davranışını belirleyici
+olarak aynı üretiyoruz". css-support.md'de "Supported" olan her özellik için
+bir referans sayfası; her sayfada Chrome PNG'si ve Chrome geometrisi. CI:
+
+- geometri uyuşmazlığı (1 CSS pikselinden fazla) → kırmızı;
+- piksel skoru beklentisinden farklı → kırmızı (iki yönlü mandal; metin kenar
+  yumuşatması yüzünden skor %100 değil, beklenti sayfaya özgü);
+- bozuk girdide panik → kırmızı (sağlamlık testi ve fuzz, M1.3).
+
+M1'de yeni mimari özellik eklenmez; iş statik UI kapsamı ve bu kapının
+genişlemesidir.
+
+
 - [ ] Ayarlar ekranı maketi (`examples/settings.html`) Chrome referans
   testinde skorlu.
 - [ ] `css/CSS2/normal-flow`, `css/css-flexbox`, `css/css-position`,
