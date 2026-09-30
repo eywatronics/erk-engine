@@ -62,35 +62,35 @@ deny.toml                                  lisans izin listesi (M1.6)
 M1'e dokunmadan önce iki şey: nereden başladığımızı ölçmek ve M0'ın metni
 sessizce düşürdüğü yeri kapatmak.
 
-- [ ] **Step 1: Ölçüm sayfası.** `examples/perf/nodes-1000.html`: bir ayarlar
+- [x] **Step 1: Ölçüm sayfası.** `examples/perf/nodes-1000.html`: bir ayarlar
   listesi, 1000 eleman (bölümler, satırlar, etiketler, değerler), gerçekçi CSS.
-- [ ] **Step 2: İlk kare ölçümü.** `crates/erk-renderer/examples/measure.rs`:
+- [x] **Step 2: İlk kare ölçümü.** `crates/erk-renderer/examples/measure.rs`:
   bir sayfayı okur, `render_html`'i N kez çalıştırır, ilk (soğuk) çağrının
   süresini ve sonraki çağrıların medyanını yazdırır. Bir örnek olduğu için
   dosya ve saat okuyabilir; çekirdeğin `src`'si değildir. Aşama aşama döküm
   için çekirdeğe saat sokulmaz, profilere bırakılır.
-- [ ] **Step 3: Ölçümler.** Yayın profiliyle, bu makinede:
+- [x] **Step 3: Ölçümler.** Yayın profiliyle, bu makinede:
   - `erk` ikilisinin boyutu. Varsayılan profille, ayrıca `strip` ve
     `lto = "fat"` + `codegen-units = 1` ile, karar verisi olarak.
   - `erk examples/perf/nodes-1000.html` penceresinin ilk kareden sonra
     boştaki belleği (özel çalışma kümesi).
   - `measure` ile ilk kare ve sıcak kare süreleri.
   Sonuçlar ve makine bilgisi bu planın yürütme notlarına yazılır.
-- [ ] **Step 4: Boyut bütçesi muhafızı.** CI'da ayrı bir `size` job'ı (ubuntu):
+- [x] **Step 4: Boyut bütçesi muhafızı.** CI'da ayrı bir `size` job'ı (ubuntu):
   `cargo build --release -p erk-shell --locked`, ikilinin boyutu
   `.github/size-budget.txt`'teki tavanla karşılaştırılır. Tavan, Linux'ta
   ölçülen boyutun %10 üstüdür (ilk CI çalışmasından alınır). Bütçeyi
   yükseltmek gerekçe ister, düşürmek serbesttir; beklenti dosyasındaki
   `# lowered:` kuralının tersi. Kasıtlı ihlal: tavanı ölçülenin altına çek →
   job kırmızı.
-- [ ] **Step 5: CSS matrisi muhafızı.** `docs/css-support.md`'deki her
+- [x] **Step 5: CSS matrisi muhafızı.** `docs/css-support.md`'deki her
   "Supported" satırın adlandırdığı test depoda tanımlı olmalı
   (`.github/scripts/check-css-support.sh`). Kasıtlı ihlal: bir satıra var
   olmayan bir test adı yaz.
-- [ ] **Step 6: `erk-renderer` pencere katmanını bilmez.** CI: `cargo tree -p
+- [x] **Step 6: `erk-renderer` pencere katmanını bilmez.** CI: `cargo tree -p
   erk-renderer --target all --all-features` çıktısında `winit` ve `softbuffer`
   yok (p1-contract §11). Kasıtlı ihlal: `erk-renderer`'a `winit`.
-- [ ] **Step 7: Anonim blok kutuları (test önce).** Blok ve metin karışık bir
+- [x] **Step 7: Anonim blok kutuları (test önce).** Blok ve metin karışık bir
   ebeveynde (`<div>önce<p>blok</p>sonra</div>`) "önce" ve "sonra" bugün
   düşüyor. Ardışık inline içerik (metin ve inline elemanlar) anonim bir
   paragraf kutusuna girer:
@@ -103,7 +103,7 @@ sessizce düşürdüğü yeri kapatmak.
   Testler: layout testinde üç kutu alt alta; display list dökümünde "önce" ve
   "sonra" var. Mutasyon: anonim kutu üretmeyi kapat → test kırmızı.
   Yeni referans sayfası `mixed-content.html`; Chrome görüntüsü ayrı commit'te.
-- [ ] **Step 8:** Matris ve belgeler güncellenir; yürütme notları yazılır.
+- [x] **Step 8:** Matris ve belgeler güncellenir; yürütme notları yazılır.
 
 **Kapsam dışı (M1.3'e):** span stillerinin düzleşmesi. Düzeltmesi IFC'nin
 kendisi (Parley stil aralıkları), yarım bir sürümü iki kez yazmak olur.
@@ -200,3 +200,67 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 *(Adımlar yürütüldükçe, planın yanlış çıkan varsayımları ve doğrulanan
 gerçeklerle doldurulur.)*
+
+### M1.0 yürütme notları (2026-09-30)
+
+**Ölçüm makinesi:** Intel Core i7-10750H (6 çekirdek, 2,60 GHz), 15,8 GB RAM,
+Windows 11 Pro, %125 ekran ölçeği. Rust 1.98.1, varsayılan yayın profili
+(`cargo build --release`, derleme 328 sn).
+
+| Ölçüm | Değer |
+|---|---|
+| `erk.exe` boyutu, varsayılan yayın profili | 14.899.200 bayt (14,9 MB) |
+| ... `strip = "symbols"` ile | 14.924.288 bayt: Windows'ta etkisiz, MSVC hata ayıklama bilgisini zaten ayrı PDB'ye koyuyor |
+| ... `lto = "fat"` + `codegen-units = 1` ile | 11.431.936 bayt (%23 küçük) |
+| ... ayrıca `opt-level = "s"` ile | 9.498.624 bayt (%36 küçük) |
+| `nodes-1000.html` (1006 eleman), `render_html` ilk çağrı | 116,85 ms |
+| ... sonraki 30 çağrının medyanı (min / maks) | 70,95 ms (62,79 / 83,29) |
+| `merhaba.html`, ilk çağrı / medyan | 8,32 ms / 6,88 ms |
+| `erk nodes-1000.html` penceresi, ilk kareden 3 sn sonra | özel bellek 13,0 MB, çalışma kümesi 30,1 MB, tepe 40,3 MB |
+| `erk merhaba.html` penceresi, aynı ölçüm | özel bellek 12,6 MB, çalışma kümesi 29,6 MB, tepe 35,5 MB |
+
+Okuma:
+
+- **"< 5 MB" hedefi gerçekçi değildi.** Stylo, html5ever, Parley ve vello'lu
+  bir ikili varsayılan profille 14,9 MB; en küçük denenmiş profille bile
+  9,5 MB. Bütçe bu yüzden bir hedef değil, ölçümden konur.
+- **Profil kararı M8'e (ürünleşme) kaldı.** `opt-level = "s"`'in boyutu
+  %36 küçülttüğü görüldü, ama çizim hızına etkisi ölçülmedi, LTO ise yayın
+  derlemesini birkaç kat uzatıyor. Bütçe varsayılan profil üzerinden işler;
+  profil değişirse bütçe gerekçesiyle yeniden konur.
+- **1000 elemanlı bir sayfanın tam yeniden çizimi ~71 ms**, yani 60 Hz'in
+  dört katı. Bu, M2'nin tam yeniden hesaplamayla neden "bilerek kaba"
+  olduğunu ve M5'teki artımlı işin neden şart olduğunu sayıyla gösteriyor.
+  İlk çağrıdaki fark (~46 ms), gömülü fontların ve Stylo'nun bir kerelik
+  kurulumu.
+- Bellek iki sayfa arasında neredeyse aynı: tabanı pencere, softbuffer ve
+  gömülü fontlar belirliyor, belge değil.
+- İlk bellek okuması 0 döndü: süreç bilgisi pencere açılmadan okunmuştu.
+  Ölçüm, pencere başlığı görünene kadar ve sürecin hâlâ açık olduğu
+  denetlenerek tekrarlandı.
+
+**Boyut bütçesi:** Linux ikilisinin boyutu bu makinede ölçülemiyor. CI'daki
+`size` job'ı ilk çalışmada ölçer; bütçe o sayının %10 üstüne aynı PR'da
+indirilir. O zamana kadar dosyada açıkça "geçici" işaretli bir tavan var.
+
+**Anonim kutular:** karışık bir ebeveyndeki her inline dizi, arena
+kapasitesinin üstündeki bir indekste anonim bir paragraf kutusu olur; DOM'a
+hiçbir şey eklenmez. Display list onları ebeveynin kutusunun altında çizer,
+ebeveynin görünürlüğünü devralırlar. Mutasyon: anonim kutu üretimi
+kapatılınca `text_beside_blocks_gets_anonymous_boxes` kırmızı. Yeni referans
+sayfası `mixed-content` %97,95; kutular Chrome'la aynı yerde, tek gerçek
+sapma düz yazıyla çizilen `<b>kalın</b>` (M1.3).
+
+**Chrome 154:** yakalama makinesinde Chrome 153'ten 154'e yükselmişti. Yeni
+sayfa eski sürümün görüntüleriyle karışmasın diye bütün sayfalar yeniden
+yakalandı. 154, beş sayfanın beşini de bayt bayt aynı çizdi; yalnızca
+`VERSION.txt` değişti.
+
+**Kasıtlı ihlaller:**
+
+- CSS matrisi: var olmayan bir test adı, test adı olmayan bir satır, var
+  olmayan bir test dosyası → üçü de 1 ile çıktı; geri alınınca 0.
+- `erk-renderer`'a `winit` bağımlılığı → adım 1 ile çıktı; geri alınınca 0.
+- Boyut bütçesi: tavanın üstündeki, altındaki, bütçesiz dosya ve eksik
+  ikili sahte bir dosyayla denendi (1, 0, 1, 1). Bütçe yükseltmenin
+  gerekçe istediği CI'daki ilk gerçek ölçümden sonra denenir.
