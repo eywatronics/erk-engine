@@ -126,17 +126,35 @@ dışında) ve onu da `now_ns` olarak verir.
 ## 6. Kaynaklar
 
 Erk hiçbir dosyayı kendisi okumaz. İçerik bir kaynak istediğinde (CSS `url()`,
-`<img src>`), UI iş parçacığında host'un `ErkResourceFn`'i çağrılır:
+`<img src>`, `<link rel=stylesheet>`, ileride `@font-face`), UI iş
+parçacığında host'un `ErkResourceFn`'i çağrılır. İstek ve yanıt yapılandırılmıştır:
 
-- Callback bir istek id'si alır. Yanıt `erk_resource_complete(app, id,
-  status, data, len)` ile verilir. Bu çağrı callback'in içinden (eşzamanlı)
-  ya da sonra başka bir iş parçacığından olabilir. Erk veriyi kopyalar.
+- **İstek:** bir id, URL ve kaynağın türü (`ERK_RESOURCE_IMAGE`,
+  `ERK_RESOURCE_STYLESHEET`, `ERK_RESOURCE_FONT`). Tür, host'un aynı URL'yi
+  farklı biçimlerde sunabilmesi ve yanlış türde veriyi baştan reddedebilmesi
+  içindir. Rust API'sinde `ResourceRequest { id, url, kind }`.
+- **Yanıt:** `erk_resource_complete(app, id, status, mime, data, len)`; Rust
+  API'sinde `ResourceResponse { mime, data }`. MIME boş bırakılırsa Erk türü
+  içerikten ve istek türünden çıkarır. Bu çağrı callback'in içinden
+  (eşzamanlı) ya da sonra başka bir iş parçacığından olabilir. Erk veriyi
+  kopyalar.
+- Durum `ErkStatus`'tur, HTTP kodu değil: ağ yok, 404 ile 500 arasındaki
+  fark host'undur ve Erk için hepsi "kaynak yok" demektir.
 - `ERK_ERR_NOT_FOUND` ya da hiç yanıt vermemek kaynağı yok sayar; sayfa onsuz
   çizilir.
 - Host sağlayıcı yoksa hiçbir kaynak yüklenmez.
 - Demo kabuğun sağlayıcısı yalnızca açılan dosyanın dizinini ve `memory://`
   şemasını kabul eder; `file:///etc/passwd` ve kök dışına çıkan yollar
   reddedilir.
+
+### 6.1 Erişilebilirlik bilgisi
+
+Erişilebilirlik bilgisi (rol, etiket, durum) DOM'daki elemanın anlamından ve
+özniteliklerinden (`role`, `aria-label`, `aria-*`) okunur; host bunları
+sıradan öznitelikler olarak yazar. `erk-dom`'un düğüm yapısına şimdiden
+`aria_role` ya da `aria_label` alanı eklenmez: öznitelikler zaten saklanıyor ve
+boş alanlar M5'e kadar ölü kod olurdu. AccessKit ağacı M5'te bu özniteliklerden
+kurulur.
 
 ## 7. Zaman ve olay döngüsü
 
@@ -217,10 +235,14 @@ void erk_string_free(ErkString s);
 typedef void (*ErkDestroyFn)(void *user_data);
 typedef void (*ErkPostFn)(void *user_data, ErkApp *app);
 
-/* Content asks for a resource (CSS url(), <img>). Answer now or later with
- * erk_resource_complete; not answering means the page renders without it. */
+#define ERK_RESOURCE_IMAGE      1
+#define ERK_RESOURCE_STYLESHEET 2
+#define ERK_RESOURCE_FONT       3
+
+/* Content asks for a resource (CSS url(), <img>, <link>). Answer now or later
+ * with erk_resource_complete; not answering means the page renders without it. */
 typedef void (*ErkResourceFn)(void *user_data, ErkApp *app,
-                              uint64_t request, ErkStr url);
+                              uint64_t request, uint32_t kind, ErkStr url);
 
 typedef void (*ErkLogFn)(void *user_data, uint32_t level, ErkStr message);
 
@@ -245,6 +267,7 @@ ErkStatus erk_app_run(ErkApp *app);        /* Erk's event loop; returns when the
 /* Thread-safe. */
 ErkStatus erk_app_post(ErkApp *app, ErkPostFn fn, void *user_data, ErkDestroyFn destroy);
 ErkStatus erk_resource_complete(ErkApp *app, uint64_t request, ErkStatus status,
+                                ErkStr mime,               /* may be empty: sniffed */
                                 const uint8_t *data, size_t len);
 
 /* Host-driven loop (defined here, implemented after M3). */
@@ -324,5 +347,6 @@ Bu tablo hangi kuralın ne zaman ve nasıl zorlanacağını söyler.
 | Dizeler kopyalanır, tampon yarım yazılmaz (§3) | Girdiyi çağrıdan hemen sonra ezen test; `BUFFER_TOO_SMALL` testi; C örneği Linux'ta AddressSanitizer ile | M3 |
 | `destroy` tam bir kez (§5) | Sayaçlı test: `erk_off`, düğüm silme ve `erk_app_destroy` yollarının üçü | M3, M4 |
 | Eski id hiçbir düğümü göstermez (§2) | Birim testi; `Mutation` fuzz'ı; `erk_load_html` sonrası eski id testi | M3, M4 |
+| Yanlış türde kaynak reddedilir (§6) | Görüntü isteğine stil sayfası verisiyle yanıt veren test | M1 (görüntüler gelince) |
 | Kaynak yalnızca callback'ten (§6) | `url("file:///...")` içeren sayfada hiçbir dosyanın okunmadığını ve sağlayıcının çağrıldığını doğrulayan test | M1 (görüntüler gelince) |
 | Yapılar genişletilebilir, sürüm (§2, §9) | `struct_size`'ı kısa bir yapıyla çağıran test; `erk_abi_version` testi | M3 |

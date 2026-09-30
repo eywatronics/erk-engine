@@ -82,6 +82,17 @@ eleştiriyle şekillendi. Alınanlar ve düzeltilenler:
 | M2'de `:hover` | Alındı, notla: M5'e kadar her durum değişikliği tam yeniden stil, layout ve boyama ister; M2 ölçümleri performans iddiası değil M5'in kıyas tabanıdır |
 | Metinde olmayanlar | Eklendi: IME (Windows TSF), seçim, pano, odak gezinmesi, AccessKit (M5), sistem fontları ve fallback, HiDPI, kenarlık/yuvarlak köşe/görüntü |
 
+Sonra gelen bir "ana plan" önerisinin M0.5 sonrası değerlendirmesi:
+
+| Öneri | Karar |
+|---|---|
+| Yapılandırılmış kaynak API'si (`ResourceRequest`, `ResourceResponse`) | Alındı: istek türü (görüntü, stil sayfası, font) ve yanıt MIME'i sözleşmeye girdi (p1-contract §6). HTTP tarzı `status: u16` alınmadı: ağ yok, durum `ErkStatus` |
+| `erk-dom` düğümüne şimdiden `aria_role`/`aria_label` alanı | Reddedildi: bilgi zaten öznitelik olarak (`role`, `aria-*`) saklanıyor, boş alanlar ölü kod olurdu. AccessKit M5'te özniteliklerden kurulur (p1-contract §6.1) |
+| M1'i mikro adımlara bölmek | Alındı: M1.0–M1.7. İlk iki adım (tek satır metin, satır kırma) M0'da zaten var ve testli |
+| Float ve tablo görülünce sessizce `display: none` | Reddedildi: içeriği gizler. Float `none` gibi dizilir; tablo için tablo algoritması yok (css-support.md) |
+| "< 5 MB" ikili | Değişmedi: bütçe M1.0'da ölçülen tabandan konur |
+| Sayaç uygulaması | Alındı: M4'ün ilk demosu; kabul ölçütü daha güçlü olan TodoMVC olarak kalır |
+
 Tarayıcı hedefi için daha önce gelen öneriler (M4'te JS/DOM-GC sınır tablosu,
 M6'da Fetch ve `cookie_store`) yeni hedefte konu dışı. M1 için olanların
 doğrulanmış hali geçerli:
