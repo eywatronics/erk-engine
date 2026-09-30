@@ -21,7 +21,7 @@ gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
 | KT | Kapsam | Durum |
 |---|---|---|
 | **M0** | İlk piksel | Bitti |
-| **M0.5** | Mimari sözleşme | Yeni |
+| **M0.5** | Mimari sözleşme | Bitti |
 | **M1** | Statik UI | Yeni |
 | **M2** | Etkileşim temeli | Yeni |
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
