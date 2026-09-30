@@ -1,13 +1,16 @@
 # Erk Engine Architecture
 
-Erk is a desktop browser engine written in Rust. It reuses mature Rust
-components and puts its original work where none of them reach: inline layout,
-the process model and sandbox, the networking and security policy, and the
-browser shell.
+Erk is an embeddable HTML/CSS UI engine for desktop applications, written in
+Rust, with no JavaScript. The host application drives the document through
+`NodeId`s and batched mutations; Erk styles, lays out and paints it and reports
+user events back. It reuses mature Rust components and puts its original work
+where none of them reach: inline layout, the embedding API and its C ABI,
+incremental rendering and form controls.
 
 This document has two parts: what the engine looks like **today**, and the
 **target** architecture it grows into. The reasoning behind every decision,
 including the alternatives that were rejected, is in
+[docs/design/p1-embedded.md](docs/design/p1-embedded.md) and
 [docs/design/p0-architecture.md](docs/design/p0-architecture.md) (Turkish). The
 milestone plan is in [docs/plans/roadmap.md](docs/plans/roadmap.md).
 
@@ -26,9 +29,9 @@ main thread                         renderer thread
 ```
 
 The shell and the renderer share no mutable state. They talk only through
-typed messages that hold plain owned data: text, integers, pixel bytes. When
-the renderer moves into its own process (M3), the transport changes and the
-messages gain a serialization derive; nothing else does.
+typed messages that hold plain owned data: text, integers, pixel bytes. The
+same discipline becomes the embedding API and its C ABI in M3, and keeps a
+separate renderer process possible later without a rewrite.
 
 ## Rendering pipeline
 
@@ -48,48 +51,42 @@ HTML ─► html5ever ─► erk-dom ─► Stylo ─► Taffy + Parley ─► d
 ## Target architecture
 
 ```
-┌──────────────────────────────┐
-│  Shell / broker (erk-shell)  │  privileged: window, input, process lifecycle
-└──────┬───────────────┬───────┘
-       │ IPC           │ IPC
-┌──────▼───────┐ ┌─────▼────────┐
-│  Renderer    │ │  Network     │  sockets, DNS, TLS, cookies, cache
-│ (sandboxed,  │ │  process     │
-│  per site)   │ │ erk-network  │
-└──────────────┘ └──────────────┘
+host application (Rust, C, Python)     logic, state, files, network
+        |   ^
+        |   |  NodeIds, batched mutations, events
+        v   |
+erk (Rust API)  --  erk-ffi (C ABI, erk.h)
+        |
+engine core: erk-dom, erk-style, erk-renderer     no I/O, no clock, no env
+        |
+window: winit + softbuffer (vello_hybrid on the GPU from M2)
 ```
 
-- **Shell / broker**: the only privileged process. Owns the window, routes
-  input and supervises the other processes.
-- **Renderer**: one sandboxed process per site (scheme + registrable domain).
-  It has no file system or network access.
-- **Network process**: the sole owner of sockets, TLS, cookies and the HTTP
-  cache. It implements the Fetch standard and enforces CORS, CORP and ORB
-  before any bytes reach a renderer. It never trusts an origin claimed by a
-  renderer.
+- **Host application**: owns all logic and all I/O. It gives Erk a resource
+  callback (for CSS `url()` and images), the current time, and configuration.
+- **erk / erk-ffi**: one API, as idiomatic Rust and as a C ABI. `NodeId` is an
+  opaque 64-bit value; a stale id is an error code, never a crash. All calls
+  come from the UI thread; callbacks run on it, never during layout or paint.
+  The contract is written in M0.5, before M1.
+- **Engine core**: the arena DOM, Stylo, layout and paint. It does no file,
+  network or process I/O and reads no clock or environment, which keeps it
+  deterministic and makes content unable to reach the file system.
 
-A crash in a renderer must never take down the shell.
+There is no JavaScript, no networking and no sandbox: the content is the host's
+own. A separate renderer process remains possible because the messages are
+plain data, but is not planned.
 
 ## Crates
 
 | Crate | Responsibility | Arrives in |
 |---|---|---|
 | `erk-dom` | Arena DOM and the html5ever tree sink. Depends on no other `erk-*` crate | M0 |
-| `erk-style` | Stylo adapter and style engine. The one crate allowed to declare `unsafe fn`s, because Stylo's `TElement` requires five | M0 |
+| `erk-style` | Stylo adapter and style engine. A named `unsafe` exception, because Stylo's `TElement` requires five `unsafe fn`s | M0 |
 | `erk-renderer` | Layout, display list, paint; the renderer thread and its messages | M0 |
-| `erk-shell` | Window, event loop, messaging with the renderer. Does not depend on `erk-dom` or `erk-style` | M0 |
-| `erk-network` | Network interface: a temporary HTTP client in M2, Erk's own Fetch implementation in M6 | M2 |
-| `erk-ipc` | Cross-process transport | M3 |
-| `erk-sandbox` | OS sandbox APIs; a named `unsafe` exception, like `erk-style` | M3 |
-| `erk-js` | JavaScript engine bindings | M4 |
-
-## JavaScript
-
-JavaScript arrives in M4, after static pages render and can be browsed. The
-engine is chosen by measurement on the same mini DOM. The candidates in order
-are Boa (pure Rust) and SpiderMonkey (via `mozjs`). V8 is not a candidate. The
-acceptance test is independent of the engine: a detached DOM subtree held only
-by its own event listener's closure must be collected.
+| `erk-shell` | Window, event loop, the demo host. Does not depend on `erk-dom` or `erk-style` | M0 |
+| `erk` | Idiomatic Rust embedding API | M3 |
+| `erk-ffi` | The same API as a C ABI (`erk.h`); a named `unsafe` exception | M3 |
+| `erk-python` | Python package over the C ABI | M6 |
 
 ## Rules enforced in CI
 

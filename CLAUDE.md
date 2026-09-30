@@ -3,6 +3,14 @@
 Bu dosya depoda tutulur ve `.gitignore`'a **eklenmez**: kurallar makineye değil
 projeye aittir.
 
+## Ürün
+
+Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: JavaScript
+yok, host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u `NodeId` ile
+sürer, Erk çizer ve olayları bildirir. Çekirdekte dosya, ağ, süreç, ortam
+değişkeni ve saat yoktur; hepsi host'tan gelir. Gerekçe:
+[p1-embedded.md](docs/design/p1-embedded.md).
+
 ## Commit kuralları
 
 - Commit mesajlarının sonuna **yalnızca** şu satır eklenir:
@@ -40,7 +48,7 @@ projeye aittir.
 
 | Türkçe | İngilizce |
 |---|---|
-| `CLAUDE.md`, `docs/design/`, `docs/plans/` | `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, kod, tanımlayıcılar, yorumlar, commit mesajları, PR'lar |
+| `CLAUDE.md`, `docs/design/`, `docs/plans/` | `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `docs/css-support.md` (host geliştiricileri için), kod, tanımlayıcılar, yorumlar, commit mesajları, PR'lar |
 
 Açık kaynak bir motorun katkıcıları koda ve geçmişe İngilizce bakar; tasarım
 tartışması ise bu projede Türkçe yürüyor.
@@ -75,7 +83,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | `erk-style`'ın `unsafe` yüzeyi tam beş imza | Stylo'nun `TElement`'i beş metodu `unsafe fn` tanımlıyor; bunları uygulamak gövde güvenli olsa bile lint ihlali. Başka hiçbir `unsafe` kod yok | CI (`check-style-unsafe-surface.sh`): crate'in tamamında (src, tests) yorum dışı `unsafe` belirteci tam 5 ve beşi de `unsafe fn`; `allow`/`expect(unsafe_code)` tam 5. Gövdede güvensiz işlem `forbid` ile hata | M0 Task 3 |
 | `erk-dom` içinde referans sayımı yok | Döngüsel ağaçta referans sayımı sızıntı üretir; DOM arena + `NodeId` ile çalışır | `crates/erk-dom/clippy.toml` → `disallowed-types` (`Rc`, `rc::Weak`, `Arc`, `sync::Weak`), clippy `-D warnings`; `check-dom-rc-ban.sh`: lint'i ya da onu içeren grupları susturan öznitelik yok, ve crate'e eklenen bir kanarya tipini clippy'nin gerçekten reddettiği doğrulanır (silinen `clippy.toml`'u, workspace tablosundaki `allow`'u yakalar) | M0 Task 2 |
 | `erk-dom` projeden hiçbir şey import etmez | En alttaki katman; parser dışında her şey ona bağlanır, o hiçbir şeye | CI'da `cargo tree -p erk-dom --target all --all-features` kontrolü (dev-dependency'ler bilerek dışarıda: yalnızca testlere girer) | M0 Task 2 |
-| Kabuk ile renderer yalnızca mesajla konuşur | M3'te renderer ayrı sürece taşındığında değişen tek şey taşıma katmanı olsun. Paylaşılan değiştirilebilir durum (`Arc<Mutex<Dom>>`) süreç ayrımını yeniden yazıma çevirir | `erk-shell` doğrudan `erk-dom`'a ya da `erk-style`'a bağımlı olamaz (`cargo tree --depth 1 --target all --all-features`). `check-renderer-surface.sh`: `erk-renderer`'ın dış yüzeyi gözden geçirilmiş listeye eşit; mesajlar `messages.rs`'te ve o dosya yalnızca prelude tiplerini kullanır (yol yok, `Arc`/`Mutex`/`Cell`/`Box`/ödünç yok); kabuk `render_html` çağırmaz. `'static` olmayan referansı zaten `spawn`'ın imzası dışlar | M0 Task 7, T8 |
+| Kabuk ile renderer yalnızca mesajla konuşur | Mesajlar M3'te C-ABI'nin ve gerekirse ayrı bir sürecin temeli: düz veri, ortak değiştirilebilir durum yok. Paylaşılan durum (`Arc<Mutex<Dom>>`) sınırı yeniden yazıma çevirir | `erk-shell` doğrudan `erk-dom`'a ya da `erk-style`'a bağımlı olamaz (`cargo tree --depth 1 --target all --all-features`). `check-renderer-surface.sh`: `erk-renderer`'ın dış yüzeyi gözden geçirilmiş listeye eşit; mesajlar `messages.rs`'te ve o dosya yalnızca prelude tiplerini kullanır (yol yok, `Arc`/`Mutex`/`Cell`/`Box`/ödünç yok); kabuk `render_html` çağırmaz. `'static` olmayan referansı zaten `spawn`'ın imzası dışlar | M0 Task 7, T8 |
 | `html5ever` ve `stylo` birlikte yükseltilir | İkisi `web_atoms`/`string_cache` üzerinden aynı atom tiplerini paylaşmak zorunda; html5ever 0.40 ile Stylo 0.21 uyumsuz | `html5ever = "=0.39.0"` sabit; CI'da `web_atoms` ve `string_cache` için tek sürüm kontrolü (tüm hedefler) | M0 Task 3 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
@@ -86,27 +94,28 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 
 | Taş | Gelen kural |
 |---|---|
+| M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
 | M1 | Lisans izin listesi (`cargo deny check licenses`). İlk MPL-2.0 bağımlılıklar (Stylo, selectors) M0 Task 3'te girdi; liste `erk-renderer`'daki yazı tiplerinin OFL-1.1'ini de kapsamalı |
-| M1 | WPT gerileme yasağı: taban çizgisinin altına düşen PR birleşmez |
-| M2 | `erk-renderer` ağ crate'lerine bağımlı olamaz; ağ yalnızca `erk-network` arayüzünden |
-| M2 | OpenSSL ve `native-tls` yasak (`cargo deny` bans) |
-| M3 | Süreç sınırı: `cargo deny` `wrappers`, `xtask arch-check`, sandbox testi zorunlu check |
-| M3 | `unsafe` istisnası: `erk-sandbox` (işletim sistemi API'leri) |
-| M4 | `unsafe` istisnası: JS motoru bağlama crate'i (mozjs seçilirse) |
+| M1 | WPT gerileme yasağı (CSS dizinleri): taban çizgisinin altına düşen PR birleşmez |
+| M1 | `render_html` hiçbir girdide paniklemez: tohumlu test ve cargo-fuzz job'ı |
+| M1 | İkili boyutu bütçenin altında (bütçe M1'in başında ölçülen tabandan) |
+| M1 | `docs/css-support.md`'deki her "Supported" satırın bir testi var |
+| M3 | `unsafe` istisnası: `erk-ffi` (C-ABI); üretilen `erk.h` depodakiyle aynı; C örneği CI'da derlenip çalışır |
+| M3 | FFI'dan panik sızmaz; eski `NodeId` ve yanlış iş parçacığı hata kodu döner |
+| M4 | `Mutation` dizileri fuzz'lanır |
 
 ## unsafe ve C/C++ politikası
 
 - `unsafe` yalnızca adıyla listelenmiş crate'lerde bulunur. Bugün liste tek
-  kalem: **`erk-style`**, FFI değil ama Stylo'nun trait imzası yüzünden; beş
+  kalem: **`erk-style`**, FFI değil ama Stylo'nun trait imzası yüzünden; M3'te
+  **`erk-ffi`** eklenir (C-ABI ham işaretçi ister; `#[unsafe(no_mangle)]`). Beş
   `unsafe fn` imzası, gövdeleri güvenli. İstisna crate'i workspace lint'ini
   devralmaz, kendi `[lints]` tablosunda `unsafe_code = "deny"` ve
   `unsafe_op_in_unsafe_fn = "forbid"` yazar ve izni öğe bazında
   `#[allow(unsafe_code)]` ile, gerekçe yorumuyla verir.
-- C/C++ bağımlılığı yalnızca iki yerde kabul edilir: JS motoru (M4, mozjs
-  seçilirse) ve TLS kripto sağlayıcısı (M2, `aws-lc-rs`). Yeni bir C/C++
-  bağımlılığı bir tasarım kararıdır ve `docs/design/` altına yazılır.
-- Kural "saf Rust" değil, **"OpenSSL/native-tls yok"**: rustls'in protokolü
-  Rust, kriptosu değil. Yanlış iddia etmektense doğru kural.
+- Bugün C/C++ bağımlılığı yok (işletim sisteminin pencere ve grafik
+  kütüphaneleri dışında). Yeni bir C/C++ bağımlılığı bir tasarım kararıdır ve
+  `docs/design/` altına yazılır.
 
 ## Derleme önkoşulları
 
@@ -118,12 +127,14 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 
 ## Gizlilik ve güvenlik
 
-- **Telemetri yok.** Hiçbir kod, kullanıcının başlatmadığı bir ağ isteği
-  atmaz.
-- Loglara sayfa içeriği, çerez, form verisi veya kimlik bilgisi yazılmaz.
-- Hedef mimaride renderer güvenilmezdir: renderer'ın iddia ettiği origin'e,
-  kendi raporladığı güvenlik durumuna asla güvenilmez (M3'ten itibaren
-  zorlanır, tasarım bugünden buna göre yapılır).
+- **Telemetri yok, ağ yok.** Motor hiçbir ağ isteği atmaz ve varsayılan olarak
+  hiçbir portu dinlemez (inspector dahil).
+- **G/Ç yalnızca host'ta.** Çekirdek crate'ler (`erk-dom`, `erk-style`,
+  `erk-renderer`) dosya, ağ, süreç, ortam değişkeni ve saat kullanmaz;
+  kaynaklar host'un callback'inden, zaman host'un `now_ns`'inden gelir.
+  İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. `<script>`
+  hiçbir zaman çalışmaz.
+- Loglara sayfa içeriği, form verisi veya kimlik bilgisi yazılmaz.
 
 ## Test disiplini
 

@@ -1,7 +1,10 @@
 # Erk Engine yol haritası
 
-Bu doküman kilometre taşlarının kapsamını ve kabul kriterini tanımlar. Neden bu
-sırada olduklarını [tasarım dokümanı](../design/p0-architecture.md) anlatıyor.
+Erk gömülü bir HTML/CSS masaüstü UI motorudur: JavaScript yok, host uygulama
+DOM'u sürer. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
+tanımlar. Yön değişikliğinin gerekçesi [p1-embedded.md](../design/p1-embedded.md),
+render hattının ve DOM modelinin ayrıntısı
+[p0-architecture.md](../design/p0-architecture.md).
 
 **Kural:** her kilometre taşı kendi başına çalışır durumda kalır ve
 gösterilebilir bir çıktıyla biter — pencerede bir sayfa, bir PNG, bir taban
@@ -18,29 +21,31 @@ gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
 | KT | Kapsam | Durum |
 |---|---|---|
 | **M0** | İlk piksel | Bitti |
-| **M1** | Statik belge motoru | Yeni |
-| **M2** | Ağdan okuma ve gezinme | Yeni |
-| **M3** | Süreç ayrımı ve kum havuzu | Yeni |
-| **M4** | JavaScript | Yeni |
-| **M5** | Dinamik web | Yeni |
-| **M6** | Fetch ve ağ güvenliği | Yeni |
-| **M7** | Tarayıcı kabuğu | Yeni |
-| **M8** | Platform genişliği | Yeni |
+| **M0.5** | Mimari sözleşme | Yeni |
+| **M1** | Statik UI | Yeni |
+| **M2** | Etkileşim temeli | Yeni |
+| **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
+| **M4** | Etkileşimli DOM | Yeni |
+| **M5** | Artımlı render ve formlar | Yeni |
+| **M6** | Python | Yeni |
+| **M7** | Geliştirici araçları | Yeni |
+| **M8** | Ürünleşme | Yeni |
 | **M9** | Kompozitör ve performans | Yeni |
-| **M10** | Erişilebilirlik ve yerelleştirme | Yeni |
-| **M11** | Medya | Yeni |
-| **M12** | Geliştirici araçları ve otomasyon | Yeni |
-| **M13** | Ürünleşme | Yeni |
 
-### Bu sıra neden ters
+### Yön değişikliği (2026-09-30)
 
-İlk taslakta M0 süreç iskeleti, IPC ölçümü ve Windows kum havuzuydu. Bu, ekranda
-tek piksel yokken yangın merdiveni yönetmeliği tartışmaktı. Sıra tersine
-çevrildi: **önce çizdir, sonra izole et; önce çalıştır, sonra kural koy.**
+İlk rota tam bir masaüstü tarayıcıydı (M4'te JavaScript, M6'da Fetch ve ağ
+güvenliği, M3'te kum havuzu). Rota gömülü bir UI motoruna çevrildi: tarayıcının
+çok yıllık katmanlarının hiçbiri masaüstü UI için gerekmiyor, M0'da kurulan her
+şey ise yeni hedefe doğrudan yarıyor. Gerekçe ve değerlendirme
+[p1-embedded.md](../design/p1-embedded.md)'de.
 
-Çoklu süreci sonradan eklemenin bedeli (Firefox'un Electrolysis geçişi yıllar
-sürdü) tek bir disiplinle sıfıra yakın tutuluyor: kabuk ile renderer M0'dan
-itibaren yalnızca mesajla konuşuyor. Ayrıntı tasarım dokümanı §2.2'de.
+### Neden önce piksel
+
+İlk taslakta M0 süreç iskeleti, IPC ölçümü ve Windows kum havuzuydu. Sıra
+tersine çevrildi: **önce çizdir, sonra kural koy.** Kabuk ile renderer M0'dan
+itibaren yalnızca düz veri mesajlarla konuşuyor; bu disiplin şimdi C-ABI'nin
+temeli.
 
 ---
 
@@ -72,213 +77,202 @@ bir altın dosya testiyle sabitleniyor.
 
 ---
 
-## M1 — Statik belge motoru
+## M0.5 — Mimari sözleşme
+
+Kod değil belge; ama M1'in önkoşulu. M1 ve M2'nin Rust çekirdeği C-ABI'ye
+sonradan uydurulmak zorunda kalmasın diye sınır şimdi çizilir.
+
+- [p1-contract.md](../design/p1-contract.md) ve içinde kâğıt üzerinde bir
+  `erk.h` taslağı:
+  - `NodeId` opak `uint64_t`; 0 geçersiz; eski id → `ERK_ERR_STALE_NODE`
+  - her çağrı bir durum kodu döner; sınırda panik yakalanır, uygulama
+    zehirlenmiş sayılır, FFI'dan panik sızmaz
+  - dizeler: girişte UTF-8 + uzunluk, Erk kopyalar; çıkışta çağıranın
+    tamponu ya da `erk_string_free`
+  - iş parçacığı modeli: API yalnızca UI iş parçacığından, başka iş
+    parçacıkları için yalnızca `erk_app_post`; callback'ler UI iş
+    parçacığında, layout ya da boyama sırasında asla
+  - callback ömrü: `user_data` + isteğe bağlı `destroy`, tam bir kez
+  - olay döngüsü: Erk'in döngüsü (`erk_app_run`) ve host'un döngüsüne gömülme
+    (`erk_app_pump`, raw-window-handle)
+  - kaynaklar host'un callback'inden, zaman host'un `now_ns`'inden,
+    yapılandırma parametrelerden
+  - sürümleme: `erk_abi_version()`, bir ana sürüm içinde yalnızca ekleme
+- [css-support.md](../css-support.md): Supported / M1 / Later / Not planned
+- Her sözleşme kuralı için hangi taşta hangi muhafızın geldiği
+
+**Kabul:** Sözleşmenin her kuralının bir muhafız taşı var. CSS matrisi M1'in
+kapsamını tanımlıyor ve "Not planned" listesi gerekçeli.
+
+---
+
+## M1 — Statik UI
 
 Motorun özgün layout işi burada: **inline formatting context.** Taffy satır
 kutularını bilmez; Parley metni şekillendirir ama kutuları satıra dizmez. İkisini
-bağlayan katmanı Erk yazar.
+bağlayan katmanı Erk yazar. Kapsam masaüstü UI'ına göre daraltılmıştır: block,
+inline metin, flex, absolute positioning. **Float, clear ve tablo düzeni yok**
+(css-support.md "Not planned"); `float` hesaplanmış stilde kalsa da layout'ta
+`none` sayılır ve metni düşürmez.
 
+- İlk görev M0'ın bilinen eksikleri, her biri bir testle: blok ve metin karışık
+  ebeveynde metin düşüyor, span stilleri tek dizeye düzleşiyor, `text-align`
+  hep başa hizalı
+- İlk ölçüm M0'ın yayın taban çizgisi: ikili boyutu, 1000 düğümlü bir sayfada
+  boştaki bellek, ilk kare süresi. Bütçe bu ölçümden konur
 - Tam IFC: inline kutular, satırlar arasında span kırılması, `text-align`
-  (justify dahil), temel `vertical-align`, satır içi görseller
-- Float ile satır kutusu etkileşimi, margin collapsing doğrulaması
-- Tablolar: önce Blitz gibi grid emülasyonu (CSS 2 tablo algoritması değil,
-  yaklaşık)
+  (justify dahil), temel `vertical-align`, satır içi görseller. Blitz
+  0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc
+  değerleri Erk'in `CalcTable`'ından geçer. Anonim blok kutularının yeri ilk
+  adımda kararlaştırılır
+- Kenarlık, yuvarlak köşe, gölge, görüntü (png, jpeg) display list öğeleri
+- Flexbox ve absolute positioning doğrulaması (Taffy)
+- Sistem fontları ve fallback (fontique); gömülü font yalnızca testlerde
+- HiDPI: cihaz ölçeği
 - `text-transform`, elemanın `lang`'ına göre `icu_casemap` ile: Türkçede
   `i → İ`, `ı → I`
-- WPT altyapısı: wptrunner'a `--screenshot` üzerinden koşan özel "erk" ürünü,
-  beklenti dosyaları, taban çizgisi JSON'u
-- Lisans denetimi (`cargo deny check licenses`) — Stylo ile ilk MPL-2.0
-  bağımlılık girdi
+- Görüntüler ve CSS `url()` host'un kaynak sağlayıcısından (demo kabukta bir
+  kök dizin ve `memory://`)
+- WPT altyapısı: wptrunner'a `--screenshot` üzerinden koşan "erk" ürünü,
+  yalnızca CSS dizinleri
+- Sağlamlık: `render_html` hiçbir girdide paniklemez. `cargo test` içinde
+  tohumlu bir girdi testi ve depodaki çökme korpusu; `fuzz/` altında
+  cargo-fuzz, ayrı ve zaman sınırlı bir CI job'ı
+- Lisans denetimi (`cargo deny check licenses`): ilk MPL-2.0 bağımlılıklar
+  M0'da girdi; liste gömülü fontların OFL-1.1'ini de kapsar
 
-Referanslar: Servo `layout` crate'i (eski adıyla layout_2020), Blitz
-`layout/inline.rs` ve `layout/table.rs`.
+Referanslar: Blitz `packages/blitz-dom/src/layout/inline.rs`, `construct.rs`
+(0.3.0-beta.2, MIT OR Apache-2.0). Servo `layout` crate'i yalnızca okunur:
+MPL-2.0, kopyalanmaz. Blitz'te `vertical-align` uygulaması yok; o iş Erk'in.
 
 ### Akış layout'u kararı
 
-Taffy block ile başlanır. `css/CSS2/normal-flow` ve `css/CSS2/floats`
-taban çizgisi Taffy'nin sınırlarında tıkanırsa, akış layout'u (block + inline)
-Servo modeline taşınır; Taffy yalnızca flex ve grid'de kalır. Karar, hangi
-testlerin neden kaldığına bakılarak verilir ve bu dokümana yazılır.
+IFC önce Blitz modeliyle, Taffy'nin block layout'u içinde kurulur.
+`css/CSS2/normal-flow` ve `css/css-text` için ilk taban çizgisi çıktığında kalan
+testler "Taffy block kaynaklı", "IFC kaynaklı" ve "diğer" diye sınıflanır. Karar
+bu sınıflandırmayla verilir ve bu dokümana yazılır: Taffy'de kalmak ya da akış
+layout'unu Erk'e almak (Taffy yalnızca flex ve grid'de). Karar bir süreye
+değil bu sonuca bağlıdır.
 
-**Kabul:** `css/CSS2/normal-flow`, `css/CSS2/floats`, `css/css-display`,
-`css/css-flexbox` taban çizgisi JSON olarak yayımlı ve gerileme yasağı CI'da.
-Diske kaydedilmiş bir Türkçe Wikipedia makalesi okunur biçimde çiziliyor. Akış
-layout'u kararı verilip gerekçesiyle belgelenmiş.
+**Kabul:** Bir ayarlar ekranı maketi (form satırları, flex düzeni, kenarlıklar,
+Türkçe metin) Chrome referans testinde skorlu. `css/CSS2/normal-flow`,
+`css/css-flexbox`, `css/css-position`, `css/css-text` taban çizgileri JSON olarak
+yayımlı ve gerileme yasağı CI'da. Fuzz job'ı yeşil. İkili boyutu CI'da bütçenin
+altında; bellek ve ilk kare adlandırılmış bir makinede ölçülüp kaydedilmiş. Akış
+layout'u kararı gerekçesiyle belgelenmiş.
 
 ---
 
-## M2 — Ağdan okuma ve gezinme
+## M2 — Etkileşim temeli
 
-- `erk-network` bir arayüz sunar; arkasında **geçici olarak** reqwest (rustls
-  + aws-lc-rs, yönlendirme, gzip/br). JS olmadığı için CORS henüz anlamsız.
-  reqwest'in kalıcı olmadığı arayüzün belgesinde yazılı
-- Link tıklama, geri/ileri, kaydırma, hit-test, metin seçimi
-- Görüntüler: png, jpeg
-- GPU yolu: `vello_hybrid` (wgpu 29), yüzey oluşturulamazsa `vello_cpu`'ya düşme
-- IME spike'ı: Windows TSF ile Türkçe ve CJK girişi
+- GPU yolu: `vello_hybrid` (wgpu 29), yüzey oluşturulamazsa `vello_cpu`'ya
+  düşme
+- Girdi hattı: winit'in fare, klavye ve tekerlek olayları kabuktan renderer'a
+  mesajla
+- Hit-test: layout kutuları boyama sırasının tersinden gezilir
+- Kaydırma kapları (`overflow: auto | scroll`), imleç biçimleri
+- `:hover`, `:active`, `:focus` (Stylo'nun eleman durumu)
 - macOS CI
 
-**Kabul:** Canlı bir Türkçe Wikipedia makalesi açılıyor, kaydırılıyor, bir linke
-tıklanıyor, geri dönülüyor. GPU yolu yoksa CPU'ya düşüyor. Renderer'ın ağ
-crate'lerine bağımlı olmadığı CI'da zorlanıyor.
+**Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
+(hover, kaydırma) tam yeniden stil, layout ve boyama ister. M2'nin kare süresi
+ölçümleri bir performans iddiası değil, M5'in kıyaslanacağı tabandır.
+
+**Kabul:** Uzun bir sayfa kayıyor, hover stili değiştiriyor, bir tık doğru
+`NodeId`'yi raporluyor (otomatik test). GPU yolu yoksa CPU'ya düşüyor. Tam
+yeniden hesaplamanın kare süresi kaydedilmiş.
 
 ---
 
-## M3 — Süreç ayrımı ve kum havuzu
+## M3 — Kütüphane
 
-Bu noktada ayrılacak bir renderer var; muhafızlar onu koruyacak şeyle birlikte
-geliyor.
+- `erk`: idiomatik Rust API'si (`App`, düğüm tutamakları, olay abonelikleri)
+- `erk-ffi`: sözleşmedeki C-ABI; `erk.h` cbindgen ile üretilir. Adıyla
+  listelenmiş `unsafe` istisnası (`#[unsafe(no_mangle)]`)
+- İş parçacığı modeli, callback ömrü ve hata kodları sözleşmedeki gibi
+- Kaynak sağlayıcı callback'i; demo kabuk `erk`'in ilk kullanıcısı olur
+- Muhafızlar: üretilen `erk.h` depodakiyle aynı; bir C örneği CI'da derlenip
+  çalışıyor; `unsafe` yalnızca `erk-style` ve `erk-ffi`'de
 
-- Renderer ayrı süreç. Aynı ikili, `--type=renderer` ile başlar
-- `mpsc` yerine IPC. Karar ölçülerek: `ipc-channel` + serde ile `rkyv` (güvenilmeyen
-  girdiyi doğrulama maliyeti dahil), 1 MB gidiş-dönüş ve küçük mesaj gecikmesi
-- Windows kum havuzu: restricted token, job object, AppContainer (`erk-sandbox`;
-  `erk-style`'dan sonra ikinci `unsafe` istisnası)
-- Çökme izolasyonu
-- Muhafızlar: `cargo deny` `wrappers`, `xtask arch-check`, kum havuzu testi
-  zorunlu check
-
-**Kabul:** Renderer dosya açamıyor ve soket bağlayamıyor (otomatik test).
-Renderer süreci öldürülünce kabuk yaşıyor ve sekmeyi yeniden yükleyebiliyor.
-Gidiş-dönüş ölçümü tasarım dokümanına yazılmış. Her muhafız kasıtlı bir ihlalle
-denenmiş.
+**Kabul:** Rust ve C örnek uygulamaları CI'da derlenip bir sayfa açıyor ve bir
+tık olayı alıyor. Yanlış iş parçacığından çağrı ve eski `NodeId` hata kodu
+döndürüyor (test). Her muhafız kasıtlı bir ihlalle denenmiş.
 
 ---
 
-## M4 — JavaScript
+## M4 — Etkileşimli DOM
 
-Bir spike değil, bir kilometre taşı: motoru bağlamak ile döngü toplayan bir
-DOM-GC mimarisi kurmak ayrı işler.
+- Arenada silme: slot serbest listeye girer, nesil artar
+- `Mutation` toplu API'si: oluştur, ekle, araya ekle, sil, metin, öznitelik,
+  sınıf, satır içi stil
+- Olay dağıtımı: DOM'un capture/bubble alt kümesi; tıklama, girdi, değişiklik,
+  gönderim, klavye, odak
+- `querySelector` ve `querySelectorAll` (selectors crate'i)
+- `Mutation` dizileri fuzz'lanır (eski `NodeId`'ler dahil)
 
-- Karar: aday sırası **Boa**, sonra **mozjs**; aynı mini DOM üzerinde ölçülerek
-  (ölçüm listesi tasarım dokümanı §8'de). V8 aday değil
-- Arena ile JS GC arasındaki sahiplik kuralı açıkça seçilir (tasarım §5.3)
-- WebIDL'den bağlama üretimi, tek motora hedefli
-- Olay döngüsü: microtask, macrotask, `requestAnimationFrame`
-- Mini DOM API: `Document`, `Element`, `Text`, `appendChild`/`removeChild`,
-  `getElementById`, `textContent`, `addEventListener`/`dispatchEvent`
-- testharness.js testleri koşabilir hale gelir
-
-**Kabul:** `dom/nodes` taban çizgisi yayımlı. Ayrılmış bir alt ağaç, kendisini
-kapanışında tutan bir dinleyiciyle birlikte toplanıyor (test). 10 bin
-oluştur/ayır döngüsünde bellek büyümüyor. Vanilla TodoMVC çalışıyor.
+**Kabul:** JS'siz, Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil
+döngüsünde bellek büyümüyor. Mutation fuzz'ı yeşil.
 
 ---
 
-## M5 — Dinamik web
+## M5 — Artımlı render ve formlar
 
-- Artımlı stil ve layout invalidation: bir `div`'in rengi değişince yalnızca o
-  dal kirlenir
-- Olaylar, formlar, zamanlayıcılar
-- Daha geniş DOM ve HTML API yüzeyi
+- Kalıcı stil verisi ve Stylo'nun yeniden stil ipuçları; kalıcı layout yan
+  tabloları ve Taffy önbelleği; kirlenme bitleri
+- Form kontrolleri: `input` (metin, onay kutusu, radyo), `textarea`, `button`,
+  `select`
+- İmleç, seçim, pano; IME (Windows TSF ile Türkçe ve CJK)
+- Odak ve Tab gezinmesi
+- Erişilebilirlik: AccessKit ile DOM'un işletim sistemi erişilebilirlik ağacına
+  çevrilmesi
 
-**Kabul:** Acid2 (1x). `html/semantics` ve `dom` taban çizgileri yükseliyor.
-Basit bir Preact veya Vue sitesi çalışıyor.
-
----
-
-## M6 — Fetch ve ağ güvenliği
-
-**Uzun taş.** Fetch standardı tarayıcının en karmaşık katmanlarından biri; reqwest
-burada emekliye ayrılır.
-
-- hyper 1.x bağlantı API'si üstünde kendi Fetch uygulamamız: main fetch, HTTP
-  fetch, hop başına yönlendirme ve her hopta denetim
-- Bağlantı havuzu `(network partition key, origin, credentials)` anahtarıyla
-- Çerezler: kendi RFC 6265bis kavanozumuz (SameSite, `__Host-`/`__Secure-`, CHIPS)
-- Bölümlenmiş HTTP cache (tazelik kararları `http-cache-semantics` ile,
-  depolama bizim)
-- CORS ve preflight cache, CORP, ORB, nosniff, mixed content, CSP
-  (`content-security-policy` crate'i), HSTS, `Sec-Fetch-*` başlıkları
-- Initiator origin'in renderer'ın süreç kilidine karşı doğrulanması
-- Site başına renderer
-- Linux (seccomp, landlock, namespace) ve macOS (Seatbelt) kum havuzu
-
-**Kabul:** `fetch/`, `cors/`, `cookies/` taban çizgileri yayımlı. Ele geçirilmiş
-bir renderer simülasyonu başka bir sitenin çerezini ve yanıtını okuyamıyor.
+**Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
+hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. Türkçe ve CJK IME
+girişi çalışıyor. Bir ekran okuyucu form etiketlerini okuyor.
 
 ---
 
-## M7 — Tarayıcı kabuğu
+## M6 — Python
 
-"Tam masaüstü tarayıcı" hedefinin ürün yüzü.
+- `erk-python`: C-ABI üstünde cffi, maturin ile platform wheel'leri
+- Nesne yönelimli sarmalayıcı (`App`, `Element`, `on("click", ...)`)
+- Go ve diğer diller topluluğa açık; C başlığı ve örnekler yeterli
 
-- Sekmeler, adres çubuğu, geçmiş, yer imleri, indirmeler, ayarlar, oturum geri
-  yükleme
-- **Karar:** kabuk arayüzü Erk'in kendisiyle çizilen HTML mi (Firefox'un
-  yaklaşımı; motoru kendi kabuğuyla sınar), yerel araç takımı mı
-
-**Kabul:** Günlük kullanım senaryo listesi (bu taşın planında yazılır) baştan
-sona çalışıyor.
+**Kabul:** `pip install erk` Windows ve Linux'ta çalışıyor; README'deki Python
+örneği bir pencere açıp bir tıklamaya yanıt veriyor.
 
 ---
 
-## M8 — Platform genişliği
+## M7 — Geliştirici araçları
 
-- Web fontları; görüntü çözücüler (jxl-rs dahil)
-- Canvas 2D (`vello_cpu` ile, Servo'nun yaptığı gibi)
-- `localStorage`, `sessionStorage`, IndexedDB (IPC üzerinden)
-- WebSocket, History API
-- Siteler arası iframe'ler ayrı süreçte
+- Erk ile çizilen, süreç içi bir inspector: DOM ağacı, hesaplanmış stil, kutu
+  kaplaması
+- HTML ve CSS için hot reload
+- Varsayılan olarak ağ dinlenmez; uzak inspector ancak açıkça istenirse
 
-**Kabul:** İlgili WPT dizinlerinde taban çizgileri yayımlı.
+**Kabul:** Inspector kendi uygulamasını inceleyebiliyor.
+
+---
+
+## M8 — Ürünleşme
+
+- `erk-cli`: `new`, `dev` (hot reload), `build`
+- Varlık gömme: HTML, CSS ve görüntüler ikiliye gömülür, `memory://` üzerinden
+  okunur
+- Paketleme (Windows, Linux, macOS) ve kod imzalama rehberi
+- C-ABI sürüm ve kararlılık politikası
+
+**Kabul:** `erk build` dış dosyasız tek parça bir `.exe` ve AppImage üretiyor.
 
 ---
 
 ## M9 — Kompozitör ve performans
 
-Akıcı kaydırma boyayıcının değil kompozitörün işi; Vello ailesi bunu
-sağlamıyor.
+- CSS animasyonları ve geçişleri (zaman host'un `now_ns`'inden)
+- Kaydırma katmanı başına tile cache, kompozitör iş parçacığında kaydırma
 
-- Kaydırma katmanı başına tile cache
-- Kompozitör iş parçacığında kaydırma
-- CSS animasyonları ve geçişleri
-
-**Kabul:** Adlandırılmış bir sayfa kümesinde, adlandırılmış bir donanımda 1080p ve
-4K p95 kare süresi hedefleri (hedef sayılar bu taşın planında) tutuyor.
-
----
-
-## M10 — Erişilebilirlik ve yerelleştirme
-
-- AccessKit ile DOM'un işletim sistemi erişilebilirlik ağacına çevrilmesi
-- Kabuk arayüzü Türkçe ve İngilizce
-- IME'nin tamamlanması (surrounding text, yeniden dönüştürme)
-- Tam klavye gezinmesi
-
-**Kabul:** Bir ekran okuyucuyla temel sayfa gezinmesi çalışıyor; kabukta
-çevrilmemiş dize kalmıyor.
-
----
-
-## M11 — Medya
-
-- `<audio>` ve `<video>`, işletim sisteminin codec'leriyle (Media Foundation,
-  VideoToolbox, VA-API) — patent riski işletim sisteminde kalır
-- DRM yok
-
-**Kabul:** `media` dizininde taban çizgisi; yaygın bir video sitesinde DRM'siz
-bir video oynuyor.
-
----
-
-## M12 — Geliştirici araçları ve otomasyon
-
-- WebDriver BiDi ve/veya CDP'nin bir alt kümesi
-- Basit geliştirici araçları: DOM ağacı, hesaplanmış stil, konsol
-
-**Kabul:** Standart bir otomasyon istemcisi Erk'i sürüp bir sayfada gezinebiliyor.
-
----
-
-## M13 — Ürünleşme
-
-- Otomatik güncelleme
-- Kod imzalama (Windows, macOS)
-- Yerel, isteğe bağlı çökme raporu (telemetri değil)
-- Kurulum paketleri
-
-**Kabul:** Üç platformda kurulum ve güncelleme çalışıyor.
+**Kabul:** Adlandırılmış bir sayfa kümesinde, adlandırılmış bir donanımda p95
+kare süresi hedefleri (sayılar bu taşın planında) tutuyor.
 
 ---
 
@@ -286,13 +280,10 @@ bir video oynuyor.
 
 | Ne | Neden |
 |---|---|
-| DRM / EME (Widevine) | Lisans ve kapalı modül gerektirir; bağımsız bir motorun kapsamı değil |
-| Telemetri | Kullanıcının başlatmadığı hiçbir istek atılmaz |
-| Bulut senkronu | Hesap ve sunucu altyapısı; motorun işi değil |
-| WebExtensions | Çok uzun vadeli; şimdi planlamak erken |
-| WebRTC, WebXR, WebUSB | Her biri ayrı bir çok yıllık yük; M8 sonrası yeniden değerlendirilir |
+| JavaScript ve her türlü betik | Motorun ilkesi; iş mantığı host'ta |
+| Ağ, HTTP, Fetch, çerezler | Host'un işi; motor ağa hiç erişmez |
+| Kum havuzu, çoklu süreç, site izolasyonu | İçerik host'un kendisi; mesajlar serileştirilebilir kaldığı için ihtiyaç olursa sonradan eklenebilir |
+| Float, clear, tablo düzeni, multi-column, print/paged media | Masaüstü UI'ı flex ile kurulur; ayrıntı css-support.md'de |
+| WebExtensions, medya ve DRM, WebRTC, WebXR | Tarayıcı işleri |
 | Mobil platformlar | Hedef masaüstü |
-| Takılabilir JS motoru soyutlaması | İki motoru da yarım bağlamanın yolu; Gosub'da V8 bağlamaları derleniyor ama hiçbir sayfa JS çalıştırmıyor |
-| V8 | Rust üzerinde olgun DOM örneği yok, cppgc bağları neredeyse tamamen `unsafe`, her ~4 haftada kırıcı sürüm |
-| Kendi font ayrıştırıcı, shaper, görüntü çözücü, metin kodlayıcı | skrifa, HarfRust, png/jxl-rs, encoding_rs var |
-| HTTP/3 | **Ertelendi, reddedilmedi:** `h3` 0.0.8 kendini "çok deneysel" diye tanımlıyor; olgunlaşınca M6'nın havuz tasarımına (Alt-Svc) eklenir |
+| Kendi font ayrıştırıcı, shaper, görüntü çözücü | skrifa, HarfRust, png, jpeg çözücüleri var |

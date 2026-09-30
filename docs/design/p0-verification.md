@@ -41,16 +41,21 @@ yazıldığında doldurulur.
 | Tuval beyaz üstüne harmanlanır, kare opak | `tests/paint.rs` + `canvas-alpha` referans sayfası | Beyaz tabanı kaldırmak | M0 T6 | 2026-09-25, yakaladı |
 | Kutusuz kök/body tuvale renk yaymaz | `tests/paint.rs` | Kutu kontrolünü kaldırmak | M0 T6 | 2026-09-25, yakaladı |
 | Sunumsal öznitelikler stile girer | `erk-style/tests/computed.rs`: `bgcolor` → `background-color`, `align` → `text-align` (hizalama M1'de çizilir) | İki eşlemeyi ayrı ayrı kapatmak | M0 T8 | 2026-09-28, yakaladı |
-| Lisans izin listesi | `cargo deny check licenses` | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
-| WPT gerilemesi yok | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
-| Renderer ağa bağımlı değil | CI: `cargo tree -p erk-renderer` çıktısında `erk-network`, `reqwest`, `hyper`, `tokio` yok | `erk-renderer`'a `reqwest` eklemek | M2 | — |
-| OpenSSL/native-tls yok | `cargo deny check bans` → `openssl-sys`, `native-tls` | `native-tls` özelliği açık bir reqwest | M2 | — |
-| Dış crate sınırları | `cargo deny` `[bans] deny = [{ crate = "...", wrappers = [...] }]` (ör. `ipc-channel` yalnızca `erk-ipc`) | `erk-renderer`'dan doğrudan `ipc-channel` | M3 | — |
-| Workspace içi yön | `cargo xtask arch-check` (`cargo metadata` grafiği) — cargo-deny'nin workspace üyelerine uygulanması belgelenmemiş olduğu için | Yasak bir iç bağımlılık | M3 | — |
-| Renderer dosya ve soket açamaz | Kum havuzu içinde renderer'ın dosya açma ve soket bağlama denemesi başarısız olmalı; zorunlu check | Sandbox'ı devre dışı bırakan bir bayrak | M3 | — |
+| Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
+| WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
+| `render_html` hiçbir girdide paniklemez | `cargo test` içinde tohumlu girdi testi ve çökme korpusu; `fuzz/` altında cargo-fuzz, ayrı ve zaman sınırlı CI job'ı | Bozuk girdide `unwrap` eden bir yol | M1 | — |
+| İkili boyutu bütçede | CI: yayın ikilisinin boyutu, M1'in başında ölçülen tabandan konan tavanın altında | Bütçeyi aşan bir bağımlılık | M1 | — |
+| CSS matrisindeki her "Supported" satırın testi var | CI: `docs/css-support.md`'deki her Supported satırın adlandırdığı test var | Test adı olmayan ya da var olmayan teste işaret eden satır | M1 | — |
+| `unsafe` yalnızca `erk-style` ve `erk-ffi`'de | Lint devralma istisna listesi; `erk-ffi` de `deny` + öğe başına izin | `erk`'e `unsafe` blok | M3 | — |
+| `erk.h` güncel | CI: cbindgen ile yeniden üretilen başlık depodakiyle aynı | Başlığı güncellemeden C-ABI'yi değiştirmek | M3 | — |
+| C örneği derlenir ve çalışır | CI: C örneği `erk-ffi`'ye bağlanıp bir sayfa açar | C-ABI'de uyumsuz bir imza | M3 | — |
+| FFI'dan panik sızmaz, eski id ve yanlış iş parçacığı hata kodu döner | `erk-ffi` testleri | `catch_unwind`'i kaldırmak; iş parçacığı denetimini kaldırmak | M3 | — |
+| `Mutation` dizileri motoru bozamaz | cargo-fuzz, eski `NodeId`'ler dahil | Nesil denetimini kaldırmak | M4 | — |
 
-`cargo tree` tabanlı kontroller M3'te `xtask arch-check`'e taşınır; o zamana kadar
-tek satırlık CI adımlarıdır.
+İç bağımlılık yönü bugün `cargo tree` adımlarıyla denetleniyor; crate sayısı
+artarsa (M3'te `erk`, `erk-ffi`) bir `xtask arch-check`'e taşınması
+değerlendirilir. Ağ, kum havuzu ve süreç sınırı muhafızları, bu hedefler yol
+haritasından çıktığı için (p1-embedded.md) takvimden çıkarıldı.
 
 ---
 
@@ -112,8 +117,9 @@ ne kadar uzak olduğumuzu ölçer.
 - Beklenti dosyaları (`.ini`, Servo'nun metadata yaklaşımı) bugünkü sonucu
   kaydeder. Kapı "her test geçmeli" değil, "beklentinin altına düşme"dir.
 - Taban çizgisi JSON'u DioxusLabs `browser-wpt-results` biçiminde yayımlanır.
-- Başlangıç dizinleri: `css/CSS2/normal-flow`, `css/CSS2/floats`,
-  `css/css-display`, `css/css-flexbox`.
+- Başlangıç dizinleri (M1'in kapsamına göre): `css/CSS2/normal-flow`,
+  `css/css-flexbox`, `css/css-position`, `css/css-text`. Float ve tablo
+  dizinleri kapsam dışı (css-support.md "Not planned").
 
 ---
 

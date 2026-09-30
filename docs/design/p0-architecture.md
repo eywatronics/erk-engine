@@ -1,13 +1,17 @@
 # Erk Engine — P0 Tasarım Dokümanı
 
 - **Tarih:** 2026-09-25
-- **Durum:** Onaylandı
+- **Durum:** Onaylandı; 2026-09-30'da hedef gömülü UI motoruna çevrildi. Render
+  hattı (§6), DOM bellek modeli (§5.1–5.2) ve test stratejisi (§9) geçerli;
+  tarayıcıya özgü bölümleri [p1-embedded.md](p1-embedded.md) geçersiz kılar.
 - **Kapsam:** Motorun hedef mimarisi, M0–M3 arasındaki sıralama kararı ve ilk
   kilometre taşlarının teknoloji seçimleri
 
 ---
 
 ## 1. Ürün tanımı
+
+> **Geçersiz (2026-09-30):** Erk artık bir tarayıcı değil, gömülü bir HTML/CSS UI motoru. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
 
 Erk, Rust ile yazılan, çoklu süreçli, kum havuzlu bir **tam masaüstü tarayıcı
 motoru**dur. Hedef platformlar sırasıyla Windows, Linux ve macOS.
@@ -47,6 +51,8 @@ tanımlanır ([roadmap.md](../plans/roadmap.md)).
 | Lisans | MIT OR Apache-2.0; MPL-2.0 bağımlılıklar kabul | Stylo, selectors ve mozjs MPL-2.0: dosya bazında copyleft. Bağımlılık olarak kullanmak Erk'in lisansını etkilemez; **kopyalanıp değiştirilen** bir MPL dosyası MPL kalır. |
 
 ### 2.1 Önce piksel, sonra izolasyon
+
+> **Geçersiz (2026-09-30):** Süreç ayrımı ve kum havuzu yol haritasından çıktı; "önce piksel" ilkesi geçerli. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
 
 İlk taslak planda M0 süreç iskeleti, IPC ölçümü, Windows sandbox'ı ve mimari
 muhafızlardı. Eleştiri haklıydı: bu, ekranda tek piksel yokken yangın merdiveni
@@ -197,6 +203,8 @@ yasak değildir; yasak olan düğüm sahipliğini referans sayımıyla kurmaktı
 
 ### 5.3 JS ile sahiplik (M4'te karar verilecek)
 
+> **Geçersiz (2026-09-30):** Motorda JavaScript yok; arena tek sahip, silme M4'te nesil artırarak gelir. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
+
 Arena ile JS çöp toplayıcısı arasındaki sahiplik kuralı M4'te açıkça seçilir:
 ya JS düğümlerin sahibidir (Servo modeli: SpiderMonkey'nin GC'si DOM
 nesnelerini tutar), ya da arena sahibidir ve arenadan erişilebilen JS kenarları
@@ -313,6 +321,8 @@ bunu sağlamıyor; M9'da Erk yazar. Hedef, adlandırılmış bir sayfa kümesind
 
 ## 7. Ağ ve güvenlik modeli (hedef)
 
+> **Geçersiz (2026-09-30):** Motor ağa hiç erişmez; kaynaklar host'un callback'inden gelir. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
+
 M2'deki ağ yalnızca gezinme içindir: `erk-network` bir arayüz sunar, arkasında
 geçici olarak reqwest (rustls/aws-lc-rs, yönlendirme, gzip/br) çalışır. JS
 olmadığı için CORS henüz anlam taşımaz.
@@ -337,6 +347,8 @@ uygulamamızla değiştirilir. Tasarım bugünden şunları öngörür:
 ---
 
 ## 8. JavaScript (M4)
+
+> **Geçersiz (2026-09-30):** Motorda JavaScript yok. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
 
 M4 bir spike değil, bir kilometre taşıdır; motoru bağlamak ile döngü toplayan
 bir DOM-GC mimarisi kurmak ayrı işlerdir.
@@ -367,7 +379,7 @@ verilir. Ölçülenler:
   başına içerik skoru iki ondalıkta sabitlenir ve yalnızca gerekçeyle düşebilir.
 - WPT (M1'den itibaren): wptrunner'a `erk --screenshot` üzerinden koşan özel bir
   "erk" ürünü eklenir (Servo'nun `executorservo` yaklaşımı). Önce reftest'ler;
-  testharness.js testleri JS ile (M4) gelir.
+  motorda JS olmadığı için testharness.js testleri kapsam dışı.
 - Taban çizgisi JSON olarak yayımlanır, DioxusLabs `browser-wpt-results` ile
   aynı biçimde (`tests, score, subtests, passed`), böylece Blitz, Servo ve
   Ladybird ile doğrudan karşılaştırılabilir.
