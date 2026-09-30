@@ -160,8 +160,46 @@ jobs:
       - name: The engine core does no I/O and reads no environment or clock
         run: bash .github/scripts/check-core-io.sh
 
+      # The renderer produces frames; windows and surfaces belong to the host
+      # side (embedding contract, section 11).
+      - name: erk-renderer does not depend on the window layer
+        run: |
+          tree=$(cargo tree -p erk-renderer -e normal --target all --all-features --locked --prefix none)
+          if grep -E '^(winit|softbuffer) ' <<< "$tree"; then
+            echo "erk-renderer must not know the window layer"
+            exit 1
+          fi
+
+      # A feature is claimed only with a test behind it.
+      - name: Every supported CSS feature names an existing test
+        run: bash .github/scripts/check-css-support.sh
+
       # clippy's disallowed_types can be silenced with an attribute or
       # switched off in configuration, which would quietly bring
       # reference-counted nodes back.
       - name: The reference-counting ban in erk-dom holds
         run: bash .github/scripts/check-dom-rc-ban.sh
+
+  # The release binary's size against the budget set from the M1.0
+  # measurement. Linux only: sizes differ per platform, and one budget that
+  # moves with every change is the point.
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Release build
+        run: cargo build --release -p erk-shell --locked
+
+      - name: The erk binary stays within its size budget
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/check-size-budget.sh target/release/erk "$BASE"
