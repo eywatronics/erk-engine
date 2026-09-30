@@ -113,7 +113,7 @@ değerlendirmesi:
 |---|---|
 | Çekirdek yalnızca UI; tepsi, diyalog, bildirim, kısayol, güncelleme host'ta | Alındı: ilke; `erk new` şablonları bunları host kodu olarak getirir (M8) |
 | Surface API (host'un GPU çizimi) | Alındı (M10), düzeltmeyle: bir yüzeyin tek çizicisi Erk; host bölgeye callback ya da dokuyla çizer (p1-contract §8.2). İşaretleme özniteliği değil API |
-| Başka `ErkApp`'in `NodeId`'si | Alındı, gerçek bir açık: neslin üst 8 biti uygulama etiketi, `ERK_ERR_WRONG_APP` |
+| Başka `ErkApp`'in `NodeId`'si | Gerçek bir açık; ilk çözüm (neslin üst 8 biti uygulama etiketi) sonra değiştirildi: iç temsil 32 bit indeks + 32 bit nesil olarak kalır, dış id uygulamaya özel bir anahtarla karıştırılır (p1-contract §2). Etiket düzeni nesli 24 bite indirip uzun süre açık kalan uygulamada sızıntıya, 256 etiketin yeniden kullanımına ve okunabilir bitlere yol açıyordu. Karıştırma güvenlik sınırı değil, ad alanı ayrımı; yakalama olasılıksal |
 | ABI'yi M0.5'te dondurmamak | Alındı: ABI v0.1; 1.0'a (M8) kadar kırıcı değişiklik hakkı saklı |
 | Kirlenme bitlerini ayırmak, stil geçersizleştirmesinin CSS bağımlılıklarına bakması | Alındı (M5): stil, layout, boyama ve metin ayrı; `.parent:hover .child` gibi bağımlılıkları Stylo'nun yeniden stil ipuçları ve snapshot'ları taşır |
 | Test stratejisi | Alındı: [p1-testing.md](p1-testing.md). Ayrı bir taş (M0.6) yerine sürekli altyapı; ilk yeni parçası Chrome'la geometri karşılaştırması |

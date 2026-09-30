@@ -67,15 +67,45 @@ dışında) ve onu da `now_ns` olarak verir.
 
 ## 2. Tipler
 
-- **`ErkNodeId`**: opak `uint64_t`, `index | (generation << 32)`. Nesil
-  hiçbir zaman 0 olmadığı için 0 "düğüm yok" demektir (`ERK_NODE_NONE`).
-  Host bu sayıyı yorumlamaz, yalnızca saklar ve geri verir.
-- **Başka uygulamanın id'si:** iki `ErkApp`'in arenası aynı indeks ve nesli
-  üretebilir; bir uygulamanın id'si ötekinde başka bir düğümü göstermemeli.
-  Neslin üst 8 biti uygulama etiketidir (süreçteki her `ErkApp`'e ayrı), alt
-  24 biti sayaçtır. Başka bir uygulamanın id'si `ERK_ERR_WRONG_APP` döner.
-  Sayacı tükenen slot, bugünkü gibi emekliye ayrılır. 0 her zaman
-  `ERK_ERR_INVALID_ARGUMENT`'tır.
+- **İç temsil değişmez:** `erk-dom`'daki `NodeId`, 32 bit indeks ve 32 bit
+  nesil (`NonZeroU32`). Nesil her slot yeniden kullanımında artar; tükenen
+  slot emekliye ayrılır, bugünkü gibi.
+- **Dış temsil (`ErkNodeId`):** opak `uint64_t`. Uygulamaya özel bir anahtarla
+  karıştırılır:
+
+  ```text
+  iç          = index | (generation << 32)
+  dış         = iç ^ app_key            (host'a giden)
+  iç          = dış ^ app_key           (host'tan gelen)
+  app_key     = splitmix64(uygulama_sıra_no) & 0xFFFF_FFFF
+  ```
+
+  `uygulama_sıra_no` süreç içinde her `erk_app_create`'te bir artan, hiç
+  tekrar etmeyen 64 bitlik bir sayaçtır; anahtar rastgele değil, bu yüzden
+  testler belirleyicidir. Anahtar yalnızca indeks yarısını karıştırır: dış
+  id'nin üst yarısı nesildir ve nesil hiçbir zaman 0 olmadığı için dış id de
+  hiçbir zaman 0 olmaz; 0 her zaman "düğüm yok"tur (`ERK_NODE_NONE`), bir
+  düğümün yerine verilirse `ERK_ERR_INVALID_ARGUMENT`.
+- **Geçerlilik her zaman arenadan gelir:** çözülen indeks var mı, o slotun
+  nesli eşleşiyor mu. Karıştırma bir güvenlik sınırı ya da kimlik doğrulama
+  değildir; başka bir uygulamanın ya da yok edilmiş bir uygulamanın id'sini
+  anlamsızlaştıran bir ad alanı ayrımıdır. Böyle bir id çözülünce neredeyse
+  her zaman var olmayan ya da nesli tutmayan bir slota düşer ve
+  `ERK_ERR_STALE_NODE` döner. Yakalama **olasılıksaldır**: yanlış bir id'nin
+  geçerli bir çifte denk gelme olasılığı canlı düğüm sayısına ve nesillerin
+  dağılımına bağlıdır, sabit bir oran olarak verilmez.
+- Host bu sayıyı yorumlamaz, yalnızca saklar ve geri verir. DevTools id'yi
+  anahtarla çözüp indeks ve nesil olarak gösterebilir; bu bir hata ayıklama
+  kolaylığıdır, ABI'nin parçası değil.
+
+  **Reddedilen düzen:** `uygulama 8 bit | nesil 24 bit | indeks 32 bit`.
+  Nesil 24 bite inince, saniyede 60 kez yeniden çizilen bir listenin
+  slotları yaklaşık 78 saatte tükenir ve arena emekliye ayrılan slotlarla
+  büyür; uzun süre açık kalan bir masaüstü uygulamasında bu bir sızıntıdır.
+  8 bit yalnızca 256 etiket verir; bir pencere gün içinde yüzlerce kez
+  açılıp kapanınca etiket yeniden kullanılır ve yok edilmiş bir uygulamanın
+  id'leri geri döner (yeni arenada nesiller yine 1'den başlar). Yayımlanmış
+  bir bit düzeni de host'u bitleri okumaya davet eder ve opaklığı bozar.
 - **Eski id:** silinmiş bir düğümün id'si hiçbir zaman başka bir düğümü
   göstermez; her çağrı `ERK_ERR_STALE_NODE` döner, çökmez. `erk_load_html`
   yeni bir arena kurmaz: eski düğümleri siler (nesilleri artar), böylece
@@ -256,12 +286,11 @@ typedef int32_t ErkStatus;
 #define ERK_ERR_REENTRANT         6        /* not allowed inside a callback */
 #define ERK_ERR_PANIC             7        /* the call panicked; the app is now poisoned */
 #define ERK_ERR_POISONED          8        /* an earlier call panicked; only destroy works */
-#define ERK_ERR_WRONG_APP         9        /* the node id belongs to another ErkApp */
 
 /* ---- Basic types ------------------------------------------------------- */
 
 typedef struct ErkApp ErkApp;              /* opaque */
-typedef uint64_t ErkNodeId;                /* opaque; 0 is no node */
+typedef uint64_t ErkNodeId;                /* opaque, scrambled per app; 0 is no node */
 #define ERK_NODE_NONE ((ErkNodeId)0)
 
 typedef struct ErkStr {                    /* UTF-8 in; Erk copies before returning */
@@ -414,7 +443,7 @@ Bu tablo hangi kuralın ne zaman ve nasıl zorlanacağını söyler.
 | Yanlış iş parçacığı (§4) | Başka iş parçacığından çağıran test; `erk_app_post` testi | M3 |
 | Dizeler kopyalanır, tampon yarım yazılmaz (§3) | Girdiyi çağrıdan hemen sonra ezen test; `BUFFER_TOO_SMALL` testi; C örneği Linux'ta AddressSanitizer ile | M3 |
 | `destroy` tam bir kez (§5) | Sayaçlı test: `erk_off`, düğüm silme ve `erk_app_destroy` yollarının üçü | M3, M4 |
-| Başka uygulamanın id'si reddedilir (§2) | İki `ErkApp`, birinin id'si ötekine verilince `ERK_ERR_WRONG_APP` | M3 |
+| Başka ya da yok edilmiş bir uygulamanın id'si hiçbir düğümü göstermez (§2) | İki `ErkApp`'te aynı sırayla oluşturulan düğümler: birinin id'leri ötekinde `ERK_ERR_STALE_NODE`; yok edilip yeniden oluşturulan bir uygulamada eski id'ler de; dış id hiçbir zaman 0 değil (özellik testi) | M3 |
 | Eski id hiçbir düğümü göstermez (§2) | Birim testi; `Mutation` fuzz'ı; `erk_load_html` sonrası eski id testi | M3, M4 |
 | Yanlış türde kaynak reddedilir (§6) | Görüntü isteğine stil sayfası verisiyle yanıt veren test | M1 (görüntüler gelince) |
 | Kaynak yalnızca callback'ten (§6) | `url("file:///...")` içeren sayfada hiçbir dosyanın okunmadığını ve sağlayıcının çağrıldığını doğrulayan test | M1 (görüntüler gelince) |
