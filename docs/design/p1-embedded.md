@@ -5,7 +5,7 @@
   DOM bellek modeli ve test stratejisi geçerli kalır. Tarayıcıya özgü
   bölümleri (§2.1 süreç izolasyonu, §5.3 JS sahipliği, §7 ağ, §8 JS) bu
   belge geçersiz kılar.
-- **Sözleşme:** [p1-contract.md](p1-contract.md) (M0.5'te yazılır)
+- **Sözleşme:** [p1-contract.md](p1-contract.md)
 - **Yol haritası:** [roadmap.md](../plans/roadmap.md)
 
 ---
@@ -75,7 +75,7 @@ eleştiriyle şekillendi. Alınanlar ve düzeltilenler:
 | Tıklamanın `data-erk-action` özniteliğiyle bildirilmesi | Reddedildi: host belirli düğümlere abone olur, olaylar DOM'un capture/bubble alt kümesiyle dağılır. Öznitelik, içeriği bağlama mantığıyla karıştırır |
 | Hit-test için QuadTree | Ertelendi: layout kutuları boyama sırasının tersinden gezilir; ölçüm yapıyı gerektirirse eklenir |
 | M1'de float ve tablolar | Çıkarıldı: masaüstü UI'ı flex ile kurulur; float CSS'in en çok köşe durumu barındıran yeri. M1 düzeni: block, inline metin, flex, absolute |
-| "CSS destekliyoruz" | Düzeltildi: [css-support.md](../css-support.md) (M0.5'te yazılır) neyin desteklendiğini ve neyin **hiç** planlanmadığını listeler |
+| "CSS destekliyoruz" | Düzeltildi: [css-support.md](../css-support.md) neyin desteklendiğini ve neyin **hiç** planlanmadığını listeler |
 | Dosya erişimi motorda | Düzeltildi: G/Ç yalnızca host'ta (§2.4) |
 | Fuzzing ve metrikler | Alındı: M1 kabulünde. "< 5 MB ikili, < 15 ms ilk kare" hedefleri doğrulanmadı; bütçe M1'in başında M0'ın ölçülen taban çizgisinden konur |
 | DevTools sunucusu (TCP/WebSocket) | Düzeltildi: varsayılan olarak ağ dinlenmez; önce süreç içi, Erk ile çizilen bir inspector |
@@ -139,6 +139,6 @@ bunu kendisi yapar ve DOM'a değişiklik olarak verir.
 | JavaScript ve her türlü betik | Motorun ilkesi (§2.1) |
 | Ağ, HTTP, Fetch, çerezler | Host'un işi |
 | Kum havuzu, çoklu süreç | İçerik host'un kendisi; ihtiyaç olursa mesaj disiplini sayesinde sonradan eklenir |
-| Float, tablo düzeni, multi-column, print/paged media | [css-support.md](../css-support.md) "Not planned" (M0.5) |
+| Float, tablo düzeni, multi-column, print/paged media | [css-support.md](../css-support.md) "Not planned" |
 | WebExtensions, medya ve DRM, WebRTC | Tarayıcı işleri |
 | Mobil | Hedef masaüstü |

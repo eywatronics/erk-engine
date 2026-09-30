@@ -42,6 +42,7 @@ yazıldığında doldurulur.
 | Kutusuz kök/body tuvale renk yaymaz | `tests/paint.rs` | Kutu kontrolünü kaldırmak | M0 T6 | 2026-09-25, yakaladı |
 | Sunumsal öznitelikler stile girer | `erk-style/tests/computed.rs`: `bgcolor` → `background-color`, `align` → `text-align` (hizalama M1'de çizilir) | İki eşlemeyi ayrı ayrı kapatmak | M0 T8 | 2026-09-28, yakaladı |
 | Çekirdekte dosya, ağ, süreç, ortam ve saat yok | CI `guards` (`check-core-io.sh`): `erk-dom`, `erk-style`, `erk-renderer` `src`'sinde `std::fs`, `std::net`, `std::process`, `std::env`, `File::`, `TcpStream`, `Command::new`, `Instant::now`, `SystemTime` ve benzerleri yok; kaynak, ortam ve zaman host'tan gelir (p1-embedded §2.4) | `std::fs::read_to_string`; `use std::{fs}` + `fs::read`; `Instant::now()` | M0.5 öncesi | 2026-09-30, yakaladı |
+| `erk-renderer` pencere katmanını bilmez | CI: `cargo tree -p erk-renderer` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1 | — |
 | Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
 | WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
 | `render_html` hiçbir girdide paniklemez | `cargo test` içinde tohumlu girdi testi ve çökme korpusu; `fuzz/` altında cargo-fuzz, ayrı ve zaman sınırlı CI job'ı | Bozuk girdide `unwrap` eden bir yol | M1 | — |
