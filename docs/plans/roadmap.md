@@ -171,6 +171,9 @@ layout'u kararı gerekçesiyle belgelenmiş.
 - Hit-test: layout kutuları boyama sırasının tersinden gezilir
 - Kaydırma kapları (`overflow: auto | scroll`), imleç biçimleri
 - `:hover`, `:active`, `:focus` (Stylo'nun eleman durumu)
+- Geliştirici araçlarının ilk parçası: `inspect_at(x, y)` (hit-test'in
+  döndürdüğü `NodeId`) ve seçili düğümün kutusunu gösteren bir vurgu
+  kaplaması (display list'e eklenen, belgeye ait olmayan bir öğe)
 - macOS CI
 
 **Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
@@ -190,6 +193,10 @@ yeniden hesaplamanın kare süresi kaydedilmiş.
   listelenmiş `unsafe` istisnası (`#[unsafe(no_mangle)]`)
 - İş parçacığı modeli, callback ömrü ve hata kodları sözleşmedeki gibi
 - Kaynak sağlayıcı callback'i; demo kabuk `erk`'in ilk kullanıcısı olur
+- Denetim sorguları (salt okunur, p1-contract §10.1): düğüm ağacı, etiket ve
+  öznitelikler, hesaplanmış stil, kutu modeli (margin, border, padding,
+  içerik). Kare başına aşama süreleri (stil, layout, display list, raster),
+  çekirdeğin değil aşamaları çağıran `erk` crate'inin ölçümüyle
 - Muhafızlar: üretilen `erk.h` depodakiyle aynı; bir C örneği CI'da derlenip
   çalışıyor; `unsafe` yalnızca `erk-style` ve `erk-ffi`'de
 
@@ -227,6 +234,8 @@ döngüsünde bellek büyümüyor. Mutation fuzz'ı yeşil.
 - Odak ve Tab gezinmesi
 - Erişilebilirlik: AccessKit ile DOM'un işletim sistemi erişilebilirlik ağacına
   çevrilmesi
+- Canlı CSS düzenleme için temel: bir düğümün satır içi stilini ya da bir
+  kuralı değiştirip artımlı yeniden stille görmek
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
 hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. Türkçe ve CJK IME
@@ -247,12 +256,29 @@ girişi çalışıyor. Bir ekran okuyucu form etiketlerini okuyor.
 
 ## M7 — Geliştirici araçları
 
-- Erk ile çizilen, süreç içi bir inspector: DOM ağacı, hesaplanmış stil, kutu
-  kaplaması
-- HTML ve CSS için hot reload
-- Varsayılan olarak ağ dinlenmez; uzak inspector ancak açıkça istenirse
+M2, M3 ve M5'te gelen parçaların (vurgu ve `inspect_at`, denetim
+sorguları, aşama süreleri, canlı stil) üzerine kurulan, **Erk ile yazılmış**
+bir DevTools uygulaması. Motoru kendi geliştirici aracıyla sınar.
 
-**Kabul:** Inspector kendi uygulamasını inceleyebiliyor.
+- Paneller: Elements (ağaç, öznitelikler), Styles (kurallar, `:hover` dahil,
+  düzenlenebilir), Computed, Layout (kutu modeli), Events (host'a giden
+  olaylar), Performance (kare başına aşama süreleri, zaman çizelgesi),
+  Console, Resources, Accessibility
+- **Console** JavaScript konsolu değildir: host'un `ErkLogFn` ile gönderdiği
+  loglar ve Erk'in kendi uyarıları (engellenen kaynak, yüklenemeyen görüntü)
+- **Resources** ağ paneli değildir: Erk'in host'tan istediği kaynaklar
+  (`memory://`, dosyalar), türleri ve durumları. Host'un kendi ağ trafiği
+  ancak host bunu olay olarak beslerse görünür
+- F12 ile açılır; tuşu ve açılıp açılmayacağını host belirler, yayın
+  derlemelerinde varsayılan kapalı
+- Önce süreç içi, ikinci pencere olarak. Uzak DevTools (ayrı süreç, yerel
+  bir kanal) ancak açıkça istenirse: motor varsayılan olarak hiçbir portu
+  dinlemez
+- HTML ve CSS için hot reload
+
+**Kabul:** F12 ile açılan DevTools, kendi uygulamasında sayfadan bir öğe
+seçiyor, stilini değiştiriyor, kutu modelini ve karenin aşama sürelerini
+gösteriyor. DevTools'un kendisi de Erk ile çiziliyor.
 
 ---
 

@@ -180,6 +180,32 @@ kurulur.
 - Rust API'sinde host'un kendi closure'undan çıkan panik, temizlikten sonra
   `run`'ı çağırana taşınır (`resume_unwind`).
 
+## 8.1 Denetim (geliştirici araçları)
+
+Geliştirici araçları (M7) motora ayrı bir kapıdan değil, bu sözleşmenin salt
+okunur sorgularıyla bakar; aynı API'yi host da kullanabilir.
+
+- **Sorgular** (M3): düğüm ağacı (`erk_node_parent`, çocuklar), etiket ve
+  öznitelikler, hesaplanmış stil (özellik adı ve değeri, metin olarak),
+  kutu modeli (konum, boyut, margin, border, padding; CSS pikseli). Hepsi
+  UI iş parçacığından, eski id'de `ERK_ERR_STALE_NODE`.
+- **Seçme ve vurgu** (M2): `erk_inspect_at(app, x, y, &node)` hit-test'in
+  sonucunu döndürür; `erk_highlight(app, node)` seçili düğümün kutularını bir
+  kaplamayla çizer. Kaplama display list'e eklenir, belgeye değil: DOM'da ve
+  hesaplanmış stillerde iz bırakmaz.
+- **Aşama süreleri** (M3): kare başına stil, layout, display list ve raster
+  süreleri. Çekirdek saat okumadığı için (§1.3) süreleri aşamaları sırayla
+  çağıran `erk` crate'i ölçer; çekirdeğe saat girmez.
+- **Log** (M3): `ErkLogFn` Erk'in kendi uyarılarını da taşır (engellenen ya
+  da yüklenemeyen kaynak); DevTools'un Console paneli bunları ve host'un
+  loglarını gösterir.
+- **Canlı düzenleme** (M5): stil değişikliği sıradan bir değişikliktir
+  (`erk_node_set_attr(node, "style", ...)` ya da stil sayfası güncellemesi),
+  artımlı yeniden stille görünür. DevTools'a özel bir yazma yolu yoktur.
+- **Taşıma:** DevTools önce aynı süreçte ikinci bir pencere olarak çalışır.
+  Ayrı süreçte bir DevTools ancak host açıkça etkinleştirirse ve yerel bir
+  kanal üzerinden bağlanır; motor varsayılan olarak hiçbir portu dinlemez.
+
 ## 9. Sürümleme
 
 - `erk_abi_version()` → `(major << 16) | minor`. Bir ana sürüm içinde
@@ -326,6 +352,29 @@ ErkStatus erk_on(ErkApp *app, ErkNodeId node, uint32_t kind,
                  ErkSubscription *out);
 ErkStatus erk_off(ErkApp *app, ErkSubscription subscription);
 ErkStatus erk_event_stop_propagation(ErkApp *app);            /* inside an event callback */
+
+/* ---- Inspection (read-only; used by the developer tools) --------------- */
+
+typedef struct ErkBox {                    /* CSS pixels, relative to the viewport */
+  uint32_t struct_size;
+  float x, y, width, height;               /* border box */
+  float margin[4], border[4], padding[4];  /* top, right, bottom, left */
+} ErkBox;
+
+ErkStatus erk_node_parent(ErkApp *app, ErkNodeId node, ErkNodeId *out);
+ErkStatus erk_node_child_at(ErkApp *app, ErkNodeId node, size_t index, ErkNodeId *out);
+ErkStatus erk_node_box(ErkApp *app, ErkNodeId node, ErkBox *out);  /* ERK_ERR_NOT_FOUND: no box */
+ErkStatus erk_node_computed_style(ErkApp *app, ErkNodeId node,
+                                  ErkString *out);                 /* "name: value;" lines */
+ErkStatus erk_inspect_at(ErkApp *app, float x, float y, ErkNodeId *out);
+ErkStatus erk_highlight(ErkApp *app, ErkNodeId node);              /* ERK_NODE_NONE clears */
+
+typedef struct ErkFrameTimings {           /* measured by the embedding layer, not the core */
+  uint32_t struct_size;
+  uint64_t frame;
+  uint64_t style_ns, layout_ns, display_list_ns, raster_ns;
+} ErkFrameTimings;
+ErkStatus erk_last_frame_timings(ErkApp *app, ErkFrameTimings *out);
 ```
 
 ---
@@ -349,4 +398,6 @@ Bu tablo hangi kuralın ne zaman ve nasıl zorlanacağını söyler.
 | Eski id hiçbir düğümü göstermez (§2) | Birim testi; `Mutation` fuzz'ı; `erk_load_html` sonrası eski id testi | M3, M4 |
 | Yanlış türde kaynak reddedilir (§6) | Görüntü isteğine stil sayfası verisiyle yanıt veren test | M1 (görüntüler gelince) |
 | Kaynak yalnızca callback'ten (§6) | `url("file:///...")` içeren sayfada hiçbir dosyanın okunmadığını ve sağlayıcının çağrıldığını doğrulayan test | M1 (görüntüler gelince) |
+| Vurgu kaplaması belgeye girmez (§8.1) | Vurgu açıkken ve kapalıyken DOM dökümü ve hesaplanmış stiller aynı; display list'te yalnızca kaplama öğesi farklı | M2 |
+| Aşama süreleri çekirdeğe saat sokmadan ölçülür (§8.1) | `check-core-io.sh` zaten `Instant::now`'ı çekirdekte yasaklıyor; `erk_last_frame_timings` testi | M3 |
 | Yapılar genişletilebilir, sürüm (§2, §9) | `struct_size`'ı kısa bir yapıyla çağıran test; `erk_abi_version` testi | M3 |
