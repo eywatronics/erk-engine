@@ -1,6 +1,6 @@
 [package]
 name = "erk-shell"
-description = "Erk Engine shell: the window, and the broker that owns disk access."
+description = "Erk Engine shell: the window and the demo host."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

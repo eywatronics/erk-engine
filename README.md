@@ -1,22 +1,32 @@
 # Erk Engine
 
-**Erk** is a desktop browser engine written in Rust.
+**Erk** is an embeddable HTML/CSS UI engine for desktop applications, written
+in Rust. There is no JavaScript: your application (in Rust, and later C or
+Python) owns the logic and drives the document, Erk lays it out, paints it and
+reports what the user did.
 
 - Built on mature Rust components: html5ever, Stylo, Taffy, Parley, Vello
-- Original work where none of them reach: inline layout, the process model and
-  sandbox, networking and security policy, and the browser shell
-- Progress measured with the [Web Platform Tests](https://web-platform-tests.org/),
-  not calendar dates
+- Original work where none of them reach: inline layout, the embedding API
+  and its C ABI, incremental rendering and form controls
+- The engine core does no file, network or process I/O and reads no clock or
+  environment: resources and time come from the host
+- Progress measured by tests, not calendar dates: a pixel comparison with
+  Chrome today, the CSS [Web Platform Tests](https://web-platform-tests.org/)
+  from M1
 
-> Erk is at the very beginning. It cannot browse the web yet.
+> Erk is at the very beginning: it renders a static page, and cannot yet be
+> embedded or interacted with.
 
 ## Status
 
-The current milestone is **M0 — first pixel**: open a local HTML file in a
-single process and paint it in a window or to a PNG. Multi-process isolation
-and sandboxing come in M3, JavaScript in M4. See the
-[roadmap](docs/plans/roadmap.md) (Turkish) for every milestone and its
-acceptance criterion.
+**M0 — first pixel** is done: Erk paints a local HTML file in a window or to a
+PNG. Next is **M0.5**, the embedding contract (C ABI, threading, memory and
+callback rules) written before more code depends on it, then **M1 — static
+UI**: inline layout, flexbox, borders and images. The Rust API and C ABI come
+in M3, a mutable DOM with events in M4, form controls in M5 and Python in M6.
+See the [roadmap](docs/plans/roadmap.md) (Turkish) for every milestone and its
+acceptance criterion, and [the design](docs/design/p1-embedded.md) (Turkish)
+for why Erk is no longer a browser.
 
 ## Building
 
@@ -43,10 +53,9 @@ cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html
 
 ```
 crates/
-  erk-shell/     window, event loop, messaging with the renderer
-  erk-renderer/  layout, display list, paint
+  erk-shell/     window, event loop, the demo host
+  erk-renderer/  layout, display list, paint; the renderer thread
   erk-style/     CSS styling with Stylo
-  erk-network/   network interface (from M2)
   erk-dom/       arena DOM and HTML parsing
 docs/
   design/        architecture decisions (Turkish)

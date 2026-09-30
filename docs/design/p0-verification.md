@@ -18,31 +18,46 @@ yazıldığında doldurulur.
 |---|---|---|---|---|
 | `unsafe` yasak | `[workspace.lints.rust] unsafe_code = "forbid"`; her crate `[lints] workspace = true` | `erk-dom` içinde bir `unsafe {}` bloğu → derleme hatası | M0 T1 | 2026-09-25, yakaladı |
 | Her crate workspace lint'ini devralır | CI `guards` job'ı: `lints.workspace = true` içermeyen `Cargo.toml` (istisna listesi dışında) → hata | Bir crate'ten `[lints]` bloğunu silmek | M0 T1 | 2026-09-25, yakaladı |
-| `erk-dom`'da `Rc` yok | `crates/erk-dom/clippy.toml` → `disallowed-types`; clippy `-D warnings` | `use std::rc::Rc;` ve bir alan → clippy hatası | M0 T2 | 2026-09-25, yakaladı |
-| `Rc` yasağı susturulamaz | CI `guards`: `erk-dom` içinde `disallowed_types` geçmez (bir `allow` özniteliği lint'i kapatırdı) | `#[allow(clippy::disallowed_types)]` eklemek | M0 T2 | 2026-09-25, yakaladı |
-| `erk-dom` yapraktır | CI `guards`: `cargo tree -p erk-dom --prefix none -e normal` çıktısında başka `erk-*` yok | `erk-dom`'a `erk-network` bağımlılığı eklemek | M0 T2 | 2026-09-25, yakaladı |
-| html5ever + Stylo tek atom sürümü | CI `guards`: `cargo tree -d` çıktısında `web_atoms` veya `string_cache` iki sürümle görünürse hata | `html5ever`'ı 0.40.1'e çekmek (derleme de E0053 ile kırılıyor) | M0 T3 | 2026-09-25, yakaladı |
-| Lint istisnası `unsafe`'i yine reddeder | CI `guards`: istisna listesindeki crate'ler (`erk-style`) `[lints.rust] unsafe_code = "deny"` yazmak zorunda | `erk-style`'da `deny` → `allow` | M0 T3 | 2026-09-25, yakaladı |
-| `erk-style`'ın `unsafe` yüzeyi tam beş imza | CI `guards`: `allow(unsafe_code)` sayısı 5, `unsafe {` sayısı 0 | Altıncı bir `#[allow(unsafe_code)]` | M0 T3 | 2026-09-25, yakaladı |
-| Stylo tutamağı tek işaretçi genişliğinde | `const _: () = assert!(size_of::<ErkNode>() == size_of::<usize>())` (derleme zamanı) | — (16 baytlık ilk tutamak Stylo'nun çalışma zamanı `assert`'ünde düştü; bu kontrol onu derlemeye taşıdı) | M0 T3 | — |
-| Kabuk DOM'a dokunamaz | CI `guards`: `cargo tree -p erk-shell -e normal --depth 1` çıktısında `erk-dom` ve `erk-style` yok. `--depth 1` bilerek: `erk-shell → erk-renderer → erk-dom` zinciri dolaylı olarak her zaman görünür | `erk-shell`'e `erk-dom` bağımlılığı eklemek | M0 T7 | 2026-09-28, yakaladı |
-| Kabuğun ekran görüntüsü renderer'ınkiyle aynı | `erk-shell/tests/screenshot.rs`: gerçek `erk --screenshot` çıktısı altın görüntüyle piksel piksel aynı | — | M0 T7 | — |
+| `erk-dom`'da referans sayımı yok | `crates/erk-dom/clippy.toml` → `disallowed-types` (`Rc`, `rc::Weak`, `Arc`, `sync::Weak`); clippy `-D warnings` | `use std::rc::Rc;` ve bir alan → clippy hatası; aynısı `Arc` ile (kanarya) | M0 T2, T8 | 2026-09-25 (`Rc`), 2026-09-28 (`Arc`), yakaladı |
+| Referans sayımı yasağı susturulamaz | CI `guards` (`check-dom-rc-ban.sh`): `erk-dom`'da lint'i adıyla ya da onu içeren bir grupla (`clippy::style`, `clippy::all`, `warnings`) susturan öznitelik yok; ayrıca crate'e eklenen kanarya `Rc` ve `Arc` alanlarını clippy gerçekten reddetmeli | `#[allow(clippy::disallowed_types)]`; crate düzeyinde `#![allow(clippy::all)]`; `node.rs`'te `#![allow(clippy::style)]`; workspace tablosunda `disallowed_types = "allow"`; `clippy.toml`'u silmek | M0 T2, T8 | 2026-09-25 (ilki); 2026-09-28 (diğer dördü, eski muhafız hepsini geçiriyordu), yakaladı |
+| `erk-dom` yapraktır | CI `guards`: `cargo tree -p erk-dom -e normal --target all --all-features --locked --prefix none` çıktısında başka `erk-*` yok | `erk-dom`'a `erk-network` bağımlılığı; yalnızca Linux için tanımlı bir `erk-network` bağımlılığı (eski komut Windows'ta görmüyordu) | M0 T2, T8 | 2026-09-25, 2026-09-28, yakaladı |
+| html5ever + Stylo tek atom sürümü | CI `guards`: `cargo tree -d --target all --all-features` çıktısında `web_atoms` veya `string_cache` iki sürümle görünürse hata | `html5ever`'ı 0.40.1'e çekmek (derleme de E0053 ile kırılıyor) | M0 T3 | 2026-09-25, yakaladı |
+| Lint istisnası `unsafe`'i yine reddeder | CI `guards`: istisna listesindeki crate'ler (`erk-style`) `[lints.rust] unsafe_code = "deny"` ve `unsafe_op_in_unsafe_fn = "forbid"` yazmak zorunda | `erk-style`'da `deny` → `allow`; `forbid` satırını silmek | M0 T3, T8 | 2026-09-25, 2026-09-28, yakaladı |
+| `erk-style`'ın `unsafe` yüzeyi tam beş imza | CI `guards` (`check-style-unsafe-surface.sh`): crate'in tamamında (`src`, `tests`) `allow`/`expect(unsafe_code)` tam 5; yorum dışı `unsafe` belirteci tam 5, beşi de `unsafe fn`. Gövdelerde güvensiz işlem `forbid` ile derleme hatası | Altıncı `#[allow(unsafe_code)]`; `#[expect(unsafe_code)] unsafe impl Sync`; `#[allow(unsafe_code, reason = ..)]` ile bir blok; `tests/`'te izinli bir blok (eski sayım bu üçünü görmüyordu); bir `unsafe fn`'e `#[allow(unsafe_op_in_unsafe_fn)]` → E0453 | M0 T3, T8 | 2026-09-25 (ilki), 2026-09-28 (diğerleri), yakaladı |
+| Stylo tutamağı tek işaretçi genişliğinde | `const _: () = assert!(size_of::<ErkNode>() == size_of::<usize>())` (derleme zamanı) | Tutamağa ikinci bir alan (`u32`) eklemek → E0080 (16 baytlık ilk tutamak Stylo'nun çalışma zamanı `assert`'ünde düşmüştü; bu kontrol onu derlemeye taşıdı) | M0 T3 | 2026-09-28, yakaladı |
+| Kabuk DOM'a dokunamaz | CI `guards`: `cargo tree -p erk-shell -e normal --target all --all-features --locked --depth 1` çıktısında `erk-dom` ve `erk-style` yok. `--depth 1` bilerek: `erk-shell → erk-renderer → erk-dom` zinciri dolaylı olarak her zaman görünür | `erk-shell`'e `erk-dom` bağımlılığı; yalnızca Linux için tanımlı ya da isteğe bağlı bir özelliğin arkasındaki `erk-dom` (eski komut ikisini de görmüyordu) | M0 T7, T8 | 2026-09-28, yakaladı |
+| Renderer'ın yüzeyi iş parçacığı ve düz veri mesajlar | CI `guards` (`check-renderer-surface.sh`): `lib.rs`'teki `pub` satırları gözden geçirilmiş listeye eşit; mesaj tiplerine `impl` yalnızca `messages.rs`'te (ve `lib.rs`'te `to_png`); `messages.rs` yol (`::`), `Arc`, `Mutex`, `Cell`, `Box`, `dyn`, ödünç referans içermez; `erk-shell`'de `render_html` yok | `pub use erk_dom;`; `Shared(Arc<Mutex<String>>)` mesajı; kabukta `render_html`; `paint.rs`'te `impl Deref for Frame` | M0 T8 | 2026-09-28, yakaladı |
+| `cargo tree` hatası adımı düşürür | CI adımları ağacı önce bir değişkene okur; `if cargo tree … grep` biçiminde bir hata "eşleşme yok" sayılırdı | Kilitle uyuşmayan manifest → adım 101 ile düşer | M0 T8 | 2026-09-28, yakaladı |
+| CI kilit dosyasıyla derler | clippy, build, test ve `cargo tree` adımlarında `--locked` | Kilitte olmayan bir bağımlılık eklemek → "cannot update the lock file" | M0 T8 | 2026-09-28, yakaladı |
+| Commit mesajları ve PR yapay zekâ aracı adı taşımaz | CI `guards` (`check-commit-messages.sh`): PR'daki commit mesajları, PR başlığı ve açıklaması; tek izinli co-author satırı projeninki | Yabancı bir `Co-authored-by`; gövdede araç adı; PR açıklamasında "Generated with" | M0 T8 | 2026-09-28, yakaladı |
+| Kabuğun ekran görüntüsü renderer'ınkiyle aynı | `erk-shell/tests/screenshot.rs`: gerçek `erk --screenshot` çıktısı altın görüntüyle piksel piksel aynı | Kabuğun ekran görüntüsü yüksekliği 600 → 601 | M0 T7 | 2026-09-28, yakaladı |
+| Pencere modunda renderer çökmesi bildirilir | `window.rs`: `finish` birim testi; kanal kapanınca pencere kapanır, çıkış kodu 1 | `finish`'in renderer sonucunu yok sayması; renderer'a enjekte edilen panik → `erk: the renderer thread panicked`, çıkış 1 | M0 T8 | 2026-09-28, yakaladı |
+| Renderer boyut bilinmeden çizmez, son boyut kazanır | `tests/thread.rs`, zaman aşımlı beklemeyle | Varsayılan bir boyut (eski test `Shutdown` kuyrukta beklediği için geçiyordu); yalnızca ilk boyutu tutmak (eski test askıda kalırdı) | M0 T7, T8 | 2026-09-28, yakaladı |
 | Render çıktısı değişmez | Altın PNG testi (`cargo test`), çözülmüş piksellerle | Glif hinting'ini kapatmak | M0 T6 | 2026-09-25, yakaladı |
-| Chrome'a yakınlık gerilemez | `tests/chrome_reference.rs`: sayfa başına içerik skoru `expectations.txt`'teki değere iki ondalıkta eşit olmalı, iki yönde de kırılır | UA'da body margin 8px → 10px; `blocks`'ta bir kutu 1px geniş (%99.97); `merhaba`'da beyaz kutu kaldırılınca (%10.37); sayfa `.htm` uzantısıyla | M0 T6b | 2026-09-25, yakaladı |
-| Beklenti gerekçesiz düşmez | CI `guards`: `.github/scripts/check-reference-expectations.sh`, PR tabanıyla karşılaştırır; düşen satırda `# lowered:` yoksa ya da Chrome görüntüsü dururken beklenti silinmişse hata | Yorumsuz düşürme; beklenti satırını silme | M0 T6b | 2026-09-25, yakaladı |
-| Boyama sırası: tüm arka planlar, sonra metin | `tests/paint.rs` + `paint-order` referans sayfası | Metni arka planlardan önce koymak | M0 T6 | 2026-09-25, yakaladı |
+| Chrome'a yakınlık gerilemez | `tests/chrome_reference.rs`: sayfa başına içerik skoru `expectations.txt`'teki değere iki ondalıkta eşit olmalı, iki yönde de kırılır; aynı sayfa için ikinci satır ve yakalamadan sonra değişen sayfa (`chrome/pages.txt`) testi kırar | UA'da body margin 8px → 10px; `blocks`'ta bir kutu 1px geniş (%99.97); `merhaba`'da beyaz kutu kaldırılınca (%10.37); sayfa `.htm` uzantısıyla; `blocks 99.00` ikinci satırı; `blocks.html`'e bir yorum eklemek | M0 T6b, T8 | 2026-09-25, 2026-09-28, yakaladı |
+| Tolerans düz renkleri birbirinden ayırır | `the_tolerance_cannot_hide_a_missing_background`: her Chrome görüntüsünde 1000 pikselden fazlasını kaplayan renk çiftleri toleranstan fazla farklı olmalı | `TOLERANCE` 12 → 24 (`blocks`: 17) | M0 T8 | 2026-09-28, yakaladı |
+| Beklenti gerekçesiz düşmez | CI `guards`: `.github/scripts/check-reference-expectations.sh`, PR tabanıyla karşılaştırır. Düşen satırda boş olmayan ve tabandaki satırda durmayan bir `# lowered:` gerekçesi olmalı; Chrome görüntüsü dururken beklenti silinemez; aynı sayfa için ikinci satır olamaz; yeniden adlandırılan görüntü eski adının skorunu taşır | Yorumsuz düşürme; beklenti satırını silme; `paragraphs`'ı eski gerekçeyle yeniden düşürmek; boş `# lowered:`; ikinci satır; `blocks`'u `blocks2` olarak düşük skorla yeniden adlandırmak (son dördünü eski betik geçiriyordu) | M0 T6b, T8 | 2026-09-25, 2026-09-28, yakaladı |
+| Boyama sırası: tüm arka planlar, sonra metin | `tests/paint.rs` (display list sırası ve sarı zemindeki metin pikselleri, kırmızı kanalla) + `paint-order` referans sayfası | Metni arka planlardan önce koymak; glifleri ayrı bir geçişte önce boyamak (eski mavi kanal ölçütü geçiriyordu) | M0 T6, T8 | 2026-09-25, 2026-09-28, yakaladı |
 | Tuval beyaz üstüne harmanlanır, kare opak | `tests/paint.rs` + `canvas-alpha` referans sayfası | Beyaz tabanı kaldırmak | M0 T6 | 2026-09-25, yakaladı |
 | Kutusuz kök/body tuvale renk yaymaz | `tests/paint.rs` | Kutu kontrolünü kaldırmak | M0 T6 | 2026-09-25, yakaladı |
-| Lisans izin listesi | `cargo deny check licenses` | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
-| WPT gerilemesi yok | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
-| Renderer ağa bağımlı değil | CI: `cargo tree -p erk-renderer` çıktısında `erk-network`, `reqwest`, `hyper`, `tokio` yok | `erk-renderer`'a `reqwest` eklemek | M2 | — |
-| OpenSSL/native-tls yok | `cargo deny check bans` → `openssl-sys`, `native-tls` | `native-tls` özelliği açık bir reqwest | M2 | — |
-| Dış crate sınırları | `cargo deny` `[bans] deny = [{ crate = "...", wrappers = [...] }]` (ör. `ipc-channel` yalnızca `erk-ipc`) | `erk-renderer`'dan doğrudan `ipc-channel` | M3 | — |
-| Workspace içi yön | `cargo xtask arch-check` (`cargo metadata` grafiği) — cargo-deny'nin workspace üyelerine uygulanması belgelenmemiş olduğu için | Yasak bir iç bağımlılık | M3 | — |
-| Renderer dosya ve soket açamaz | Kum havuzu içinde renderer'ın dosya açma ve soket bağlama denemesi başarısız olmalı; zorunlu check | Sandbox'ı devre dışı bırakan bir bayrak | M3 | — |
+| Sunumsal öznitelikler stile girer | `erk-style/tests/computed.rs`: `bgcolor` → `background-color`, `align` → `text-align` (hizalama M1'de çizilir) | İki eşlemeyi ayrı ayrı kapatmak | M0 T8 | 2026-09-28, yakaladı |
+| Çekirdekte dosya, ağ, süreç, ortam ve saat yok | CI `guards` (`check-core-io.sh`): `erk-dom`, `erk-style`, `erk-renderer` `src`'sinde `std::fs`, `std::net`, `std::process`, `std::env`, `File::`, `TcpStream`, `Command::new`, `Instant::now`, `SystemTime` ve benzerleri yok; kaynak, ortam ve zaman host'tan gelir (p1-embedded §2.4) | `std::fs::read_to_string`; `use std::{fs}` + `fs::read`; `Instant::now()` | M0.5 öncesi | 2026-09-30, yakaladı |
+| `erk-renderer` pencere katmanını bilmez | CI: `cargo tree -p erk-renderer` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1 | — |
+| Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
+| WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
+| `render_html` hiçbir girdide paniklemez | `cargo test` içinde tohumlu girdi testi ve çökme korpusu; `fuzz/` altında cargo-fuzz, ayrı ve zaman sınırlı CI job'ı | Bozuk girdide `unwrap` eden bir yol | M1 | — |
+| İkili boyutu bütçede | CI: yayın ikilisinin boyutu, M1'in başında ölçülen tabandan konan tavanın altında | Bütçeyi aşan bir bağımlılık | M1 | — |
+| CSS matrisindeki her "Supported" satırın testi var | CI: `docs/css-support.md`'deki her Supported satırın adlandırdığı test var | Test adı olmayan ya da var olmayan teste işaret eden satır | M1 | — |
+| `unsafe` yalnızca `erk-style` ve `erk-ffi`'de | Lint devralma istisna listesi; `erk-ffi` de `deny` + öğe başına izin | `erk`'e `unsafe` blok | M3 | — |
+| `erk.h` güncel | CI: cbindgen ile yeniden üretilen başlık depodakiyle aynı | Başlığı güncellemeden C-ABI'yi değiştirmek | M3 | — |
+| C örneği derlenir ve çalışır | CI: C örneği `erk-ffi`'ye bağlanıp bir sayfa açar | C-ABI'de uyumsuz bir imza | M3 | — |
+| FFI'dan panik sızmaz, eski id ve yanlış iş parçacığı hata kodu döner | `erk-ffi` testleri | `catch_unwind`'i kaldırmak; iş parçacığı denetimini kaldırmak | M3 | — |
+| `Mutation` dizileri motoru bozamaz | cargo-fuzz, eski `NodeId`'ler dahil | Nesil denetimini kaldırmak | M4 | — |
 
-`cargo tree` tabanlı kontroller M3'te `xtask arch-check`'e taşınır; o zamana kadar
-tek satırlık CI adımlarıdır.
+İç bağımlılık yönü bugün `cargo tree` adımlarıyla denetleniyor; crate sayısı
+artarsa (M3'te `erk`, `erk-ffi`) bir `xtask arch-check`'e taşınması
+değerlendirilir. Ağ, kum havuzu ve süreç sınırı muhafızları, bu hedefler yol
+haritasından çıktığı için (p1-embedded.md) takvimden çıkarıldı.
 
 ---
 
@@ -65,8 +80,10 @@ tek satırlık CI adımlarıdır.
 
 `crates/erk-renderer/tests/golden.rs`, sayfayı `erk_renderer::render_html`
 ile çizer ve çözülmüş pikselleri `crates/erk-renderer/tests/golden/` altındaki
-referansla karşılaştırır. Kabuğun `--screenshot` yolu (Task 7) aynı işlevi
-çağıracak; o yolun kendi testi Task 7'de gelir. Referans görüntü, onu
+referansla karşılaştırır. Kabuğun `--screenshot` yolu aynı işlevi renderer
+iş parçacığı üzerinden çağırır; `crates/erk-shell/tests/screenshot.rs` gerçek
+`erk` ikilisinin çıktısını aynı altın görüntüyle piksel piksel karşılaştırır.
+Referans görüntü, onu
 değiştiren değişiklikle **aynı commit'te** güncellenir ve gövde neden
 değiştiğini söyler; ayrı commit, değişikliği yapan commit'i kırmızı bırakırdı.
 
@@ -102,8 +119,9 @@ ne kadar uzak olduğumuzu ölçer.
 - Beklenti dosyaları (`.ini`, Servo'nun metadata yaklaşımı) bugünkü sonucu
   kaydeder. Kapı "her test geçmeli" değil, "beklentinin altına düşme"dir.
 - Taban çizgisi JSON'u DioxusLabs `browser-wpt-results` biçiminde yayımlanır.
-- Başlangıç dizinleri: `css/CSS2/normal-flow`, `css/CSS2/floats`,
-  `css/css-display`, `css/css-flexbox`.
+- Başlangıç dizinleri (M1'in kapsamına göre): `css/CSS2/normal-flow`,
+  `css/css-flexbox`, `css/css-position`, `css/css-text`. Float ve tablo
+  dizinleri kapsam dışı (css-support.md "Not planned").
 
 ---
 
@@ -116,14 +134,20 @@ M0 Task 1'den itibaren:
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
   `cargo build --workspace`, `cargo test --workspace`. Toolchain
   `rust-toolchain.toml`'dan `rustup toolchain install` ile kurulur.
-- `guards` job'ı (ubuntu): mimari muhafızlar. İşletim sistemine bağlı olmadıkları
-  için tek platformda koşar.
+- `guards` job'ı (ubuntu): mimari muhafızlar. Tek platformda koşar: statik
+  kontroller işletim sistemine bağlı değil, `cargo tree` kontrolleri de
+  `--target all --all-features` ile her platformun ve her özelliğin
+  bağımlılıklarını çözer. Betikler `.github/scripts/` altında.
+- Derleme, clippy, test ve `cargo tree` `--locked` ile: CI, `Cargo.lock`'taki
+  sürümlerle derler. İki job'ın da zaman aşımı var (45 ve 20 dakika); bir
+  kanalı sonsuza kadar bekleyen test çalıştırmayı altı saat tutmaz.
 - Zorunlu check'ler: `rust-checks (ubuntu-latest)`, `rust-checks
   (windows-latest)`, `guards`.
 - `macos-latest` M0'da yok; pencere katmanı macOS'ta ayrıca doğrulanacağı zaman
   (M2) eklenir.
-- Stylo geldiğinde (M0 Task 3) CI'da Python 3 kurulu olmalı; GitHub'ın hazır
-  imajlarında var, yine de sürüm adımda yazdırılır.
+- Stylo'nun derlemesi Python 3 ister. GitHub'ın hazır imajlarında var; CI
+  sürümü ayrı bir adımda yazdırır (Windows'ta `python`, diğerlerinde
+  `python3`, Stylo'nun arama sırası).
 
 ---
 
