@@ -239,9 +239,21 @@ Okuma:
   Ölçüm, pencere başlığı görünene kadar ve sürecin hâlâ açık olduğu
   denetlenerek tekrarlandı.
 
-**Boyut bütçesi:** Linux ikilisinin boyutu bu makinede ölçülemiyor. CI'daki
-`size` job'ı ilk çalışmada ölçer; bütçe o sayının %10 üstüne aynı PR'da
-indirilir. O zamana kadar dosyada açıkça "geçici" işaretli bir tavan var.
+**Boyut bütçesi:** Linux ikilisinin boyutu bu makinede ölçülemiyordu;
+dosyaya "geçici" işaretli 20 MB'lık bir tavan kondu. PR #7'deki ilk `size`
+çalışması Linux ikilisini **22.023.288 bayt** ölçtü ve tavanı aştı: tahmin
+yanlıştı. Linux ikilisi Windows'takinden (14,9 MB) büyük; ELF'te kalan
+sembol tabloları ve winit'in X11/Wayland kodu olası nedenler, ayrıştırılmadı.
+Bütçe ölçümün %10 üstüne, **24.225.617 bayta** kondu.
+
+Bu yükseltme, muhafızın kendi hatasını da buldu. Betik gerekçeyi dosyadaki
+ilk `# raised:` eşleşmesinden okuyordu; bu, açıklama başlığındaki örnek
+satırdı. Yeni ve taban dosyada aynı örnek okununca her yükseltme "eski
+gerekçe" sayılıp reddediliyordu, yani muhafız hiçbir yükseltmeye izin
+vermiyordu. Gerekçe artık yalnızca bütçe satırından okunuyor. Denenen
+durumlar: gerekçeli yükseltme (0), gerekçesiz (1), boş gerekçe (1), ikilinin
+altına düşürme (1), gerekçesiz düşürme (0), taban gerekçesini yeniden
+kullanan yükseltme (1).
 
 **Anonim kutular:** karışık bir ebeveyndeki her inline dizi, arena
 kapasitesinin üstündeki bir indekste anonim bir paragraf kutusu olur; DOM'a
@@ -262,8 +274,8 @@ yakalandı. 154, beş sayfanın beşini de bayt bayt aynı çizdi; yalnızca
   olmayan bir test dosyası → üçü de 1 ile çıktı; geri alınınca 0.
 - `erk-renderer`'a `winit` bağımlılığı → adım 1 ile çıktı; geri alınınca 0.
 - Boyut bütçesi: tavanın üstündeki, altındaki, bütçesiz dosya ve eksik
-  ikili sahte bir dosyayla denendi (1, 0, 1, 1). Bütçe yükseltmenin
-  gerekçe istediği CI'daki ilk gerçek ölçümden sonra denenir.
+  ikili sahte bir dosyayla denendi (1, 0, 1, 1); yükseltme ve düşürme
+  kuralları yukarıda.
 
 ### M1.3 yürütme notları (2026-09-30, sürüyor)
 

@@ -6,4 +6,4 @@
 # binary and set the budget 10% above it. Lowering it is always allowed;
 # raising it needs a reason on the budget's line:
 #   <bytes>  # raised: <reason>
-20000000  # provisional: replaced by 110% of the first Linux measurement
+24225617  # raised: first Linux measurement, 22023288 bytes on ubuntu-latest (PR #7); the budget is 110% of it
