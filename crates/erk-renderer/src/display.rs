@@ -155,6 +155,22 @@ impl DisplayList {
             ));
         }
 
+        // Anonymous boxes inherit their block's visibility and have no
+        // border or padding of their own.
+        if visible {
+            for anonymous in walk.layouts.anonymous(id) {
+                let origin = (
+                    x + anonymous.layout.location.x,
+                    y + anonymous.layout.location.y,
+                );
+                text.extend(glyph_runs(
+                    &anonymous.text.text,
+                    &anonymous.text.layout,
+                    origin,
+                ));
+            }
+        }
+
         for child in walk.doc.children(id) {
             self.add_box(walk, child, (x, y), text);
         }

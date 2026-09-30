@@ -6,11 +6,13 @@
 //! erk-style. The trait implementations follow blitz-dom 0.3.0-beta.2,
 //! src/layout/mod.rs (MIT OR Apache-2.0).
 //!
-//! M0 has no inline formatting context. A block whose children are only text
-//! and inline elements becomes a paragraph leaf: Parley shapes its whole text
-//! with the block's style and Taffy sees only the resulting width and height.
-//! A block that mixes block children with text keeps the blocks and drops
-//! the text; anonymous block boxes and the real inline layout come in M1.
+//! There is no inline formatting context yet (M1.3). A block whose children
+//! are only text and inline elements becomes a paragraph leaf: Parley shapes
+//! its whole text with the block's style and Taffy sees only the resulting
+//! width and height. In a block that mixes block children with text, each run
+//! of inline content becomes an anonymous paragraph box (CSS 2 §9.2.1.1).
+//! Anonymous boxes live only in this side table, at indices past the arena's
+//! slots: the DOM, and the NodeIds a host sees, never contain them.
 
 mod calc;
 
@@ -36,6 +38,16 @@ use crate::text::{Paragraph, TextBrush, TextEngine};
 pub(crate) struct Layouts {
     nodes: Vec<Option<Layout>>,
     text: Vec<Option<ShapedText>>,
+    /// Anonymous paragraph boxes, by the index of the block they belong to.
+    anonymous: Vec<Vec<AnonymousText>>,
+}
+
+/// An anonymous paragraph box: a run of inline content between the block
+/// children of a block.
+pub(crate) struct AnonymousText {
+    /// Relative to the block's box, like a child's layout.
+    pub(crate) layout: Layout,
+    pub(crate) text: ShapedText,
 }
 
 /// A paragraph's text and its shaped, line-broken layout.
@@ -56,6 +68,13 @@ impl Layouts {
     pub(crate) fn text(&self, id: NodeId) -> Option<&ShapedText> {
         self.text.get(id.index() as usize)?.as_ref()
     }
+
+    /// The anonymous paragraph boxes among `id`'s children, in tree order.
+    pub(crate) fn anonymous(&self, id: NodeId) -> &[AnonymousText] {
+        self.anonymous
+            .get(id.index() as usize)
+            .map_or(&[], Vec::as_slice)
+    }
 }
 
 /// Lay out `doc` in a viewport of `width` × `height` CSS pixels.
@@ -66,6 +85,7 @@ pub(crate) fn layout(
     width: f32,
     height: f32,
 ) -> Layouts {
+    let slots = doc.capacity_hint();
     let mut tree = LayoutTree::build(doc, styles, text);
     let root = taffy_id(doc.root());
     compute_root_layout(
@@ -96,12 +116,25 @@ pub(crate) fn layout(
             })
         })
         .collect();
+    let mut text: Vec<Option<ShapedText>> = text_layouts;
+    let mut anonymous: Vec<Vec<AnonymousText>> = (0..slots).map(|_| Vec::new()).collect();
+    for (index, node) in nodes.iter().enumerate().skip(slots) {
+        if let (Some(parent), Some(shaped)) = (node.anonymous_parent, text[index].take()) {
+            anonymous[parent].push(AnonymousText {
+                layout: node.layout,
+                text: shaped,
+            });
+        }
+    }
+    text.truncate(slots);
     Layouts {
         nodes: nodes
             .into_iter()
+            .take(slots)
             .map(|node| node.in_tree.then_some(node.layout))
             .collect(),
-        text: text_layouts,
+        text,
+        anonymous,
     }
 }
 
@@ -113,6 +146,8 @@ struct LayoutNode {
     style: Style<Atom>,
     /// Set for paragraph leaves: blocks laid out as one run of text.
     paragraph: Option<Paragraph>,
+    /// For an anonymous paragraph box, the arena index of its block.
+    anonymous_parent: Option<usize>,
     cache: Cache,
     unrounded: Layout,
     layout: Layout,
@@ -141,13 +176,13 @@ impl<'t> LayoutTree<'t> {
 
         let mut stack = vec![doc.root()];
         while let Some(parent) = stack.pop() {
-            let mut blocks = Vec::new();
-            let mut has_inline_content = false;
+            // The children in tree order: block-level elements, and the text
+            // of everything inline (text nodes and inline elements).
+            let mut entries = Vec::new();
+            let mut has_blocks = false;
             for child in doc.children(parent) {
                 match doc.node(child).map(|node| &node.data) {
-                    Some(NodeData::Text(text)) => {
-                        has_inline_content |= !text.trim_ascii().is_empty();
-                    }
+                    Some(NodeData::Text(text)) => entries.push(Entry::Inline(text.clone())),
                     Some(NodeData::Element(_)) => {
                         // Elements inside display:none are not styled, so a
                         // missing style means no box.
@@ -155,19 +190,29 @@ impl<'t> LayoutTree<'t> {
                             continue;
                         };
                         if is_inline_level(&computed) {
-                            has_inline_content = true;
+                            entries.push(Entry::Inline(inline_text(doc, styles, child)));
                         } else {
-                            blocks.push((child, computed));
+                            has_blocks = true;
+                            entries.push(Entry::Block(child, computed));
                         }
                     }
                     _ => {}
                 }
             }
+            let parent_style = styles.computed(parent);
 
             // A paragraph leaf: only inline content, laid out as one run.
-            if blocks.is_empty() && has_inline_content && parent != doc.root() {
-                if let Some(computed) = styles.computed(parent) {
-                    let content = inline_text(doc, styles, parent);
+            if !has_blocks && parent != doc.root() {
+                let content: String = entries
+                    .into_iter()
+                    .filter_map(|entry| match entry {
+                        Entry::Inline(text) => Some(text),
+                        Entry::Block(..) => None,
+                    })
+                    .collect();
+                if let Some(computed) = parent_style
+                    && !content.trim_ascii().is_empty()
+                {
                     nodes[parent.index() as usize].paragraph =
                         Some(Paragraph::new(&content, &computed));
                 }
@@ -175,18 +220,26 @@ impl<'t> LayoutTree<'t> {
             }
 
             let mut children = Vec::new();
-            for (child, computed) in blocks {
-                let style = stylo_taffy::to_taffy_style(&computed);
-                if style.display == Display::None {
-                    continue;
+            let mut run = String::new();
+            for entry in entries {
+                match entry {
+                    Entry::Inline(text) => run.push_str(&text),
+                    Entry::Block(child, computed) => {
+                        let style = stylo_taffy::to_taffy_style(&computed);
+                        if style.display == Display::None {
+                            continue;
+                        }
+                        push_anonymous(&mut nodes, &mut children, parent, &parent_style, &mut run);
+                        calcs.record(&computed);
+                        let node = &mut nodes[child.index() as usize];
+                        node.in_tree = true;
+                        node.style = style;
+                        children.push(taffy_id(child));
+                        stack.push(child);
+                    }
                 }
-                calcs.record(&computed);
-                let node = &mut nodes[child.index() as usize];
-                node.in_tree = true;
-                node.style = style;
-                children.push(taffy_id(child));
-                stack.push(child);
             }
+            push_anonymous(&mut nodes, &mut children, parent, &parent_style, &mut run);
             nodes[parent.index() as usize].children = children;
         }
 
@@ -228,6 +281,43 @@ impl<'t> LayoutTree<'t> {
             Display::None => LayoutOutput::HIDDEN,
         }
     }
+}
+
+/// A child of a block, as layout sees it.
+enum Entry {
+    Block(NodeId, erk_style::style::servo_arc::Arc<ComputedValues>),
+    /// The text of a text node or of an inline element.
+    Inline(String),
+}
+
+/// Close the current run of inline content: unless it is only whitespace,
+/// it becomes an anonymous paragraph box after the children so far, styled
+/// like its block.
+fn push_anonymous(
+    nodes: &mut Vec<LayoutNode>,
+    children: &mut Vec<taffy::NodeId>,
+    parent: NodeId,
+    parent_style: &Option<erk_style::style::servo_arc::Arc<ComputedValues>>,
+    run: &mut String,
+) {
+    let text = std::mem::take(run);
+    let Some(style) = parent_style else {
+        return;
+    };
+    if text.trim_ascii().is_empty() {
+        return;
+    }
+    nodes.push(LayoutNode {
+        in_tree: true,
+        style: Style {
+            display: Display::Block,
+            ..Style::DEFAULT
+        },
+        paragraph: Some(Paragraph::new(&text, style)),
+        anonymous_parent: Some(parent.index() as usize),
+        ..LayoutNode::default()
+    });
+    children.push(taffy::NodeId::from(nodes.len() - 1));
 }
 
 fn is_inline_level(style: &ComputedValues) -> bool {
