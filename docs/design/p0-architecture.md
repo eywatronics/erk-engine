@@ -122,6 +122,8 @@ kabuk, DOM'u paylaşamaz.
 
 ## 3. Hedef mimari
 
+> **Geçersiz (2026-09-30):** Hedef mimari artık host ↔ `erk`/`erk-ffi` ↔ çekirdek; ağ ve kum havuzu süreci yok. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
+
 ```
 ┌──────────────────────────────┐
 │  Kabuk / broker (erk-shell)  │  yetkili: pencere, girdi, süreç yaşam döngüsü
@@ -149,6 +151,8 @@ Ağ yok, yerel dosya okunur.
 ---
 
 ## 4. Crate'ler ve bağımlılık yönü
+
+> **Geçersiz (2026-09-30):** `erk-network` kaldırıldı; M3'te `erk` ve `erk-ffi` gelir. Bkz. [p1-embedded.md](p1-embedded.md). Metin karar geçmişi olarak duruyor.
 
 ```
 erk-shell ──► erk-renderer ──► erk-style ──► erk-dom

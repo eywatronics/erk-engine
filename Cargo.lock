@@ -571,10 +571,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "erk-network"
-version = "0.1.0"
-
-[[package]]
 name = "erk-renderer"
 version = "0.1.0"
 dependencies = [

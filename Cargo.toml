@@ -3,7 +3,6 @@ resolver = "3"
 members = [
     "crates/erk-shell",    # window, event loop, messaging with the renderer
     "crates/erk-renderer", # layout, display list, paint; the renderer thread
-    "crates/erk-network",  # network interface (from M2)
     "crates/erk-dom",      # arena DOM and HTML parsing
     "crates/erk-style",    # Stylo adapter (the one crate that may declare unsafe fns)
 ]
