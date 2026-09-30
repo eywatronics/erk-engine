@@ -27,6 +27,7 @@ does not lay out or paint is not supported.
 |---|---|---|
 | Type, class and id selectors | Supported | `erk-style/tests/computed.rs`: `class_and_id_selectors_match` |
 | `<style>` blocks, `style` attribute, inheritance | Supported | `author_stylesheet_applies`, `style_attribute_applies`, `inherited_properties_flow_down` |
+| Custom properties (`--name`, `var()`), which utility CSS such as Tailwind relies on | Supported | `css_custom_properties_resolve` |
 | User agent stylesheet (headings, block elements) | Supported | `user_agent_stylesheet_makes_headings_blocks_with_larger_text` |
 | `:hover`, `:active`, `:focus` | M2 | Element state from the input pipeline |
 | `:focus-visible`, form pseudo-classes (`:checked`, `:disabled`) | M5 | With form controls |
