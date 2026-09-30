@@ -42,12 +42,12 @@ yazıldığında doldurulur.
 | Kutusuz kök/body tuvale renk yaymaz | `tests/paint.rs` | Kutu kontrolünü kaldırmak | M0 T6 | 2026-09-25, yakaladı |
 | Sunumsal öznitelikler stile girer | `erk-style/tests/computed.rs`: `bgcolor` → `background-color`, `align` → `text-align` (hizalama M1'de çizilir) | İki eşlemeyi ayrı ayrı kapatmak | M0 T8 | 2026-09-28, yakaladı |
 | Çekirdekte dosya, ağ, süreç, ortam ve saat yok | CI `guards` (`check-core-io.sh`): `erk-dom`, `erk-style`, `erk-renderer` `src`'sinde `std::fs`, `std::net`, `std::process`, `std::env`, `File::`, `TcpStream`, `Command::new`, `Instant::now`, `SystemTime` ve benzerleri yok; kaynak, ortam ve zaman host'tan gelir (p1-embedded §2.4) | `std::fs::read_to_string`; `use std::{fs}` + `fs::read`; `Instant::now()` | M0.5 öncesi | 2026-09-30, yakaladı |
-| `erk-renderer` pencere katmanını bilmez | CI: `cargo tree -p erk-renderer` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1 | — |
+| `erk-renderer` pencere katmanını bilmez | CI `guards`: `cargo tree -p erk-renderer --target all --all-features` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1.0 | 2026-09-30, yakaladı |
 | Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
 | WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
 | `render_html` hiçbir girdide paniklemez | `cargo test` içinde tohumlu girdi testi ve çökme korpusu; `fuzz/` altında cargo-fuzz, ayrı ve zaman sınırlı CI job'ı | Bozuk girdide `unwrap` eden bir yol | M1 | — |
-| İkili boyutu bütçede | CI: yayın ikilisinin boyutu, M1'in başında ölçülen tabandan konan tavanın altında | Bütçeyi aşan bir bağımlılık | M1 | — |
-| CSS matrisindeki her "Supported" satırın testi var | CI: `docs/css-support.md`'deki her Supported satırın adlandırdığı test var | Test adı olmayan ya da var olmayan teste işaret eden satır | M1 | — |
+| İkili boyutu bütçede, bütçe gerekçesiz yükselmez | CI `size` job'ı (`check-size-budget.sh`): Linux yayın ikilisi `.github/size-budget.txt`'teki tavanın altında; tavanı yükseltmek, taban commit'e göre yeni bir `# raised:` gerekçesi ister | Tavanın üstünde bir ikili; bütçesiz dosya; eksik ikili | M1.0 | 2026-09-30, yakaladı (sahte ikiliyle; gerçek ölçüm CI'da) |
+| CSS matrisindeki her "Supported" satırın testi var | CI `guards` (`check-css-support.sh`): her Supported satır bir test fonksiyonu ya da test dosyası adlandırır ve o test var | Var olmayan bir test adı; test adı olmayan satır; var olmayan test dosyası | M1.0 | 2026-09-30, yakaladı |
 | `unsafe` yalnızca `erk-style` ve `erk-ffi`'de | Lint devralma istisna listesi; `erk-ffi` de `deny` + öğe başına izin | `erk`'e `unsafe` blok | M3 | — |
 | `erk.h` güncel | CI: cbindgen ile yeniden üretilen başlık depodakiyle aynı | Başlığı güncellemeden C-ABI'yi değiştirmek | M3 | — |
 | C örneği derlenir ve çalışır | CI: C örneği `erk-ffi`'ye bağlanıp bir sayfa açar | C-ABI'de uyumsuz bir imza | M3 | — |

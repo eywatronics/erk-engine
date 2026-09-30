@@ -37,6 +37,7 @@ does not lay out or paint is not supported.
 |---|---|---|
 | Block layout: stacking, width, margin, padding, border widths | Supported | `erk-renderer/src/layout/tests.rs`: `block_siblings_stack_vertically`, `explicit_width_is_used`, `padding_and_border_widen_the_border_box` |
 | Vertical margin collapsing | Supported | `adjacent_vertical_margins_collapse` |
+| Text beside block children (anonymous boxes) | Supported | `text_beside_blocks_gets_anonymous_boxes`, `whitespace_between_blocks_makes_no_anonymous_box` |
 | `calc()` lengths | Supported | `calc_widths_resolve_against_the_container` |
 | `ex`, `ch` units | Supported | `ex_and_ch_come_from_the_embedded_font` |
 | `display: none`, `visibility: hidden` | Supported | `display_none_generates_no_box`, `visibility_hidden_paints_neither_background_nor_text` |

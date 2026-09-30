@@ -206,3 +206,31 @@ fn ex_and_ch_come_from_the_embedded_font() {
     assert_eq!(ex.size.width, 86.0);
     assert_eq!(ch.size.width, 92.0);
 }
+
+#[test]
+fn text_beside_blocks_gets_anonymous_boxes() {
+    // M0 kept the <p> and dropped "önce" and "sonra".
+    let (doc, layouts) = lay_out(r#"<div>önce<p style="margin: 0">blok</p>sonra</div>"#);
+    let div = all(&doc, &local_name!("div"))[0];
+    let anonymous = layouts.anonymous(div);
+    let texts: Vec<&str> = anonymous.iter().map(|a| a.text.text.as_str()).collect();
+    assert_eq!(texts, ["önce", "sonra"]);
+
+    // Anonymous box, paragraph, anonymous box: stacked in tree order.
+    let p = *layouts.get(all(&doc, &local_name!("p"))[0]).unwrap();
+    let (before, after) = (anonymous[0].layout, anonymous[1].layout);
+    assert_eq!(before.location.y, 0.0);
+    assert_eq!(p.location.y, before.size.height);
+    assert_eq!(after.location.y, p.location.y + p.size.height);
+    assert_eq!(
+        layouts.get(div).unwrap().size.height,
+        before.size.height + p.size.height + after.size.height
+    );
+}
+
+#[test]
+fn whitespace_between_blocks_makes_no_anonymous_box() {
+    let (doc, layouts) = lay_out("<div>\n  <p>a</p>\n  <p>b</p>\n</div>");
+    let div = all(&doc, &local_name!("div"))[0];
+    assert!(layouts.anonymous(div).is_empty());
+}

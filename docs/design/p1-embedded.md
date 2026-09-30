@@ -93,6 +93,19 @@ Sonra gelen bir "ana plan" önerisinin M0.5 sonrası değerlendirmesi:
 | "< 5 MB" ikili | Değişmedi: bütçe M1.0'da ölçülen tabandan konur |
 | Sayaç uygulaması | Alındı: M4'ün ilk demosu; kabul ölçütü daha güçlü olan TodoMVC olarak kalır |
 
+Geliştirici araçları önerisinin (F12 ile açılan, Erk ile yazılmış DevTools)
+değerlendirmesi:
+
+| Öneri | Karar |
+|---|---|
+| DevTools'u M7'ye kadar bekletmemek, parça parça kurmak | Alındı; her parça dayandığı altyapının taşına: `inspect_at` ve vurgu M2 (hit-test), denetim sorguları ve aşama süreleri M3 (API), canlı CSS M5 (artımlı stil), DevTools uygulaması M7 |
+| Önerideki M2–M7 numaralandırması | Uyarlandı: önerinin taşları bu projeninkilerle örtüşmüyor (örneğin API M3'te geliyor, sorgular ondan önce olamaz) |
+| Performance paneli için aşama süreleri | Alındı, düzeltmeyle: çekirdek saat okumaz; süreleri aşamaları çağıran `erk` crate'i ölçer (p1-contract §8.1) |
+| Console | Alındı, JavaScript konsolu olarak değil: host'un logları ve Erk'in uyarıları (`ErkLogFn`) |
+| Network paneli | "Resources" olarak alındı: Erk'in host'tan istediği kaynaklar. Motorun ağı yok; host'un ağ trafiği ancak host beslerse görünür |
+| JSON-RPC / WebSocket DevTools protokolü | Ertelendi: önce süreç içi ikinci pencere. Motor varsayılan olarak port dinlemez; uzak DevTools yalnızca açıkça etkinleştirilirse, yerel bir kanaldan |
+| DevTools'u Erk ile yazmak | Alındı: M7'nin kabul ölçütü, motoru kendi aracıyla sınar |
+
 Tarayıcı hedefi için daha önce gelen öneriler (M4'te JS/DOM-GC sınır tablosu,
 M6'da Fetch ve `cookie_store`) yeni hedefte konu dışı. M1 için olanların
 doğrulanmış hali geçerli:

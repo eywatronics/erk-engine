@@ -1,0 +1,9 @@
+# Size budget, in bytes, of the release `erk` binary built on Linux
+# (x86_64, ubuntu-latest) with the default release profile. Checked by the
+# `size` CI job (.github/scripts/check-size-budget.sh).
+#
+# The budget comes from a measurement, not a target: M1.0 measured the
+# binary and set the budget 10% above it. Lowering it is always allowed;
+# raising it needs a reason on the budget's line:
+#   <bytes>  # raised: <reason>
+20000000  # provisional: replaced by 110% of the first Linux measurement
