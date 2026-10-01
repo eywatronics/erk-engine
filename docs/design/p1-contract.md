@@ -71,7 +71,10 @@ dışında) ve onu da `now_ns` olarak verir.
   nesil (`NonZeroU32`). Nesil her slot yeniden kullanımında artar; tükenen
   slot emekliye ayrılır, bugünkü gibi.
 - **Dış temsil (`ErkNodeId`):** opak `uint64_t`. Uygulamaya özel bir anahtarla
-  karıştırılır:
+  karıştırılır. Amacı **ad alanı ayrımı ve eski id yalıtımıdır**: bir
+  uygulamanın id'si başka bir uygulamada ya da yok edilmiş bir uygulamada
+  kullanılırsa sessizce başka bir düğüme denk gelmesin, hata koduna düşsün.
+  Bir güvenlik önlemi **değildir** (aşağıda):
 
   ```text
   iç          = index | (generation << 32)
@@ -87,13 +90,19 @@ dışında) ve onu da `now_ns` olarak verir.
   hiçbir zaman 0 olmaz; 0 her zaman "düğüm yok"tur (`ERK_NODE_NONE`), bir
   düğümün yerine verilirse `ERK_ERR_INVALID_ARGUMENT`.
 - **Geçerlilik her zaman arenadan gelir:** çözülen indeks var mı, o slotun
-  nesli eşleşiyor mu. Karıştırma bir güvenlik sınırı ya da kimlik doğrulama
-  değildir; başka bir uygulamanın ya da yok edilmiş bir uygulamanın id'sini
-  anlamsızlaştıran bir ad alanı ayrımıdır. Böyle bir id çözülünce neredeyse
-  her zaman var olmayan ya da nesli tutmayan bir slota düşer ve
-  `ERK_ERR_STALE_NODE` döner. Yakalama **olasılıksaldır**: yanlış bir id'nin
+  nesli eşleşiyor mu. Başka bir uygulamanın ya da yok edilmiş bir
+  uygulamanın id'si çözülünce neredeyse her zaman var olmayan ya da nesli
+  tutmayan bir slota düşer ve `ERK_ERR_STALE_NODE` döner. Yakalama **olasılıksaldır**: yanlış bir id'nin
   geçerli bir çifte denk gelme olasılığı canlı düğüm sayısına ve nesillerin
   dağılımına bağlıdır, sabit bir oran olarak verilmez.
+- **Karıştırma ne değildir.** Bir güvenlik sınırı, kimlik doğrulama,
+  yetkilendirme ya da sahteciliğe karşı koruma (anti-forgery) **değildir**.
+  Anahtar gizli değildir, uygulama sıra numarasından belirleyici olarak
+  türetilir; bir id'yi bilen herkes onu kullanabilir. Host ile Erk aynı
+  süreçte, aynı güven alanında çalışır: aralarında korunacak bir sınır
+  yoktur. Gizli ya da tahmin edilemez bir tutamak gereken bir host (örneğin
+  id'leri güvenilmeyen bir tarafa veren) bunu kendi katmanında yapar. Bir
+  id'yi "imzalı" ya da "doğrulanmış" sayan her belge ve API yanlıştır.
 - Host bu sayıyı yorumlamaz, yalnızca saklar ve geri verir. DevTools id'yi
   anahtarla çözüp indeks ve nesil olarak gösterebilir; bu bir hata ayıklama
   kolaylığıdır, ABI'nin parçası değil.
@@ -297,7 +306,7 @@ typedef int32_t ErkStatus;
 /* ---- Basic types ------------------------------------------------------- */
 
 typedef struct ErkApp ErkApp;              /* opaque */
-typedef uint64_t ErkNodeId;                /* opaque, scrambled per app; 0 is no node */
+typedef uint64_t ErkNodeId;                /* opaque; per-app namespace, not a security token; 0 is no node */
 #define ERK_NODE_NONE ((ErkNodeId)0)
 
 typedef struct ErkStr {                    /* UTF-8 in; Erk copies before returning */
