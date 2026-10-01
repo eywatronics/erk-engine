@@ -477,3 +477,14 @@ Mutasyonlar (7/7 yakalandı): flex kapsayıcıda metin paragraf oluyor;
 satırının altında değil üstünde başlıyor; flex kapsayıcı blok olsa da içerik
 kenarı; iki eksen birden statik konumu alıyor; satır içi çapa satır başına
 konuyor. Sağlamlık üretecine uç flex değerleri eklendi.
+
+**İnceleme raporu: `docs/reviews/wpt_commit_review.md` (2026-10-01, #17).**
+İlk rapor; inceleme raporları kuralı (proje kuralları) bununla başladı.
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| `elements` etiketi ilk `>`'de bitiyor; tırnaklı bir değerdeki `>` (`title="a > b"`) etiketi erken kapatır | **Geçerli, düzeltildi.** Etiketin sonu tırnak dışındaki ilk `>` (`tag_end`); kendiliğinden kapanan etiketleri açan XHTML döngüsü de aynı yardımcıyı kullanıyor. Yan bulgu: o döngü her `<`'yi etiket sayıyordu; yorumdaki bir kesme işareti (`don't`) tırnak sanılınca on XHTML testi düştü. Yorumlar artık bütün olarak geçiyor, tırnak denetimi yalnızca gerçek etiketlerde |
+| CDATA işaretleri dosyanın her yerinden siliniyor; stil dışındaki CDATA'yı bozabilir | **Geçerli, düzeltildi.** `<style>`/`<script>` içinde yalnızca işaretler siliniyor, başka yerde bölüm metin olarak kaçışlanıyor (`<![CDATA[<b>]]>` bir eleman olmuyor). CSS dizgesinin içindeki bir CDATA işareti ayırt edilmiyor; belgelendi |
+| İş parçacığı modeli, panik yakalama, fuzzy hesabı | Artı olarak not edildi; değişiklik yok |
+
+Taban çizgisi değişmedi: 2009 sonucun hepsi aynı.
