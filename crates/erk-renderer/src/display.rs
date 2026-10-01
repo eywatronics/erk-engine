@@ -249,18 +249,20 @@ fn glyph_runs(text: &str, shaped: &InlineLayout, origin: (f32, f32)) -> Vec<Disp
                 continue;
             };
             let range = ranges.next().unwrap_or_default();
+            // `vertical-align` moves the run off the line's baseline.
+            let raise = run.style().brush.raise;
             let glyphs = run
                 .positioned_glyphs()
                 .map(|glyph| PositionedGlyph {
                     id: glyph.id,
                     x: origin.0 + glyph.x,
-                    y: origin.1 + shift + glyph.y,
+                    y: origin.1 + shift + glyph.y - raise,
                 })
                 .collect();
             runs.push(DisplayItem::Glyphs(GlyphRun {
                 font: run.run().font().clone(),
                 size: run.run().font_size(),
-                color: run.style().brush.0,
+                color: run.style().brush.color,
                 glyphs,
                 text: text.get(range).unwrap_or_default().to_owned(),
             }));

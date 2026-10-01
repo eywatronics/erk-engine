@@ -182,3 +182,22 @@ fn text_after_a_tall_line_is_painted_lower() {
     let y: f32 = second.split(' ').nth(2).unwrap().parse().unwrap();
     assert_eq!(y, 62.0, "{second}");
 }
+
+#[test]
+fn superscript_glyphs_are_painted_raised() {
+    let frame = render_html(
+        r#"<style>body { margin: 0 }</style><p style="margin: 0">x<sup>2</sup></p>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    let list = frame.display_list();
+    let y_of = |text: &str| -> f32 {
+        let line = list
+            .lines()
+            .find(|line| line.starts_with("glyphs") && line.ends_with(&format!("{text:?}")))
+            .unwrap_or_else(|| panic!("no glyphs for {text:?}:\n{list}"));
+        line.split(' ').nth(2).unwrap().parse().unwrap()
+    };
+    // Raised by a third of the 16px font plus one pixel, in 1/64 px.
+    assert_eq!(y_of("x") - y_of("2"), 405.0 / 64.0);
+}
