@@ -50,12 +50,14 @@ does not lay out or paint is not supported.
 | `vertical-align`: `baseline`, `sub`, `super`, lengths, percentages, `middle`, `text-top`, `text-bottom` on inline elements and atomic inlines; `top`, `center`, `bottom` on atomic inlines | Supported | `sup_and_sub_move_their_text_off_the_baseline`, `raised_and_lowered_text_make_room_on_their_own_side`, `vertical_align_places_an_inline_block_against_the_parent`, `vertical_align_top_and_bottom_follow_the_line_box`, `superscript_glyphs_are_painted_raised`. On a non-atomic inline element the line-relative values (top, center, bottom) are laid out as baseline |
 | Inline images | M1 | With `<img>` (below) |
 | Flexbox | M1 | Laid out by Taffy today, not yet verified |
-| `position: absolute`, `relative`, `fixed` | M1 | |
+| `position: relative`, `absolute`, `fixed` with `top`, `right`, `bottom`, `left`; the containing block is the nearest positioned ancestor or the viewport | Supported | `relative_position_offsets_the_box_but_not_the_flow`, `an_absolute_box_is_placed_in_its_nearest_positioned_ancestor`, `without_a_positioned_ancestor_the_viewport_contains`, `a_fixed_box_ignores_its_positioned_ancestors`, `an_absolute_element_does_not_split_its_paragraph`, `static_position_ignores_insets`. With all insets auto, an absolute box sits at its containing block's content edge rather than where it would have been in the flow; an inline element is never a containing block |
+| `z-index` and paint order of positioned elements (CSS 2 Appendix E) | Supported | `positioned_boxes_paint_after_the_flow`, `z_index_orders_positioned_boxes`. Each positioned element paints as a unit; positioned descendants of a z-index auto element stay inside it |
+| `position: sticky` | Later | Laid out as `static` until scrolling exists (M2) |
 | `overflow: auto`, `scroll`, scroll containers | M2 | |
 | `contain: size layout paint` | M5 | A relayout and repaint boundary for incremental rendering |
 | `content-visibility` | Later | |
 | Grid | Later | Laid out by Taffy; verified after flexbox |
-| `float`, `clear` | Not planned | Desktop UI is built with flexbox; floats are the most edge-case-heavy part of CSS. A floated element is laid out as if `float: none` (M1) |
+| `float`, `clear` | Not planned | Desktop UI is built with flexbox; floats are the most edge-case-heavy part of CSS. A floated element is laid out as if `float: none` (test: a_float_is_laid_out_as_if_not_floated) |
 | Table layout (`display: table`, `<table>` as a grid of cells) | Not planned | Use grid or flexbox. Tables parse and are styled, but there is no table layout algorithm |
 | Multi-column layout | Not planned | Not a UI layout |
 | Print and paged media (`@page`, page breaks) | Not planned | Erk renders to windows, not pages |

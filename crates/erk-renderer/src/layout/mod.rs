@@ -19,6 +19,19 @@
 //! paragraph box (CSS 2 §9.2.1.1). Anonymous boxes live only in this side
 //! table, at indices past the arena's slots: the DOM, and the NodeIds a host
 //! sees, never contain them.
+//!
+//! An absolutely positioned element leaves the flow: it is not part of its
+//! parent's inline content and does not split it. It becomes a Taffy child
+//! of its containing block, the nearest positioned ancestor with a box, or
+//! the viewport (CSS 2 §10.1); a fixed element's is always the viewport.
+//! Its static position, used when its insets are `auto`, is the containing
+//! block's content edge rather than where it would have sat in the flow.
+//! Floats are laid out as if `float: none` (css-support.md): Parley's lines
+//! do not flow around them.
+//!
+//! The layout tree is therefore not the DOM: after layout every box's
+//! position is made relative to its nearest DOM ancestor with a box, which
+//! is what painting and the host walk.
 
 mod calc;
 
@@ -30,12 +43,12 @@ use erk_style::style::Atom;
 use erk_style::style::values::specified::box_::{DisplayInside, DisplayOutside};
 use erk_style::{ComputedValues, Styles};
 use taffy::{
-    AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Display, Layout,
+    AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Dimension, Display, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
-    LayoutPartialTree, Line, Overflow, Point, RequestedAxis, ResolveOrZero, RoundTree, RunMode,
-    Size, SizingMode, Style, TraversePartialTree, TraverseTree, compute_block_layout,
-    compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
-    compute_root_layout, round_layout,
+    LayoutPartialTree, LengthPercentageAuto, Line, Overflow, Point, RequestedAxis, ResolveOrZero,
+    RoundTree, RunMode, Size, SizingMode, Style, TraversePartialTree, TraverseTree,
+    compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
+    compute_leaf_layout, compute_root_layout, round_layout,
 };
 
 use self::calc::CalcTable;
@@ -97,7 +110,12 @@ pub(crate) fn layout(
     height: f32,
 ) -> Layouts {
     let slots = doc.capacity_hint();
-    let (nodes, calcs) = build(doc, styles);
+    let (mut nodes, calcs) = build(doc, styles);
+    // The initial containing block is the viewport (CSS 2 §10.1).
+    nodes[doc.root().index() as usize].style.size = Size {
+        width: Dimension::length(width),
+        height: Dimension::length(height),
+    };
     let mut tree = LayoutTree {
         nodes,
         calcs: &calcs,
@@ -116,16 +134,7 @@ pub(crate) fn layout(
 
     let LayoutTree { mut nodes, .. } = tree;
     snap_locations(&mut nodes, usize::from(root));
-    // An atomic inline in an anonymous box is laid out relative to that
-    // box, which the DOM does not have: make it relative to the block.
-    for index in slots..nodes.len() {
-        let origin = nodes[index].layout.location;
-        for child in nodes[index].children.clone() {
-            let location = &mut nodes[usize::from(child)].layout.location;
-            location.x += origin.x;
-            location.y += origin.y;
-        }
-    }
+    relative_to_dom(doc, &mut nodes);
     let mut text: Vec<Option<ShapedText>> = nodes
         .iter_mut()
         .map(|node| {
@@ -181,6 +190,45 @@ fn snap_locations(nodes: &mut [LayoutNode], root: usize) {
     }
 }
 
+/// Make every element's position relative to its nearest DOM ancestor with
+/// a box. Layout places a box relative to its parent in the layout tree,
+/// which differs from the DOM for atomic inlines inside inline elements or
+/// anonymous boxes, and for absolutely positioned elements, whose parent is
+/// their containing block. Anonymous boxes stay relative to their block.
+fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
+    // Each box's absolute position, down the layout tree.
+    let mut absolute = vec![Point::ZERO; nodes.len()];
+    let mut stack = vec![(doc.root().index() as usize, Point::ZERO)];
+    while let Some((index, parent)) = stack.pop() {
+        let location = nodes[index].layout.location;
+        let here = Point {
+            x: parent.x + location.x,
+            y: parent.y + location.y,
+        };
+        absolute[index] = here;
+        for child in &nodes[index].children {
+            stack.push((usize::from(*child), here));
+        }
+    }
+    // Down the DOM, with the absolute position of the nearest box above.
+    let mut stack = vec![(doc.root(), Point::ZERO)];
+    while let Some((id, above)) = stack.pop() {
+        let index = id.index() as usize;
+        let mut origin = above;
+        if nodes[index].in_tree {
+            let here = absolute[index];
+            nodes[index].layout.location = Point {
+                x: here.x - above.x,
+                y: here.y - above.y,
+            };
+            origin = here;
+        }
+        for child in doc.children(id) {
+            stack.push((child, origin));
+        }
+    }
+}
+
 #[derive(Default)]
 struct LayoutNode {
     /// Whether this arena slot generates a box in the layout tree.
@@ -212,6 +260,10 @@ type Token = InlineToken<StyleArc>;
 /// The atomic inlines met while reading inline content.
 type Atoms = Vec<(NodeId, StyleArc)>;
 
+/// Absolutely positioned elements met while reading a block's children,
+/// with their containing block.
+type OutOfFlow = Vec<(NodeId, StyleArc, NodeId)>;
+
 /// A child of a block, as layout sees it.
 enum Entry {
     Block(NodeId, StyleArc),
@@ -235,11 +287,20 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
         ..Style::DEFAULT
     };
 
-    let mut stack = vec![doc.root()];
-    while let Some(parent) = stack.pop() {
+    // Each block to build, with the containing block of the absolutely
+    // positioned elements below it.
+    let mut stack = vec![(doc.root(), doc.root())];
+    while let Some((parent, outer_container)) = stack.pop() {
+        let parent_style = styles.computed(parent);
+        let positioned = parent_style
+            .as_ref()
+            .is_some_and(|style| is_positioned(style));
+        let container = if positioned { parent } else { outer_container };
         // The children in tree order: block-level elements, and everything
-        // inline (text nodes, inline elements, atomic inlines).
+        // inline (text nodes, inline elements, atomic inlines). Absolutely
+        // positioned elements are set aside for their containing block.
         let mut entries = Vec::new();
+        let mut out_of_flow: OutOfFlow = Vec::new();
         let mut has_blocks = false;
         for child in doc.children(parent) {
             match doc.node(child).map(|node| &node.data) {
@@ -257,14 +318,25 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     let Some(computed) = styles.computed(child) else {
                         continue;
                     };
-                    if is_atomic_inline(&computed) {
+                    if is_out_of_flow(&computed) {
+                        out_of_flow.push((child, computed, container));
+                    } else if is_atomic_inline(&computed) {
                         entries.push(Entry::Inline(
                             vec![InlineToken::Atom(child.index() as usize, computed.clone())],
                             vec![(child, computed)],
                         ));
                     } else if is_inline_level(&computed) {
                         let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
-                        inline_tokens(doc, styles, child, &computed, &mut tokens, &mut atoms);
+                        inline_tokens(
+                            doc,
+                            styles,
+                            child,
+                            &computed,
+                            container,
+                            &mut tokens,
+                            &mut atoms,
+                            &mut out_of_flow,
+                        );
                         entries.push(Entry::Inline(tokens, atoms));
                     } else {
                         has_blocks = true;
@@ -274,10 +346,10 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                 _ => {}
             }
         }
-        let parent_style = styles.computed(parent);
-
-        // A paragraph: only inline content, laid out as one run.
-        if !has_blocks && parent != doc.root() {
+        // A paragraph: only inline content, laid out as one run. A positioned
+        // block keeps a block box with an anonymous paragraph inside, so the
+        // absolutely positioned elements it contains are laid out by Taffy.
+        if !has_blocks && !positioned && parent != doc.root() {
             let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
                 if let Entry::Inline(more_tokens, more_atoms) = entry {
@@ -288,12 +360,13 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
             if let Some(computed) = parent_style {
                 let paragraph = Paragraph::new(&tokens, &computed);
                 if !paragraph.is_empty() {
-                    let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms);
+                    let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms, container);
                     let node = &mut nodes[parent.index() as usize];
                     node.paragraph = Some(paragraph);
                     node.children = children;
                 }
             }
+            add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
             continue;
         }
 
@@ -306,7 +379,7 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     run.atoms.extend(atoms);
                 }
                 Entry::Block(child, computed) => {
-                    let style = stylo_taffy::to_taffy_style(&computed);
+                    let style = taffy_style(&computed);
                     if style.display == Display::None {
                         continue;
                     }
@@ -317,13 +390,14 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                         &mut children,
                         parent,
                         &parent_style,
+                        container,
                     );
                     calcs.record(&computed);
                     let node = &mut nodes[child.index() as usize];
                     node.in_tree = true;
                     node.style = style;
                     children.push(taffy_id(child));
-                    stack.push(child);
+                    stack.push((child, container));
                 }
             }
         }
@@ -334,11 +408,82 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
             &mut children,
             parent,
             &parent_style,
+            container,
         );
         nodes[parent.index() as usize].children = children;
+        add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
     }
 
     (nodes, calcs)
+}
+
+/// Give each absolutely positioned element a box as the last child of its
+/// containing block. The containing block was built before it (it is an
+/// ancestor), and is never a paragraph: positioned blocks keep a block box.
+/// A fixed element goes to the viewport, the document node's box.
+fn add_out_of_flow(
+    nodes: &mut [LayoutNode],
+    calcs: &mut CalcTable,
+    stack: &mut Vec<(NodeId, NodeId)>,
+    out_of_flow: OutOfFlow,
+    viewport: NodeId,
+) {
+    use erk_style::style::computed_values::position::T as CssPosition;
+    for (id, computed, container) in out_of_flow {
+        // A fixed element's containing block is always the viewport.
+        let container = if computed.clone_position() == CssPosition::Fixed {
+            viewport
+        } else {
+            container
+        };
+        calcs.record(&computed);
+        let node = &mut nodes[id.index() as usize];
+        node.in_tree = true;
+        node.style = taffy_style(&computed);
+        nodes[container.index() as usize]
+            .children
+            .push(taffy_id(id));
+        // A positioned element is the containing block of what it holds.
+        stack.push((id, id));
+    }
+}
+
+/// Stylo's style as Taffy's, with what Erk lays out differently: floats as
+/// `float: none`, and insets only where `position` applies them
+/// (stylo_taffy maps `static` and `sticky` to Taffy's relative position,
+/// which would apply `top` and `left` as offsets).
+fn taffy_style(computed: &ComputedValues) -> Style<Atom> {
+    use erk_style::style::computed_values::position::T as CssPosition;
+    let mut style = stylo_taffy::to_taffy_style(computed);
+    style.float = taffy::Float::None;
+    if matches!(
+        computed.clone_position(),
+        CssPosition::Static | CssPosition::Sticky
+    ) {
+        style.inset = taffy::Rect {
+            left: LengthPercentageAuto::auto(),
+            right: LengthPercentageAuto::auto(),
+            top: LengthPercentageAuto::auto(),
+            bottom: LengthPercentageAuto::auto(),
+        };
+    }
+    style
+}
+
+/// `position` other than `static`: a containing block for absolutely
+/// positioned descendants, and painted after the flow (CSS 2 Appendix E).
+pub(crate) fn is_positioned(style: &ComputedValues) -> bool {
+    use erk_style::style::computed_values::position::T as CssPosition;
+    style.clone_position() != CssPosition::Static
+}
+
+/// `position: absolute` or `fixed`: out of the flow.
+fn is_out_of_flow(style: &ComputedValues) -> bool {
+    use erk_style::style::computed_values::position::T as CssPosition;
+    matches!(
+        style.clone_position(),
+        CssPosition::Absolute | CssPosition::Fixed
+    )
 }
 
 /// Inline content between the block children of a block.
@@ -351,14 +496,16 @@ struct Run {
 impl Run {
     /// Close the run: unless it is only whitespace, it becomes an anonymous
     /// paragraph box after the children so far, styled like its block.
+    #[allow(clippy::too_many_arguments)]
     fn close(
         &mut self,
         nodes: &mut Vec<LayoutNode>,
         calcs: &mut CalcTable,
-        stack: &mut Vec<NodeId>,
+        stack: &mut Vec<(NodeId, NodeId)>,
         children: &mut Vec<taffy::NodeId>,
         parent: NodeId,
         parent_style: &Option<StyleArc>,
+        container: NodeId,
     ) {
         let Self { tokens, atoms } = std::mem::take(self);
         let Some(style) = parent_style else {
@@ -368,7 +515,12 @@ impl Run {
         if paragraph.is_empty() {
             return;
         }
-        let atoms = add_atoms(nodes, calcs, stack, atoms);
+        let container = if is_positioned(style) {
+            parent
+        } else {
+            container
+        };
+        let atoms = add_atoms(nodes, calcs, stack, atoms, container);
         nodes.push(LayoutNode {
             in_tree: true,
             children: atoms,
@@ -389,8 +541,9 @@ impl Run {
 fn add_atoms(
     nodes: &mut [LayoutNode],
     calcs: &mut CalcTable,
-    stack: &mut Vec<NodeId>,
+    stack: &mut Vec<(NodeId, NodeId)>,
     atoms: Atoms,
+    container: NodeId,
 ) -> Vec<taffy::NodeId> {
     atoms
         .into_iter()
@@ -398,8 +551,8 @@ fn add_atoms(
             calcs.record(&computed);
             let node = &mut nodes[id.index() as usize];
             node.in_tree = true;
-            node.style = stylo_taffy::to_taffy_style(&computed);
-            stack.push(id);
+            node.style = taffy_style(&computed);
+            stack.push((id, container));
             taffy_id(id)
         })
         .collect()
@@ -423,13 +576,16 @@ fn is_atomic_inline(style: &ComputedValues) -> bool {
 /// The content of inline element `id`, in tree order: its start, the text
 /// of each text node with the style of its element, nested inline elements,
 /// atomic inlines, and its end.
+#[allow(clippy::too_many_arguments)]
 fn inline_tokens(
     doc: &Document,
     styles: &Styles,
     id: NodeId,
     style: &StyleArc,
+    container: NodeId,
     tokens: &mut Vec<Token>,
     atoms: &mut Atoms,
+    out_of_flow: &mut OutOfFlow,
 ) {
     tokens.push(InlineToken::Open(style.clone()));
     for child in doc.children(id) {
@@ -439,14 +595,25 @@ fn inline_tokens(
             }
             Some(NodeData::Element(_)) => {
                 if let Some(child_style) = styles.computed(child) {
-                    if is_atomic_inline(&child_style) {
+                    if is_out_of_flow(&child_style) {
+                        out_of_flow.push((child, child_style, container));
+                    } else if is_atomic_inline(&child_style) {
                         tokens.push(InlineToken::Atom(
                             child.index() as usize,
                             child_style.clone(),
                         ));
                         atoms.push((child, child_style));
                     } else {
-                        inline_tokens(doc, styles, child, &child_style, tokens, atoms);
+                        inline_tokens(
+                            doc,
+                            styles,
+                            child,
+                            &child_style,
+                            container,
+                            tokens,
+                            atoms,
+                            out_of_flow,
+                        );
                     }
                 }
             }

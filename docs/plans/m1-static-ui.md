@@ -141,15 +141,15 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1.4: Block ve absolute positioning
 
-- [ ] `position: relative | absolute | fixed`, `top/right/bottom/left`,
+- [x] `position: relative | absolute | fixed`, `top/right/bottom/left`,
   `z-index` ile boyama sırası (yığın bağlamları, CSS 2 Ek E'nin gerisi).
-- [ ] Float `none` gibi dizilir: `float: left` bir kutu metni düşürmez (test).
+- [x] Float `none` gibi dizilir: `float: left` bir kutu metni düşürmez (test).
 - [ ] **WPT altyapısı:** wptrunner'a `erk --screenshot` üzerinden koşan "erk"
   ürünü; `css/CSS2/normal-flow` ve `css/css-position` taban çizgileri JSON,
   gerileme yasağı CI'da.
 - [ ] **Akış layout'u kararı** (roadmap): normal-flow ve css-text taban
   çizgisindeki kalan testler sınıflanır, karar yazılır.
-- [ ] Referans sayfası: `positioning.html`.
+- [x] Referans sayfası: `positioning.html`.
 
 ### M1.5: Flexbox
 
@@ -401,3 +401,26 @@ yüksekliğini yok sayıyor; `text-top` alçalmayı kullanıyor; `bottom` üste
 yerleşiyor; uzun bir satır hizalı kutu satırı büyütmüyor; layout birimi
 yok; `super` beşte bir kullanıyor; konumlar ebeveyne göre yuvarlanıyor.
 Sağlamlık üretecine uç `vertical-align` değerleri eklendi.
+
+**M1.4, konumlandırma (2026-10-01).** Plan adımı ikiye bölündü: bu PR
+konumlandırma, `z-index` ve float; WPT altyapısı ve akış layout'u kararı
+ayrı bir PR'da (karar WPT taban çizgisine bağlı). Yeni `positioning`
+referans sayfası %97,39; kutuların 13/13'ü Chrome'la 1 px içinde, sabit
+alt çubuk ve `z-index` sırası piksel piksel aynı.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Absolute positioning'i Taffy'yle doğrulamak | Taffy absolute bir kutuyu her zaman **ebeveynine** göre yerleştiriyor; CSS'te kapsayıcı blok en yakın konumlandırılmış ata ya da görüntü alanı. Erk absolute ve fixed elemanları akıştan çıkarıp kapsayıcı bloklarının Taffy çocuğu yapıyor, layout'tan sonra her kutunun konumunu en yakın kutulu DOM atasına göre yeniden hesaplıyor (boyama ve host DOM'u yürür). Bu genelleme atomların anonim kutu düzeltmesinin de yerini aldı. Kök kutu artık görüntü alanı boyutunda: ilk kapsayıcı blok o |
+| — | Absolute bir eleman paragrafı bölüyordu: Stylo onu bloğa çeviriyor, Erk de blok çocuk sanıp metni anonim kutulara ayırıyordu. Artık satır içi içerikten tamamen çıkıyor |
+| — | Konumlandırılmış bir metin bloğu paragraf yaprağı olsaydı absolute çocuklarını Taffy yerleştiremezdi; böyle bir blok blok kutusu olarak kalıyor, metni anonim bir paragrafta |
+| — | stylo_taffy `static` ve `sticky`'yi Taffy'nin relative konumuna eşliyor, yani `top`/`left` static bir kutuyu da kaydırıyordu; artık yok sayılıyor |
+| Float `none` gibi dizilir | Taffy'nin float özelliği açıktı ve float'u gerçekten yüzdürüyordu: sonraki paragraf float'un yanında, y=0'da başlıyordu ve Parley satırları float'un çevresinden dolaşmadığı için metin float'un üstüne çizilirdi. Taffy'ye artık `float: none` veriliyor |
+| `z-index` ile boyama sırası | Yığın bağlamları: negatif `z-index`'liler, akıştaki bloklar, satır içi içerik, `auto`/0, pozitifler. Her konumlandırılmış eleman bir bütün olarak boyanıyor; `z-index: auto`'nun içindeki konumlandırılmış torunlar CSS'te dış bağlama katılabilir, Erk'te içeride kalıyor |
+| — | Bilinen sınırlar: bütün inset'ler `auto` olan absolute bir kutu, akışta duracağı yerde değil kapsayıcı bloğun içerik kenarında; satır içi bir eleman kapsayıcı blok olmuyor; `sticky` kaydırma gelene kadar `static` |
+
+Mutasyonlar (10/10 yakalandı): fixed konumlandırılmış ataya gidiyor;
+absolute elemanlar akışta kalıyor; konumlar layout ebeveynine göre kalıyor;
+static inset'lerini koruyor; float yüzüyor; ilk kapsayıcı blok içerik
+boyunda; konumlandırılmış metin bloğu paragraf oluyor; konumlandırılmışlar
+akışın içinde boyanıyor; `z-index` yok sayılıyor; negatif `z-index` akışın
+üstünde. Sağlamlık üretecine uç konumlandırma değerleri eklendi.
