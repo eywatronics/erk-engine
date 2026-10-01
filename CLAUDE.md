@@ -65,6 +65,22 @@ hepsi host'tan gelir. Gerekçe: [p1-embedded.md](docs/design/p1-embedded.md).
   5. Yığılmış bir dalın PR'ı, tabanı birleşmeden açılmaz; açıldıysa birleşme
      sonrası 3. adım hemen uygulanır ve PR'ın çakışmasız olduğu denetlenir.
 
+## İnceleme raporları
+
+Her `main` birleşmesinden sonra başka bir inceleyici, birleşen işin
+raporunu `docs/reviews/` altına koyar.
+
+- **Her yeni işe başlamadan önce `docs/reviews/`'a bakılır.** Henüz depoda
+  izlenmeyen (yeni) bir rapor varsa önce o okunur. Her maddesi
+  değerlendirilir: geçerli olanlar o işin parçası olur, geçersiz olanlar
+  gerekçesiyle ilgili planın yürütme notlarına yazılır. Ondan sonra işe
+  geçilir. Rapor yoksa iş doğrudan başlar.
+- Rapor dosyası, onu ele alan işin commit'ine eklenir; böylece depoda
+  izlenir ve "yeni rapor" yalnızca izlenmeyen dosya demek olur.
+- Commit'e dosyalar adlarıyla eklenir (`git add <yol>`), hiçbir zaman
+  `git add -A` ile değil: çalışma dizininde başkasının bıraktığı bir dosya
+  okunmadan commit'e girmemeli.
+
 ## Dil
 
 | Türkçe | İngilizce |
