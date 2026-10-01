@@ -4,13 +4,22 @@
 //! boundary to a compositor. M0 has backgrounds and glyph runs; borders,
 //! images, clips and the spatial tree come with the features that need them.
 //!
-//! Paint order follows CSS 2 Appendix E for a single stacking context: every
-//! block background first, in tree order, then all inline content: each
-//! paragraph's inline backgrounds, then its text. Painting a paragraph's text
-//! right after its own background would let a later sibling's background
-//! cover text that overflows into it. An atomic inline's own background is
-//! painted with the block backgrounds, before the text of its line; Appendix
-//! E paints it in line order, which differs only where they overlap.
+//! Paint order follows CSS 2 Appendix E. Within a stacking context: the
+//! positioned descendants with a negative `z-index`, then every in-flow
+//! block background in tree order, then all inline content (each
+//! paragraph's inline backgrounds, then its text), then the positioned
+//! descendants with `z-index: auto` or 0 in tree order, then those with a
+//! positive `z-index`. Painting a paragraph's text right after its own
+//! background would let a later sibling's background cover text that
+//! overflows into it.
+//!
+//! Each positioned element is painted as a unit, its own context. For
+//! `z-index: auto` CSS lets positioned descendants inside it join the outer
+//! context's order; Erk keeps them inside, which differs only when such a
+//! descendant has a `z-index` meant to reach past its ancestor. An atomic
+//! inline's own background is painted with the block backgrounds, before
+//! the text of its line; Appendix E paints it in line order, which differs
+//! only where they overlap.
 
 use std::fmt::Write as _;
 
@@ -79,9 +88,7 @@ impl DisplayList {
             layouts,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
         };
-        let mut text = Vec::new();
-        list.add_box(&walk, doc.root(), (0.0, 0.0), &mut text);
-        list.items.append(&mut text);
+        list.items = stacking_context(&walk, doc.root(), (0.0, 0.0));
         list
     }
 
@@ -108,74 +115,6 @@ impl DisplayList {
             }
         }
         None
-    }
-
-    /// Add `id`'s background to the list and its text to `text`, which is
-    /// appended after every background once the walk is done.
-    fn add_box(
-        &mut self,
-        walk: &Walk<'_>,
-        id: NodeId,
-        parent_origin: (f32, f32),
-        text: &mut Vec<DisplayItem>,
-    ) {
-        let Some(layout) = walk.layouts.get(id) else {
-            // An element without a box (an inline element) can contain one
-            // that has a box (an atomic inline), positioned relative to the
-            // block around them.
-            for child in walk.doc.children(id) {
-                self.add_box(walk, child, parent_origin, text);
-            }
-            return;
-        };
-        let x = parent_origin.0 + layout.location.x;
-        let y = parent_origin.1 + layout.location.y;
-        let style = walk.styles.computed(id);
-        // `visibility: hidden` keeps the box but paints nothing of it; its
-        // descendants may still be visible, so the walk continues.
-        let visible = style
-            .as_ref()
-            .is_none_or(|style| style.clone_visibility() == Visibility::Visible);
-
-        if let Some(style) = &style
-            && visible
-            && Some(id) != walk.canvas_source
-        {
-            let color = background(style);
-            if color[3] != 0 {
-                self.items.push(DisplayItem::Rect {
-                    x,
-                    y,
-                    width: layout.size.width,
-                    height: layout.size.height,
-                    color,
-                });
-            }
-        }
-
-        if let Some(shaped) = walk.layouts.text(id)
-            && visible
-        {
-            let content_x = x + layout.border.left + layout.padding.left;
-            let content_y = y + layout.border.top + layout.padding.top;
-            text.extend(inline_content(shaped, (content_x, content_y)));
-        }
-
-        // Anonymous boxes inherit their block's visibility and have no
-        // border or padding of their own.
-        if visible {
-            for anonymous in walk.layouts.anonymous(id) {
-                let origin = (
-                    x + anonymous.layout.location.x,
-                    y + anonymous.layout.location.y,
-                );
-                text.extend(inline_content(&anonymous.text, origin));
-            }
-        }
-
-        for child in walk.doc.children(id) {
-            self.add_box(walk, child, (x, y), text);
-        }
     }
 
     /// A readable, stable text form of the list, one item per line. Useful
@@ -206,6 +145,127 @@ impl DisplayList {
             }
         }
         out
+    }
+}
+
+/// What one stacking context paints, sorted into the phases of CSS 2
+/// Appendix E.
+#[derive(Default)]
+struct Context {
+    backgrounds: Vec<DisplayItem>,
+    inline: Vec<DisplayItem>,
+    /// Positioned descendants, each painted later as a unit.
+    layers: Vec<Layer>,
+}
+
+/// A positioned element, painted as a unit at its `z-index`.
+struct Layer {
+    z: i32,
+    id: NodeId,
+    parent_origin: (f32, f32),
+}
+
+/// The items of the stacking context rooted at `id`, in paint order.
+fn stacking_context(walk: &Walk<'_>, id: NodeId, parent_origin: (f32, f32)) -> Vec<DisplayItem> {
+    let mut context = Context::default();
+    add_box(walk, id, parent_origin, &mut context, true);
+    // Stable: equal `z-index` keeps tree order.
+    context.layers.sort_by_key(|layer| layer.z);
+    let (below, above): (Vec<Layer>, Vec<Layer>) =
+        context.layers.into_iter().partition(|layer| layer.z < 0);
+    let mut items = Vec::new();
+    for layer in below {
+        items.extend(stacking_context(walk, layer.id, layer.parent_origin));
+    }
+    items.append(&mut context.backgrounds);
+    items.append(&mut context.inline);
+    for layer in above {
+        items.extend(stacking_context(walk, layer.id, layer.parent_origin));
+    }
+    items
+}
+
+/// Add `id`'s background and inline content to `context`, then its
+/// children's. A positioned element other than the context's own root
+/// becomes a layer instead.
+fn add_box(
+    walk: &Walk<'_>,
+    id: NodeId,
+    parent_origin: (f32, f32),
+    context: &mut Context,
+    context_root: bool,
+) {
+    let Some(layout) = walk.layouts.get(id) else {
+        // An element without a box (an inline element) can contain one
+        // that has a box (an atomic inline), positioned relative to the
+        // block around them.
+        for child in walk.doc.children(id) {
+            add_box(walk, child, parent_origin, context, false);
+        }
+        return;
+    };
+    let style = walk.styles.computed(id);
+    if !context_root
+        && let Some(style) = &style
+        && crate::layout::is_positioned(style)
+    {
+        context.layers.push(Layer {
+            z: style.clone_z_index().integer_or(0),
+            id,
+            parent_origin,
+        });
+        return;
+    }
+    let x = parent_origin.0 + layout.location.x;
+    let y = parent_origin.1 + layout.location.y;
+    // `visibility: hidden` keeps the box but paints nothing of it; its
+    // descendants may still be visible, so the walk continues.
+    let visible = style
+        .as_ref()
+        .is_none_or(|style| style.clone_visibility() == Visibility::Visible);
+
+    if let Some(style) = &style
+        && visible
+        && Some(id) != walk.canvas_source
+    {
+        let color = background(style);
+        if color[3] != 0 {
+            context.backgrounds.push(DisplayItem::Rect {
+                x,
+                y,
+                width: layout.size.width,
+                height: layout.size.height,
+                color,
+            });
+        }
+    }
+
+    if let Some(shaped) = walk.layouts.text(id)
+        && visible
+    {
+        let content_x = x + layout.border.left + layout.padding.left;
+        let content_y = y + layout.border.top + layout.padding.top;
+        context
+            .inline
+            .extend(inline_content(shaped, (content_x, content_y)));
+    }
+
+    // Anonymous boxes inherit their block's visibility and have no
+    // border or padding of their own.
+    if visible {
+        for anonymous in walk.layouts.anonymous(id) {
+            let origin = (
+                x + anonymous.layout.location.x,
+                y + anonymous.layout.location.y,
+            );
+            context
+                .inline
+                .extend(inline_content(&anonymous.text, origin));
+        }
+    }
+
+    for child in walk.doc.children(id) {
+        add_box(walk, child, (x, y), context, false);
     }
 }
 

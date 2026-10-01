@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Konumlandırma</title>
+<style>
+  body { margin: 24px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 16px; }
+  .kart { position: relative; width: 300px; height: 90px; background: #e0e7ff; margin-bottom: 24px; }
+  .kart p { margin: 0; padding: 12px; }
+  .rozet { position: absolute; top: 8px; right: 8px; width: 48px; height: 22px; background: #dc2626; }
+  .kaydir { position: relative; top: 6px; left: 20px; width: 120px; height: 30px; background: #fde68a; }
+  .yigin { position: relative; height: 120px; }
+  .katman { position: absolute; width: 90px; height: 70px; }
+  .bir { left: 0; top: 0; background: #10b981; z-index: 2; }
+  .iki { left: 50px; top: 30px; background: #3b82f6; z-index: 1; }
+  .uc { left: 100px; top: 10px; background: #f97316; z-index: 3; }
+  .alt { position: absolute; left: 210px; top: 20px; width: 80px; height: 80px; background: #a855f7; z-index: -1; }
+  .ust-blok { margin-left: 240px; width: 80px; height: 60px; background: #94a3b8; }
+  .alt-cubuk { position: fixed; left: 0; right: 0; bottom: 0; height: 36px; background: #1f2933; }
+</style>
+</head>
+<body>
+  <div class="kart"><p>Bildirimler kartı, köşesinde bir rozet.</p><span class="rozet"></span></div>
+  <div class="kaydir"></div>
+  <p>Kaydırılan kutu akıştaki yerini korur: bu satır onun altında başlar.</p>
+  <div class="yigin">
+    <div class="katman bir"></div>
+    <div class="katman iki"></div>
+    <div class="katman uc"></div>
+    <div class="alt"></div>
+    <div class="ust-blok"></div>
+  </div>
+  <div class="alt-cubuk"></div>
+</body>
+</html>

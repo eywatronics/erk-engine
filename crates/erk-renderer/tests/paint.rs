@@ -201,3 +201,43 @@ fn superscript_glyphs_are_painted_raised() {
     // Raised by a third of the 16px font plus one pixel, in 1/64 px.
     assert_eq!(y_of("x") - y_of("2"), 405.0 / 64.0);
 }
+
+/// The colour at the middle of the overlap, as RGB.
+fn rgb_at(frame: &Frame, x: usize, y: usize) -> [u8; 3] {
+    let [r, g, b, _] = pixel(frame, x, y);
+    [r, g, b]
+}
+
+#[test]
+fn positioned_boxes_paint_after_the_flow() {
+    // The red box comes first in the tree but is positioned: it is painted
+    // after the blue in-flow block that overlaps it.
+    let frame = render_html(
+        r#"<style>body { margin: 0 }</style>
+        <div style="position: relative; background: #ff0000; height: 40px"></div>
+        <div style="margin-top: -20px; background: #0000ff; height: 40px"></div>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    assert_eq!(rgb_at(&frame, 10, 30), [255, 0, 0]);
+    assert_eq!(rgb_at(&frame, 10, 50), [0, 0, 255]);
+}
+
+#[test]
+fn z_index_orders_positioned_boxes() {
+    let frame = render_html(
+        r#"<style>body { margin: 0 } div { position: absolute; width: 40px; height: 40px }</style>
+        <div style="left: 0; top: 0; z-index: 2; background: #ff0000"></div>
+        <div style="left: 20px; top: 20px; z-index: 1; background: #0000ff"></div>
+        <p style="margin: 0; position: relative; height: 0"></p>
+        <div style="left: 100px; top: 0; z-index: -1; background: #00ff00"></div>
+        <section style="margin-left: 110px; width: 40px; height: 40px; background: #ffff00"></section>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    // The higher z-index wins although it comes first.
+    assert_eq!(rgb_at(&frame, 30, 30), [255, 0, 0]);
+    // A negative z-index is painted below the in-flow yellow block.
+    assert_eq!(rgb_at(&frame, 120, 10), [255, 255, 0]);
+    assert_eq!(rgb_at(&frame, 105, 10), [0, 255, 0]);
+}

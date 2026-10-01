@@ -676,3 +676,101 @@ fn raised_and_lowered_text_make_room_on_their_own_side() {
     // `<sub>` lowered 268/64: the strut's 17 above, 4 + 268/64 below.
     assert_eq!(height("<p>x<sub>2</sub></p>"), 17.0 + 4.0 + 268.0 / 64.0);
 }
+
+#[test]
+fn relative_position_offsets_the_box_but_not_the_flow() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; top: 10px; left: 5px; height: 20px"></div><div style="height: 10px"></div>"#,
+    );
+    let divs = divs(&doc, &layouts);
+    assert_eq!((divs[0].location.x, divs[0].location.y), (5.0, 10.0));
+    assert_eq!(divs[1].location.y, 20.0);
+}
+
+#[test]
+fn static_position_ignores_insets() {
+    let (doc, layouts) = lay_out(r#"<div style="top: 50px; left: 9px; height: 10px"></div>"#);
+    let div = divs(&doc, &layouts)[0];
+    assert_eq!((div.location.x, div.location.y), (0.0, 0.0));
+}
+
+#[test]
+fn an_absolute_box_is_placed_in_its_nearest_positioned_ancestor() {
+    // The static middle div is the DOM parent; the relative outer div is the
+    // containing block.
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; margin-left: 30px; width: 200px; height: 100px"><div style="margin-left: 15px; height: 10px"><div style="position: absolute; right: 10px; bottom: 10px; width: 20px; height: 20px"></div></div></div>"#,
+    );
+    let [outer, middle, inner] = divs(&doc, &layouts)[..] else {
+        panic!("three divs");
+    };
+    assert_eq!(outer.location.x, 30.0);
+    assert_eq!(middle.location.x, 15.0);
+    // 200 - 10 - 20 from the outer div's left, relative to the middle div.
+    assert_eq!(inner.location.x, 170.0 - 15.0);
+    assert_eq!(inner.location.y, 70.0);
+}
+
+#[test]
+fn without_a_positioned_ancestor_the_viewport_contains() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="height: 30px"><div style="position: absolute; bottom: 0; right: 0; width: 20px; height: 20px"></div></div>"#,
+    );
+    let inner = divs(&doc, &layouts)[1];
+    assert_eq!(
+        (inner.location.x, inner.location.y),
+        (WIDTH - 20.0, HEIGHT - 20.0)
+    );
+}
+
+#[test]
+fn a_fixed_box_ignores_its_positioned_ancestors() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; margin: 40px; height: 30px"><div style="position: fixed; top: 0; left: 0; width: 20px; height: 20px"></div></div>"#,
+    );
+    let inner = divs(&doc, &layouts)[1];
+    // At the viewport's corner: 40px up and left of its parent.
+    assert_eq!((inner.location.x, inner.location.y), (-40.0, -40.0));
+}
+
+#[test]
+fn an_absolute_element_does_not_split_its_paragraph() {
+    let (doc, layouts) =
+        lay_out(r#"<p>önce <span style="position: absolute; top: 0">x</span>sonra</p>"#);
+    let p = all(&doc, &local_name!("p"))[0];
+    let shaped = layouts.text(p).expect("still one paragraph");
+    assert_eq!(shaped.text, "önce sonra");
+    assert!(layouts.anonymous(p).is_empty());
+    // The span has a box of its own, its text in an anonymous paragraph.
+    let span = all(&doc, &local_name!("span"))[0];
+    assert!(layouts.get(span).is_some());
+    assert_eq!(layouts.anonymous(span).len(), 1);
+}
+
+#[test]
+fn a_positioned_block_of_text_lays_out_its_absolute_children() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; padding: 4px">metin <span style="position: absolute; top: 0; left: 0; width: 5px; height: 5px"></span></div>"#,
+    );
+    let div = all(&doc, &local_name!("div"))[0];
+    assert_eq!(
+        layouts.anonymous(div).len(),
+        1,
+        "its text in an anonymous box"
+    );
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    assert_eq!((span.location.x, span.location.y), (0.0, 0.0));
+    assert_eq!((span.size.width, span.size.height), (5.0, 5.0));
+}
+
+#[test]
+fn a_float_is_laid_out_as_if_not_floated() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="float: left; width: 50px; height: 50px"></div><p style="margin: 0">metin</p>"#,
+    );
+    let p = boxes(&doc, &layouts, &local_name!("p"))[0];
+    // Below the float, not beside it: Parley's lines do not flow around
+    // floats, so text beside one would be drawn over it.
+    assert_eq!(p.location.y, 50.0);
+    assert!(layouts.text(all(&doc, &local_name!("p"))[0]).is_some());
+}
