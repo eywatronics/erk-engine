@@ -22,6 +22,23 @@ struct Sink {
     doc: RefCell<Document>,
 }
 
+/// How deep the parser nests nodes: the document is 0 and `<html>` 1. A node
+/// whose parent is deeper is attached to the parent's parent instead, as
+/// Blink's parser does (kMaximumHTMLParserDOMTreeDepth), so Erk builds the
+/// same tree as Chrome. Without a limit, a few thousand nested elements
+/// overflowed the renderer thread's stack.
+const MAX_PARENT_DEPTH: usize = 512;
+
+fn depth(doc: &Document, id: NodeId) -> usize {
+    let mut depth = 0;
+    let mut node = doc.get(id).parent;
+    while let Some(parent) = node {
+        depth += 1;
+        node = doc.get(parent).parent;
+    }
+    depth
+}
+
 impl Sink {
     fn append_text(doc: &mut Document, parent: NodeId, text: &str) {
         if let Some(last) = doc.get(parent).last_child
@@ -92,9 +109,15 @@ impl TreeSink for Sink {
 
     fn append(&self, parent: &NodeId, child: NodeOrText<NodeId>) {
         let mut doc = self.doc.borrow_mut();
+        let mut parent = *parent;
+        if depth(&doc, parent) > MAX_PARENT_DEPTH
+            && let Some(grandparent) = doc.get(parent).parent
+        {
+            parent = grandparent;
+        }
         match child {
-            NodeOrText::AppendNode(node) => doc.append(*parent, node),
-            NodeOrText::AppendText(text) => Self::append_text(&mut doc, *parent, &text),
+            NodeOrText::AppendNode(node) => doc.append(parent, node),
+            NodeOrText::AppendText(text) => Self::append_text(&mut doc, parent, &text),
         }
     }
 

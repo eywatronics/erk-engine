@@ -12,12 +12,18 @@ use std::thread::JoinHandle;
 use crate::messages::{FromRenderer, ToRenderer};
 use crate::render_html;
 
+/// Layout recurses once per level of nesting, and the parser allows 512
+/// levels (as Chrome's does). A debug build needs more than the default 2 MiB
+/// for that; this is address space, committed only as it is used.
+pub(crate) const STACK_SIZE: usize = 16 * 1024 * 1024;
+
 /// Start the renderer on its own thread.
 pub fn spawn() -> (Sender<ToRenderer>, Receiver<FromRenderer>, JoinHandle<()>) {
     let (to_renderer, inbox) = channel();
     let (outbox, from_renderer) = channel();
     let handle = std::thread::Builder::new()
         .name("erk-renderer".to_owned())
+        .stack_size(STACK_SIZE)
         .spawn(move || run(&inbox, &outbox))
         .expect("the renderer thread starts");
     (to_renderer, from_renderer, handle)
