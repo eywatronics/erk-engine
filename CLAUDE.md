@@ -5,11 +5,12 @@ projeye aittir.
 
 ## Ürün
 
-Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: JavaScript
-yok, host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u `NodeId` ile
-sürer, Erk çizer ve olayları bildirir. Çekirdekte dosya, ağ, süreç, ortam
-değişkeni ve saat yoktur; hepsi host'tan gelir. Gerekçe:
-[p1-embedded.md](docs/design/p1-embedded.md).
+Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: çekirdekte
+JavaScript yok, host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u
+`NodeId` ile sürer, Erk çizer ve olayları bildirir. JavaScript isteğe bağlı bir
+bağlamadır (`erk-script`, M6): Python gibi genel API'nin üstünde durur,
+çekirdeğe girmez. Çekirdekte dosya, ağ, süreç, ortam değişkeni ve saat yoktur;
+hepsi host'tan gelir. Gerekçe: [p1-embedded.md](docs/design/p1-embedded.md).
 
 ## Commit kuralları
 
@@ -120,6 +121,7 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | M3 | `unsafe` istisnası: `erk-ffi` (C-ABI); üretilen `erk.h` depodakiyle aynı; C örneği CI'da derlenip çalışır |
 | M3 | FFI'dan panik sızmaz; eski `NodeId` ve yanlış iş parçacığı hata kodu döner |
 | M4 | `Mutation` dizileri fuzz'lanır |
+| M6 | Çekirdek crate'ler, `erk` ve `erk-ffi` hiçbir JS motoruna bağımlı değil; `erk-script` projeden yalnızca `erk`'e bağımlı (`cargo tree`) |
 
 ## unsafe ve C/C++ politikası
 
@@ -149,8 +151,9 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 - **G/Ç yalnızca host'ta.** Çekirdek crate'ler (`erk-dom`, `erk-style`,
   `erk-renderer`) dosya, ağ, süreç, ortam değişkeni ve saat kullanmaz;
   kaynaklar host'un callback'inden, zaman host'un `now_ns`'inden gelir.
-  İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. `<script>`
-  hiçbir zaman çalışmaz.
+  İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. Çekirdek
+  `<script>` çalıştırmaz; betik ancak host isteğe bağlı `erk-script`'i
+  açarsa çalışır ve host'un açtığı işlevler dışında hiçbir şeye erişemez.
 - Loglara sayfa içeriği, form verisi veya kimlik bilgisi yazılmaz.
 
 ## Test disiplini
@@ -230,3 +233,5 @@ ve ikisi arasındaki fark toleransın üstünde olmalı.
 
 - Mimari kararlar: `docs/design/`
 - Yol haritası ve uygulama planları: `docs/plans/`
+- Mimari tartışma yalnızca o anki taşı bloke ediyorsa yapılır; etmiyorsa
+  ilgili taşın planına açık soru olarak yazılır.

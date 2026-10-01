@@ -19,7 +19,9 @@ does not lay out or paint is not supported.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `<script>`, event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Erk runs no scripts. The host subscribes to events through the embedding API |
+| `<script>` and scripts the host runs | Later (M6) | Off by default. The engine core runs no scripts; the optional `erk-script` binding runs JavaScript on top of the public API, with a small DOM subset (selectors, text, attributes, `classList`, `style`, create/insert/remove, `addEventListener`) |
+| Event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Listen with `addEventListener` in `erk-script`, or subscribe from the host through the embedding API |
+| Web APIs (`fetch`, storage, workers, `XMLHttpRequest`) | Not planned | A script reaches files or the network only through functions the host exposes |
 
 ## Selectors and cascade
 
@@ -100,4 +102,5 @@ does not lay out or paint is not supported.
 | Feature | Status | Test / notes |
 |---|---|---|
 | HTML parsing (full HTML5 algorithm) | Supported | `erk-dom/tests/parse.rs` |
+| `<details>`/`<summary>`, `<dialog>`, the `popover` attribute, `commandfor`/`command` | Later (M5) | Built-in behaviour: menus, disclosure widgets and dialogs work without script or a host round trip |
 | `<audio>`, `<video>`, `<canvas>`, `<iframe>`, SVG | Not planned for now | Revisited after M9 |
