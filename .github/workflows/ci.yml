@@ -248,12 +248,14 @@ jobs:
             echo 'END_OF_DIRS'
           } >> "$GITHUB_OUTPUT"
 
+      # Outside target/: when the Cargo.lock changes, rust-cache restores a
+      # fallback cache and first cleans target/, emptying a checkout there.
       - name: Check out the pinned WPT directories
         uses: actions/checkout@v4
         with:
           repository: web-platform-tests/wpt
           ref: ${{ steps.pin.outputs.commit }}
-          path: target/wpt
+          path: wpt-checkout
           sparse-checkout: ${{ steps.pin.outputs.dirs }}
           persist-credentials: false
 
@@ -263,4 +265,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: WPT reftests match the baseline
-        run: cargo run --release --locked -p erk-wpt -- check --wpt target/wpt
+        run: cargo run --release --locked -p erk-wpt -- check --wpt wpt-checkout

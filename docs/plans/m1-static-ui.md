@@ -546,6 +546,7 @@ Chrome'la 1 px içinde. Diğer sayfaların skorları değişmedi.
 | **Lisans kapısı** | `deny.toml`: MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, Unlicense, 0BSD, MPL-2.0 (Stylo), OFL-1.1 (gömülü fontlar), her biri gerekçesiyle. GPL ailesi yok: `r-efi`'nin "MIT OR Apache-2.0 OR LGPL-2.1-or-later" ifadesinden MIT seçiliyor. CI `licenses` job'ı `cargo deny --all-features --locked check licenses` |
 | — | **Listeden başka yollar da kapalı:** `check-license-config.sh` `deny.toml`'da istisna (`exceptions`), açıklama (`clarify`), `private`/`ignore`, `skip`, `exclude`, hedef ya da özellik daraltması ve GPL ailesinden bir izin bulursa düşüyor; `all-features = true` zorunlu. Böyle bir karar betiği aynı PR'da değiştirmeyi istiyor |
 | — | Renderer yüzey muhafızı satır satır okuyordu: rustfmt'nin çok satıra böldüğü `pub use` listesine eklenen bir tip görünmüyordu. Artık her `pub` öğesi `;` ya da `{`'ye kadar bütün okunuyor |
+| — | **CI'da WPT kontrolü hiç test bulamadı** (2009 test "missing"). PR `Cargo.lock`'u değiştirdiği için rust-cache tam eşleşme bulamayıp `main`'in önbelleğine düştü; bu durumda geri yüklemeden önce `target/`'ı temizliyor ve `target/wpt`'deki WPT dosyalarını da sildi (dizinler kaldı, dosyalar gitti). Önceki PR'lar kilidi değiştirmediği için görülmedi. CI'daki WPT kopyası artık `target/` dışında (`wpt-checkout`) |
 
 Muhafızlar kasıtlı ihlallerle denendi: izin listesinden MPL-2.0'ı çıkarmak
 (28 crate reddedildi); `[[licenses.exceptions]]`, `exceptions = [...]`,
