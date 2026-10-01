@@ -33,6 +33,7 @@ pub fn spawn() -> (Sender<ToRenderer>, Receiver<FromRenderer>, JoinHandle<()>) {
 fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
     let mut html: Option<String> = None;
     let mut size: Option<(u16, u16)> = None;
+    let mut scale = 1.0;
     // The resources of the current document: asked for once, kept across
     // resizes, dropped with the document.
     let mut resources = Resources::default();
@@ -48,6 +49,7 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                     resources = resources.for_new_document();
                 }
                 ToRenderer::Resize { width, height } => size = Some((width, height)),
+                ToRenderer::Scale { factor } => scale = factor,
                 ToRenderer::Resource(response) => resources.complete(&response),
                 ToRenderer::ResourceMissing { id } => resources.missing(id),
                 ToRenderer::Shutdown => return,
@@ -55,7 +57,7 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             message = inbox.try_recv().ok();
         }
         if let (Some(document), Some((width, height))) = (&html, size) {
-            let (frame, requests) = render_document(document, width, height, &mut resources);
+            let (frame, requests) = render_document(document, width, height, scale, &mut resources);
             // The requests first: a host that answers at once has its
             // answers queued before it sees the frame painted without them.
             if !requests.is_empty() && outbox.send(FromRenderer::Resources(requests)).is_err() {

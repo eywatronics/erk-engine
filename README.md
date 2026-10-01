@@ -158,7 +158,7 @@ Erk does not support yet (external stylesheets, block-in-inline,
 
 The Linux release binary is held under a size budget in CI. Similarity to
 Chrome 154 on the reference pages: every element box matches within 1 CSS
-pixel on all fourteen pages, and pixel scores range from 48 % on text-heavy
+pixel on all sixteen pages, and pixel scores range from 48 % on text-heavy
 pages (glyph antialiasing differs) to 100 % on boxes; the scores are in
 [expectations.txt](crates/erk-renderer/tests/reference/expectations.txt)
 and may only rise unless a written reason says otherwise.

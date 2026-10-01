@@ -48,6 +48,8 @@ const UA_CSS: &str = include_str!("ua.css");
 /// Computes styles for documents rendered into a viewport of a given size.
 pub struct StyleEngine {
     viewport: Size2D<f32, style_traits::CSSPixel>,
+    /// Device pixels per CSS pixel.
+    device_scale: f32,
     guard: SharedRwLock,
     url: UrlExtraData,
     user_agent: DocumentStyleSheet,
@@ -76,11 +78,25 @@ impl StyleEngine {
         let user_agent = stylesheet(UA_CSS, Origin::UserAgent, &guard, &url);
         Self {
             viewport: Size2D::new(width, height),
+            device_scale: 1.0,
             guard,
             url,
             user_agent,
             font_metrics,
         }
+    }
+
+    /// The same engine on a device with `scale` device pixels per CSS pixel
+    /// (2 on a typical HiDPI screen). The viewport stays in CSS pixels; the
+    /// scale is what `resolution` media queries see. A scale that is not a
+    /// positive number is taken as 1.
+    pub fn with_device_scale(mut self, scale: f32) -> Self {
+        self.device_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        self
     }
 
     /// Style every element in `doc`, using the UA stylesheet and the
@@ -145,8 +161,11 @@ impl StyleEngine {
             MediaType::screen(),
             QuirksMode::NoQuirks,
             self.viewport,
-            Size2D::new(self.viewport.width, self.viewport.height),
-            Scale::new(1.0),
+            Size2D::new(
+                self.viewport.width * self.device_scale,
+                self.viewport.height * self.device_scale,
+            ),
+            Scale::new(self.device_scale),
             Box::new(SharedFontMetrics(self.font_metrics.clone())),
             ComputedValues::initial_values_with_font_override(Font::initial_values()),
             PrefersColorScheme::Light,

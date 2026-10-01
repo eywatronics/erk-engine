@@ -72,7 +72,8 @@ does not lay out or paint is not supported.
 | Turkish and other Latin text | Supported | `turkish_letters_all_have_glyphs` |
 | `text-align` (`start`, `end`, `left`, `right`, `center`, `justify`), `align` attribute | Supported | `text_align_moves_the_line_within_the_box`, `justified_lines_fill_the_box_except_the_last`, `the_align_attribute_aligns_text` |
 | System fonts and font fallback (CJK, emoji) | M1 | Today only the embedded Noto Sans |
-| `text-transform` with the element's `lang` (Turkish `i → İ`) | M1 | |
+| `text-transform: uppercase`, `lowercase`, `capitalize` in the language of the nearest `lang` attribute (Turkish `i → İ`, Greek capitals without accents, Dutch `IJ`) | Supported | `uppercase_and_lowercase_follow_the_language`, `the_nearest_lang_attribute_decides`, `capitalize_titlecases_the_first_letter_of_each_word`, `a_word_continues_across_inline_elements`, `only_the_transformed_element_changes`. Text without a language uses the root rules (Chrome uses its own UI language). Unlike Chrome, capitalize is language-sensitive too |
+| `text-transform: full-width`, `full-size-kana` | Later | |
 | Text selection, caret, IME input | M5 | |
 | Web fonts (`@font-face` from the host's resources) | Later | |
 | `::first-line`, `::first-letter` | Not planned | Rarely used in UI, costly in inline layout |
@@ -115,5 +116,6 @@ does not lay out or paint is not supported.
 | Feature | Status | Test / notes |
 |---|---|---|
 | HTML parsing (full HTML5 algorithm) | Supported | `erk-dom/tests/parse.rs` |
+| HiDPI: layout in CSS pixels, painting at the screen's device scale; `resolution` media queries | Supported | `a_css_pixel_covers_scale_device_pixels`, `the_viewport_is_the_device_size_in_css_pixels`, `text_is_drawn_at_device_resolution`, `resolution_media_queries_see_the_device_scale`. Positions round to CSS pixels, so a fractional scale leaves some edges soft |
 | `<details>`/`<summary>`, `<dialog>`, the `popover` attribute, `commandfor`/`command` | Later (M5) | Built-in behaviour: menus, disclosure widgets and dialogs work without script or a host round trip |
 | `<audio>`, `<video>`, `<canvas>`, `<iframe>`, SVG | Not planned for now | Revisited after M9 |

@@ -12,7 +12,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use erk_renderer::{
-    FromRenderer, ResourceRequest, ResourceResponse, ToRenderer, render_html_with_resources, spawn,
+    FromRenderer, ResourceRequest, ResourceResponse, ToRenderer, render_html_at_scale, spawn,
 };
 
 const WIDTH: u16 = 320;
@@ -110,6 +110,9 @@ const DECLARATIONS: &[&str] = &[
     "background: url(i.png); background-size: cover; border-radius: 50%",
     "background: url(i.png), url(gone.png), url(i.png); background-size: contain, 1e30px",
     "background-image: url(); background-position: 50% 50%",
+    "text-transform: uppercase",
+    "text-transform: capitalize",
+    "text-transform: lowercase full-width",
 ];
 
 const TEXT: &[&str] = &[
@@ -117,6 +120,9 @@ const TEXT: &[&str] = &[
     r#"<img src="i.png">"#,
     r#"<img src="gone.png" width="-5" height="1e30">"#,
     r#"<img src="i.png" width="100%" height="0">"#,
+    // Letters whose case mapping changes their length, under odd languages.
+    r#"<span lang="tr" style="text-transform: uppercase">ıi ﬁ ŉ ǰ</span>"#,
+    r#"<b lang="x--" style="text-transform: capitalize">'a' .b. ’c’ ß‍ﬀ</b>"#,
     "İstanbul ılık şişe göç üzüm ağaç",
     " ",
     "\n\t  \n",
@@ -190,9 +196,10 @@ fn tiny_png() -> Vec<u8> {
     out
 }
 
-/// Render `html` on a thread with the renderer's stack and report a panic as
-/// an error, keeping the page so it can be added to the corpus.
-fn renders(name: &str, html: &str) -> Result<(), String> {
+/// Render `html` at device `scale` on a thread with the renderer's stack and
+/// report a panic as an error, keeping the page so it can be added to the
+/// corpus.
+fn renders(name: &str, html: &str, scale: f32) -> Result<(), String> {
     let page = html.to_owned();
     let result = std::thread::Builder::new()
         .stack_size(RENDERER_STACK)
@@ -205,7 +212,7 @@ fn renders(name: &str, html: &str) -> Result<(), String> {
                     data: image.clone(),
                 })
             };
-            render_html_with_resources(&page, WIDTH, HEIGHT, &mut provide);
+            render_html_at_scale(&page, WIDTH, HEIGHT, scale, &mut provide);
         })
         .expect("a render thread starts")
         .join();
@@ -228,7 +235,11 @@ fn renders(name: &str, html: &str) -> Result<(), String> {
 fn generated_malformed_pages_render_without_panicking() {
     let mut rng = Rng(0x0e2c_2026_0930_0001);
     let failures: Vec<String> = (0..300)
-        .filter_map(|n| renders(&format!("generated-{n}"), &page(&mut rng)).err())
+        // Some at HiDPI scales, a fractional one among them.
+        .filter_map(|n| {
+            let scale = [1.0, 1.5, 2.0][n % 3];
+            renders(&format!("generated-{n}"), &page(&mut rng), scale).err()
+        })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
@@ -243,7 +254,7 @@ fn the_crash_corpus_renders_without_panicking() {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let html = std::fs::read_to_string(&path).expect("corpus pages are UTF-8");
         pages += 1;
-        if let Err(failure) = renders(&name, &html) {
+        if let Err(failure) = renders(&name, &html, 1.0) {
             failures.push(failure);
         }
     }

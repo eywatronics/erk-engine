@@ -14,6 +14,9 @@ pub enum ToRenderer {
     Load { html: String },
     /// The viewport is now `width` × `height` device pixels.
     Resize { width: u16, height: u16 },
+    /// The screen now has `factor` device pixels per CSS pixel (1 until
+    /// told otherwise; a window moved to a HiDPI screen sends 2).
+    Scale { factor: f32 },
     /// The host's answer to a resource request.
     Resource(ResourceResponse),
     /// The host has no resource for request `id`; the page renders

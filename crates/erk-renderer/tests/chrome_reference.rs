@@ -28,6 +28,11 @@
 //! `cargo test -p erk-renderer --test chrome_reference -- --ignored capture_chrome_references`
 //! After a Chrome upgrade, set `ERK_RECAPTURE_ALL=1` to recapture every page.
 //! Chrome is found through `ERK_CHROME` or its default install path.
+//!
+//! A page is drawn at one device pixel per CSS pixel unless it says
+//! otherwise with `<meta name="erk-device-scale" content="2">`: then Chrome
+//! captures it with that device scale factor and Erk renders it at the same
+//! scale, both into an 800 × 600 CSS pixel viewport.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,6 +51,30 @@ const HEIGHT: u16 = 600;
 /// on merhaba.html (difference 21) went unnoticed.
 /// `the_tolerance_cannot_hide_a_missing_background` checks this.
 const TOLERANCE: u8 = 12;
+
+/// The device scale a page asks for (see the module docs), 1 by default.
+fn page_scale(html: &str) -> f32 {
+    const META: &str = r#"<meta name="erk-device-scale" content=""#;
+    let Some(at) = html.find(META) else {
+        return 1.0;
+    };
+    let rest = &html[at + META.len()..];
+    let value = &rest[..rest.find('"').expect("the content attribute is closed")];
+    let scale: f32 = value.parse().expect("erk-device-scale is a number");
+    assert!(
+        scale > 0.0
+            && (f32::from(WIDTH) * scale).fract() == 0.0
+            && (f32::from(HEIGHT) * scale).fract() == 0.0,
+        "erk-device-scale {value} must give whole device pixels"
+    );
+    scale
+}
+
+/// The viewport in device pixels at `scale`.
+fn device_size(scale: f32) -> (u16, u16) {
+    let device = |css: u16| (f32::from(css) * scale) as u16;
+    (device(WIDTH), device(HEIGHT))
+}
 
 /// Largest difference, in CSS pixels, between an edge of an Erk box and
 /// Chrome's. Erk rounds boxes to whole pixels; Chrome's are fractional.
@@ -73,9 +102,10 @@ window.addEventListener('load', () => document.fonts.ready.then(() => {
 </script>
 "#;
 
-/// A colour covering at least this many pixels of a Chrome reference is a
-/// flat colour (a background, a box), not antialiasing: about a 32 × 32
-/// box. No antialiasing shade on the current pages comes close.
+/// A colour covering at least this many CSS pixels of a Chrome reference is
+/// a flat colour (a background, a box), not antialiasing: about a 32 × 32
+/// box. No antialiasing shade on the current pages comes close. On a page
+/// drawn at device scale 2 the same area is four times as many pixels.
 const FLAT_PIXELS: u32 = 1000;
 
 fn manifest() -> PathBuf {
@@ -351,7 +381,9 @@ fn erk_matches_its_recorded_distance_from_chrome() {
                  delete chrome/{name}.png and capture it again (see module docs)"
             ));
         }
-        let erk_png = erk_renderer::render_html_with_resources(&html, WIDTH, HEIGHT, &mut provide)
+        let scale = page_scale(&html);
+        let (width, height) = device_size(scale);
+        let erk_png = erk_renderer::render_html_at_scale(&html, width, height, scale, &mut provide)
             .to_png()
             .expect("non-empty frame");
         let result = compare(&decode(&erk_png), &decode(&chrome_png));
@@ -396,11 +428,13 @@ fn erk_matches_its_recorded_distance_from_chrome() {
 #[test]
 fn the_tolerance_cannot_hide_a_missing_background() {
     let mut failures = Vec::new();
-    for (name, _) in pages() {
+    for (name, path) in pages() {
         let Ok(png) = std::fs::read(reference_dir().join("chrome").join(format!("{name}.png")))
         else {
             continue; // reported by the main test
         };
+        let scale = page_scale(&std::fs::read_to_string(&path).unwrap());
+        let flat_pixels = (FLAT_PIXELS as f32 * scale * scale) as u32;
         let image = decode(&png);
         let mut counts: HashMap<[u8; 3], u32> = HashMap::new();
         for p in image.pixels.as_chunks::<4>().0 {
@@ -408,7 +442,7 @@ fn the_tolerance_cannot_hide_a_missing_background() {
         }
         let mut flat: Vec<[u8; 3]> = counts
             .into_iter()
-            .filter(|&(_, count)| count >= FLAT_PIXELS)
+            .filter(|&(_, count)| count >= flat_pixels)
             .map(|(colour, _)| colour)
             .collect();
         flat.sort();
@@ -566,12 +600,13 @@ fn capture_chrome_references() {
             .expect("reference pages have a <head>");
         std::fs::write(&page, format!("{}{font_face}{}", &html[..at], &html[at..])).unwrap();
         let shot = chrome_dir.join(format!("{name}.png"));
+        let scale = page_scale(&html);
         let status = Command::new(&chrome)
             .args([
                 "--headless",
                 "--disable-gpu",
                 "--hide-scrollbars",
-                "--force-device-scale-factor=1",
+                &format!("--force-device-scale-factor={scale}"),
                 "--disable-lcd-text",
                 "--allow-file-access-from-files",
                 "--no-first-run",
@@ -600,7 +635,7 @@ fn capture_chrome_references() {
             ),
         )
         .unwrap();
-        let geometry = measure_geometry(&chrome, &work, &measured, &name);
+        let geometry = measure_geometry(&chrome, &work, &measured, &name, scale);
         std::fs::write(chrome_dir.join(format!("{name}.geometry.txt")), geometry).unwrap();
         println!("captured {name}");
     }
@@ -614,7 +649,7 @@ fn capture_chrome_references() {
     std::fs::write(
         version_file,
         format!(
-            "Captured with: {version} ({})\nWindow {WIDTH}x{HEIGHT}, device scale 1, LCD text off, embedded Noto Sans.\n",
+            "Captured with: {version} ({})\nWindow {WIDTH}x{HEIGHT}, device scale 1 unless a page sets erk-device-scale, LCD text off, embedded Noto Sans.\n",
             std::env::consts::OS
         ),
     )
@@ -624,7 +659,7 @@ fn capture_chrome_references() {
 /// Chrome's boxes for a page carrying the measuring script, measured in a
 /// viewport of exactly WIDTH x HEIGHT: the window is enlarged by whatever its
 /// frame takes, which depends on the operating system.
-fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str) -> String {
+fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str, scale: f32) -> String {
     let (mut window_width, mut window_height) = (i32::from(WIDTH), i32::from(HEIGHT));
     for _ in 0..2 {
         let output = Command::new(chrome)
@@ -632,7 +667,7 @@ fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str) -> Stri
                 "--headless",
                 "--disable-gpu",
                 "--hide-scrollbars",
-                "--force-device-scale-factor=1",
+                &format!("--force-device-scale-factor={scale}"),
                 "--allow-file-access-from-files",
                 "--no-first-run",
                 "--no-default-browser-check",
