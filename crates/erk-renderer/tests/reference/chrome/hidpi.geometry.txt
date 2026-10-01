@@ -1,0 +1,8 @@
+0 body block 24 24 752 193.5
+1 div block 24 24 394 193.5
+2 div flex 41 41 360 32
+3 img block 41 41 32 32
+4 h2 block 85 43.25 138.3046875 27.5
+5 p block 41 85 360 72.5
+6 span inline-block 137.1640625 135.5 55.984375 22
+7 p block 41 165.5 360 27

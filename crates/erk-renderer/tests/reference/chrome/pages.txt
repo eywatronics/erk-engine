@@ -2,6 +2,7 @@ blocks 34d6fbfbe2573fa3
 borders 1dc4702396b718e8
 canvas-alpha 719508b93c27ff29
 flex-form 45ec6c193e17318d
+hidpi 9b87a96568f76016
 images a3f59156afc9bb17
 inline-boxes b60252fc0b20cfa2
 inline-styles 2b48e5daa79bc7de
@@ -11,4 +12,5 @@ paint-order 4ff93afcc3cbf558
 paragraphs 72fe46fb396269a2
 positioning f882ce189cc5c5f3
 text-align 437cfa02171026c0
+text-transform f5fb2b44d37bd046
 vertical-align c889f2b755f9f7be

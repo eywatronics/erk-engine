@@ -8,6 +8,7 @@ blocks 100.00
 borders 92.30
 canvas-alpha 97.81
 flex-form 97.21
+hidpi 96.19
 images 98.12
 inline-boxes 75.10
 inline-styles 48.60
@@ -17,4 +18,5 @@ paint-order 98.61
 paragraphs 48.27  # lowered: metric tightened (tolerance 24 to 12), not a rendering change
 positioning 97.39
 text-align 93.48
+text-transform 95.74
 vertical-align 68.11

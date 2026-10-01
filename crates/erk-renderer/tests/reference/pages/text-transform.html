@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Harf dönüşümü</title>
+<style>
+  body { margin: 24px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 16px; }
+  p { width: 520px; margin: 0 0 12px 0; padding: 8px; background: #eef2f5; }
+  .buyuk { text-transform: uppercase; }
+  .kucuk { text-transform: lowercase; }
+  .bas { text-transform: capitalize; }
+  .etiket { text-transform: uppercase; font-size: 12px; font-weight: bold; color: #475569; }
+</style>
+</head>
+<body>
+  <p class="buyuk">istanbul ılık bir şehir, içinde iğne iplik</p>
+  <p class="buyuk" lang="en">istanbul in english keeps its dotless capitals</p>
+  <p class="kucuk">IŞIK İÇİN İYİ BİR GÜN</p>
+  <p class="bas">ilk iş, yeni ürün ve öğle arası</p>
+  <p class="bas" lang="en">don't capitalize foo-bar twice, <b>bo</b>ld stays one word</p>
+  <p class="buyuk" lang="de">die straße und der fluss</p>
+  <p class="buyuk" lang="el">Γειά σου κόσμε</p>
+  <p>Karışık: <span class="etiket">ayarlar</span> ve <span class="bas">kişisel bilgiler</span> düz kalır.</p>
+</body>
+</html>
