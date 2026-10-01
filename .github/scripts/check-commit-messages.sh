@@ -13,6 +13,9 @@ fi
 
 text=$(git log --format='%B' "$base..HEAD")
 text+=$'\n'"${PR_TITLE:-}"$'\n'"${PR_BODY:-}"
+# A body written in GitHub's web editor has CRLF line ends; without this the
+# project's own trailer, ending in a carriage return, matches nothing.
+text=${text//$'\r'/}
 fail=0
 
 names=$(grep -inE 'claude|anthropic|openai|chatgpt|copilot|gemini|generated with' <<< "$text" || true)
