@@ -116,15 +116,22 @@ fn elements(markup: &str, name: &str) -> Vec<String> {
 }
 
 /// Where the tag that `rest` is inside ends: the first `>` outside a quoted
-/// attribute value, so `title="a > b"` does not end it early.
+/// attribute value, so `title="a > b"` does not end it early. A quote opens
+/// a value only right after `=` (spaces allowed); one inside an unquoted
+/// value (`title=it's`) is part of it.
 fn tag_end(rest: &str) -> Option<usize> {
     let mut quote = None;
+    let mut after_equals = false;
     for (index, c) in rest.char_indices() {
         match (quote, c) {
-            (None, '"' | '\'') => quote = Some(c),
             (Some(open), _) if c == open => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') if after_equals => quote = Some(c),
             (None, '>') => return Some(index),
             _ => {}
+        }
+        if quote.is_none() && !c.is_whitespace() {
+            after_equals = c == '=';
         }
     }
     None
@@ -240,6 +247,23 @@ pub fn xhtml_as_html(markup: &str) -> String {
     out
 }
 
+/// The next `token` in `lower` from `from`. A tag name must end there
+/// (`<styles>` is not `<style`); a CDATA marker needs no boundary.
+fn find_token(lower: &str, from: usize, token: &str) -> Option<usize> {
+    let mut start = from;
+    while let Some(at) = lower[start..].find(token) {
+        let at = start + at;
+        let after = lower[at + token.len()..].chars().next();
+        if token.starts_with("<![")
+            || after.is_none_or(|c| c.is_whitespace() || c == '>' || c == '/')
+        {
+            return Some(at);
+        }
+        start = at + token.len();
+    }
+    None
+}
+
 /// CDATA sections as XML reads them. Inside `<style>` or `<script>`, whose
 /// content an HTML parser keeps as raw text, only the markers go. Anywhere
 /// else the section is text, so its content is escaped: dropping the
@@ -255,7 +279,7 @@ fn resolve_cdata(markup: &str) -> String {
         // The next thing that changes what a CDATA section means.
         let next = ["<![cdata[", "<style", "</style", "<script", "</script"]
             .iter()
-            .filter_map(|token| lower[index..].find(token).map(|at| (index + at, *token)))
+            .filter_map(|token| find_token(&lower, index, token).map(|at| (at, *token)))
             .min_by_key(|(at, _)| *at);
         let Some((at, token)) = next else {
             break;
@@ -357,6 +381,25 @@ mod tests {
         assert_eq!(
             xhtml_as_html(r#"<div title="a > b"/>"#),
             r#"<div title="a > b"></div>"#
+        );
+    }
+
+    #[test]
+    fn a_quote_inside_an_unquoted_value_opens_nothing() {
+        let markup = "<link title=it's rel=match href=ref.html><p>x</p>";
+        assert_eq!(references(markup).len(), 1);
+        assert_eq!(
+            xhtml_as_html("<div title=it's/><p class='a'/>"),
+            "<div title=it's></div><p class='a'></p>"
+        );
+    }
+
+    #[test]
+    fn a_longer_tag_name_is_not_style() {
+        // `<styles>` must not start raw text: the CDATA after it is body text.
+        assert_eq!(
+            xhtml_as_html("<styles><![CDATA[<b>]]></styles>"),
+            "<styles>&lt;b&gt;</styles>"
         );
     }
 

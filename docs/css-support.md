@@ -82,8 +82,11 @@ does not lay out or paint is not supported.
 | Feature | Status | Test / notes |
 |---|---|---|
 | `background-color`, canvas background propagation, `bgcolor` attribute | Supported | `a_translucent_canvas_is_blended_over_white`, `an_element_without_a_box_does_not_colour_the_canvas`, `bgcolor_sets_the_background_colour` |
-| Border colour and style (solid), `border-radius` | M1 | Border widths take space today but are not painted |
-| `box-shadow` | M1 | |
+| Borders: width, colour per side, on blocks and inline elements | Supported | `a_solid_border_is_painted_around_the_padding_box`, `each_border_side_keeps_its_own_colour`, `an_inline_border_closes_only_the_first_and_last_line`, `the_canvas_element_still_paints_its_border`. Every style other than none and hidden is drawn solid |
+| Border styles `dotted`, `dashed`, `double`, `groove`, `ridge`, `inset`, `outset` | Later | Drawn solid |
+| `border-radius`, circular and elliptical, percentages; the background is clipped to it | Supported | `rounded_corners_clip_the_background`, `overlapping_radii_are_scaled_down_together`. Children are not clipped (that needs overflow clipping, M2) |
+| `box-shadow` (outer: offset, blur, spread, several shadows) | Supported | `a_box_shadow_is_cast_outside_the_box_only`, `an_offset_blurred_shadow_lies_behind_the_background`. A rounded box's shadow uses one mean radius for its corners |
+| `box-shadow: inset` | Later | |
 | `<img>` and `background-image` (PNG, JPEG) through the host's resource callback | M1 | Erk never reads files itself |
 | Gradients | Later | |
 
@@ -91,7 +94,7 @@ does not lay out or paint is not supported.
 
 | Feature | Status | Test / notes |
 |---|---|---|
-| `opacity` | M1 | |
+| `opacity` | Supported | `opacity_composites_an_element_as_one_group`. The element paints as one group, ordered like a positioned element with z-index 0 |
 | `transform` (2D) | Later | |
 | Transitions and animations | M9 | Driven by the host's clock |
 | `filter`, `backdrop-filter`, `mix-blend-mode` | Not planned | Costly compositing effects; revisit only with the compositor (M9) |

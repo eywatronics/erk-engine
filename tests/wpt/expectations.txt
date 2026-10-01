@@ -10,9 +10,9 @@ css/CSS2/normal-flow/block-formatting-context-height-003.xht PASS
 css/CSS2/normal-flow/block-formatting-contexts-001.xht FAIL
 css/CSS2/normal-flow/block-formatting-contexts-003.xht FAIL
 css/CSS2/normal-flow/block-formatting-contexts-004.xht FAIL
-css/CSS2/normal-flow/block-formatting-contexts-005.xht FAIL
-css/CSS2/normal-flow/block-formatting-contexts-006.xht FAIL
-css/CSS2/normal-flow/block-formatting-contexts-007.xht FAIL
+css/CSS2/normal-flow/block-formatting-contexts-005.xht PASS
+css/CSS2/normal-flow/block-formatting-contexts-006.xht PASS
+css/CSS2/normal-flow/block-formatting-contexts-007.xht PASS
 css/CSS2/normal-flow/block-formatting-contexts-008.xht FAIL
 css/CSS2/normal-flow/block-formatting-contexts-009.xht FAIL
 css/CSS2/normal-flow/block-formatting-contexts-010.xht FAIL
@@ -27,8 +27,8 @@ css/CSS2/normal-flow/block-in-inline-align-last-001.html FAIL
 css/CSS2/normal-flow/block-in-inline-append-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-append-002.xht FAIL
 css/CSS2/normal-flow/block-in-inline-baseline-001.html FAIL
-css/CSS2/normal-flow/block-in-inline-empty-001.xht PASS
-css/CSS2/normal-flow/block-in-inline-empty-002.xht PASS
+css/CSS2/normal-flow/block-in-inline-empty-001.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-empty-002.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
 css/CSS2/normal-flow/block-in-inline-empty-003.xht FAIL
 css/CSS2/normal-flow/block-in-inline-empty-004.xht FAIL
 css/CSS2/normal-flow/block-in-inline-first-line-001.html FAIL
@@ -73,16 +73,16 @@ css/CSS2/normal-flow/block-in-inline-insert-015.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-016a.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-016b.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-017.xht FAIL
-css/CSS2/normal-flow/block-in-inline-margins-001a.xht PASS
-css/CSS2/normal-flow/block-in-inline-margins-001b.xht PASS
-css/CSS2/normal-flow/block-in-inline-margins-002a.xht PASS
-css/CSS2/normal-flow/block-in-inline-margins-002b.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-001a.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-margins-001b.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-margins-002a.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-margins-002b.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
 css/CSS2/normal-flow/block-in-inline-margins-003.html FAIL
 css/CSS2/normal-flow/block-in-inline-margins-004.html FAIL
 css/CSS2/normal-flow/block-in-inline-margins-005.html PASS
 css/CSS2/normal-flow/block-in-inline-nested-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-nested-002.xht FAIL
-css/CSS2/normal-flow/block-in-inline-percents-001.xht PASS
+css/CSS2/normal-flow/block-in-inline-percents-001.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
 css/CSS2/normal-flow/block-in-inline-remove-000.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-002.xht FAIL
@@ -92,7 +92,7 @@ css/CSS2/normal-flow/block-in-inline-remove-005.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-006.xht FAIL
 css/CSS2/normal-flow/block-in-inline-whitespace-001a.xht FAIL
 css/CSS2/normal-flow/block-in-inline-whitespace-001b.xht FAIL
-css/CSS2/normal-flow/block-non-replaced-height-001.xht FAIL
+css/CSS2/normal-flow/block-non-replaced-height-001.xht PASS
 css/CSS2/normal-flow/block-non-replaced-height-005.xht FAIL
 css/CSS2/normal-flow/block-non-replaced-height-011.xht FAIL
 css/CSS2/normal-flow/block-non-replaced-height-013.xht PASS
@@ -105,10 +105,10 @@ css/CSS2/normal-flow/block-non-replaced-width-006.xht PASS
 css/CSS2/normal-flow/block-non-replaced-width-007.xht FAIL
 css/CSS2/normal-flow/block-replaced-height-001.xht PASS
 css/CSS2/normal-flow/block-replaced-height-002.xht FAIL
-css/CSS2/normal-flow/block-replaced-height-004.xht PASS
-css/CSS2/normal-flow/block-replaced-height-005.xht PASS
+css/CSS2/normal-flow/block-replaced-height-004.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/CSS2/normal-flow/block-replaced-height-005.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/block-replaced-height-006.xht FAIL
-css/CSS2/normal-flow/block-replaced-height-007.xht PASS
+css/CSS2/normal-flow/block-replaced-height-007.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/block-replaced-width-002.xht FAIL
 css/CSS2/normal-flow/block-replaced-width-006.xht FAIL
 css/CSS2/normal-flow/blocks-011.xht PASS
@@ -196,8 +196,8 @@ css/CSS2/normal-flow/height-102.xht PASS
 css/CSS2/normal-flow/height-103.xht PASS
 css/CSS2/normal-flow/height-104.xht FAIL
 css/CSS2/normal-flow/height-111.xht PASS
-css/CSS2/normal-flow/height-112.xht FAIL
-css/CSS2/normal-flow/height-113.xht FAIL
+css/CSS2/normal-flow/height-112.xht PASS
+css/CSS2/normal-flow/height-113.xht PASS
 css/CSS2/normal-flow/height-114.xht FAIL
 css/CSS2/normal-flow/height-applies-to-004.xht PASS
 css/CSS2/normal-flow/height-applies-to-005.xht PASS
@@ -213,7 +213,7 @@ css/CSS2/normal-flow/height-applies-to-016.xht PASS
 css/CSS2/normal-flow/height-inherit-001.xht FAIL
 css/CSS2/normal-flow/height-percentage-001.xht FAIL
 css/CSS2/normal-flow/height-percentage-002.xht PASS
-css/CSS2/normal-flow/height-percentage-003.xht PASS
+css/CSS2/normal-flow/height-percentage-003.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/height-percentage-004.xht FAIL
 css/CSS2/normal-flow/height-percentage-005.xht PASS
 css/CSS2/normal-flow/inline-block-000.xht FAIL
@@ -225,13 +225,13 @@ css/CSS2/normal-flow/inline-block-non-replaced-width-001.xht FAIL
 css/CSS2/normal-flow/inline-block-non-replaced-width-002.xht FAIL
 css/CSS2/normal-flow/inline-block-non-replaced-width-003.xht FAIL
 css/CSS2/normal-flow/inline-block-non-replaced-width-004.xht FAIL
-css/CSS2/normal-flow/inline-block-replaced-height-001.xht PASS
+css/CSS2/normal-flow/inline-block-replaced-height-001.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/inline-block-replaced-height-002.xht FAIL
 css/CSS2/normal-flow/inline-block-replaced-height-003.xht FAIL
-css/CSS2/normal-flow/inline-block-replaced-height-004.xht PASS
-css/CSS2/normal-flow/inline-block-replaced-height-005.xht PASS
+css/CSS2/normal-flow/inline-block-replaced-height-004.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/CSS2/normal-flow/inline-block-replaced-height-005.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/inline-block-replaced-height-006.xht FAIL
-css/CSS2/normal-flow/inline-block-replaced-height-007.xht PASS
+css/CSS2/normal-flow/inline-block-replaced-height-007.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/inline-block-replaced-height-009.xht FAIL
 css/CSS2/normal-flow/inline-block-replaced-width-001.xht FAIL
 css/CSS2/normal-flow/inline-block-replaced-width-002.xht FAIL
@@ -259,10 +259,10 @@ css/CSS2/normal-flow/inline-non-replaced-width-002.xht FAIL
 css/CSS2/normal-flow/inline-replaced-height-001.xht PASS
 css/CSS2/normal-flow/inline-replaced-height-002.xht FAIL
 css/CSS2/normal-flow/inline-replaced-height-003.xht FAIL
-css/CSS2/normal-flow/inline-replaced-height-004.xht PASS
-css/CSS2/normal-flow/inline-replaced-height-005.xht PASS
+css/CSS2/normal-flow/inline-replaced-height-004.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/CSS2/normal-flow/inline-replaced-height-005.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/inline-replaced-height-006.xht FAIL
-css/CSS2/normal-flow/inline-replaced-height-007.xht PASS
+css/CSS2/normal-flow/inline-replaced-height-007.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/CSS2/normal-flow/inline-replaced-height-009.xht FAIL
 css/CSS2/normal-flow/inline-replaced-height-010.xht PASS
 css/CSS2/normal-flow/inline-replaced-height-011.xht FAIL
@@ -750,12 +750,12 @@ css/CSS2/normal-flow/width-inherit-001.xht FAIL
 css/CSS2/normal-flow/width-non-replaced-inline-001.xht PASS
 css/CSS2/normal-flow/width-percentage-001.xht FAIL
 css/CSS2/normal-flow/width-percentage-002.xht FAIL
-css/css-flexbox/abspos/abspos-autopos-htb-ltr.html FAIL
-css/css-flexbox/abspos/abspos-autopos-htb-rtl.html FAIL
-css/css-flexbox/abspos/abspos-autopos-vlr-ltr.html FAIL
-css/css-flexbox/abspos/abspos-autopos-vlr-rtl.html FAIL
-css/css-flexbox/abspos/abspos-autopos-vrl-ltr.html FAIL
-css/css-flexbox/abspos/abspos-autopos-vrl-rtl.html FAIL
+css/css-flexbox/abspos/abspos-autopos-htb-ltr.html PASS
+css/css-flexbox/abspos/abspos-autopos-htb-rtl.html PASS
+css/css-flexbox/abspos/abspos-autopos-vlr-ltr.html PASS
+css/css-flexbox/abspos/abspos-autopos-vlr-rtl.html PASS
+css/css-flexbox/abspos/abspos-autopos-vrl-ltr.html PASS
+css/css-flexbox/abspos/abspos-autopos-vrl-rtl.html PASS
 css/css-flexbox/abspos/dynamic-align-self-001.html FAIL
 css/css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-001.tentative.html FAIL
 css/css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-002.tentative.html FAIL
@@ -923,7 +923,7 @@ css/css-flexbox/dynamic-baseline-change.html FAIL
 css/css-flexbox/dynamic-bsize-change.html FAIL
 css/css-flexbox/dynamic-change-simplified-layout-002.html PASS
 css/css-flexbox/dynamic-change-simplified-layout.html FAIL
-css/css-flexbox/dynamic-isize-change-001.html PASS
+css/css-flexbox/dynamic-isize-change-001.html FAIL  # lowered: depends on script, which Erk does not run; it passed only while borders and opacity were not painted
 css/css-flexbox/dynamic-isize-change-002.html FAIL
 css/css-flexbox/dynamic-isize-change-003.html FAIL
 css/css-flexbox/dynamic-isize-change-004.html FAIL
@@ -1140,7 +1140,7 @@ css/css-flexbox/flexbox-align-self-horiz-003.xhtml FAIL
 css/css-flexbox/flexbox-align-self-horiz-004.xhtml FAIL
 css/css-flexbox/flexbox-align-self-horiz-005.xhtml PASS
 css/css-flexbox/flexbox-align-self-stretch-vert-001.html PASS
-css/css-flexbox/flexbox-align-self-stretch-vert-002.html PASS
+css/css-flexbox/flexbox-align-self-stretch-vert-002.html FAIL  # lowered: a flex layout difference, invisible until borders were painted (M1.5 open list)
 css/css-flexbox/flexbox-align-self-vert-001.xhtml FAIL
 css/css-flexbox/flexbox-align-self-vert-002.xhtml FAIL
 css/css-flexbox/flexbox-align-self-vert-003.xhtml FAIL
@@ -1176,7 +1176,7 @@ css/css-flexbox/flexbox-basic-canvas-horiz-001.xhtml FAIL
 css/css-flexbox/flexbox-basic-canvas-horiz-001v.xhtml FAIL
 css/css-flexbox/flexbox-basic-canvas-vert-001.xhtml FAIL
 css/css-flexbox/flexbox-basic-canvas-vert-001v.xhtml FAIL
-css/css-flexbox/flexbox-basic-fieldset-horiz-001.xhtml PASS
+css/css-flexbox/flexbox-basic-fieldset-horiz-001.xhtml FAIL  # lowered: fieldset has no special layout in Erk; it passed only while borders were not painted
 css/css-flexbox/flexbox-basic-fieldset-vert-001.xhtml FAIL
 css/css-flexbox/flexbox-basic-iframe-horiz-001.xhtml FAIL
 css/css-flexbox/flexbox-basic-iframe-vert-001.xhtml FAIL
@@ -1271,13 +1271,13 @@ css/css-flexbox/flexbox-mbp-horiz-003.xhtml PASS
 css/css-flexbox/flexbox-mbp-horiz-003v.xhtml PASS
 css/css-flexbox/flexbox-mbp-horiz-004.xhtml PASS
 css/css-flexbox/flexbox-min-height-auto-001.html FAIL
-css/css-flexbox/flexbox-min-height-auto-002a.html PASS
-css/css-flexbox/flexbox-min-height-auto-002b.html PASS
-css/css-flexbox/flexbox-min-height-auto-002c.html PASS
+css/css-flexbox/flexbox-min-height-auto-002a.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/css-flexbox/flexbox-min-height-auto-002b.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/css-flexbox/flexbox-min-height-auto-002c.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/css-flexbox/flexbox-min-width-auto-001.html PASS
-css/css-flexbox/flexbox-min-width-auto-002a.html PASS
-css/css-flexbox/flexbox-min-width-auto-002b.html PASS
-css/css-flexbox/flexbox-min-width-auto-002c.html PASS
+css/css-flexbox/flexbox-min-width-auto-002a.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/css-flexbox/flexbox-min-width-auto-002b.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
+css/css-flexbox/flexbox-min-width-auto-002c.html FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
 css/css-flexbox/flexbox-min-width-auto-003.html PASS
 css/css-flexbox/flexbox-min-width-auto-004.html PASS
 css/css-flexbox/flexbox-min-width-auto-005.html FAIL
@@ -1690,7 +1690,7 @@ css/css-flexbox/percentage-max-height-002.html FAIL
 css/css-flexbox/percentage-max-height-003.html FAIL
 css/css-flexbox/percentage-max-height-004.html FAIL
 css/css-flexbox/percentage-max-height-005.html PASS
-css/css-flexbox/percentage-padding-002.html PASS
+css/css-flexbox/percentage-padding-002.html FAIL  # lowered: a flex layout difference, invisible until borders were painted (M1.5 open list)
 css/css-flexbox/percentage-padding-003.html FAIL
 css/css-flexbox/percentage-padding-004.html FAIL
 css/css-flexbox/percentage-padding-005.html PASS
@@ -1774,7 +1774,7 @@ css/css-position/hypothetical-box-scroll-viewport.html FAIL
 css/css-position/hypothetical-dynamic-change-001.html FAIL
 css/css-position/hypothetical-dynamic-change-002.html FAIL
 css/css-position/hypothetical-dynamic-change-003.html FAIL
-css/css-position/invalidate-opacity-negative-z-index.html PASS
+css/css-position/invalidate-opacity-negative-z-index.html FAIL  # lowered: depends on script, which Erk does not run; it passed only while borders and opacity were not painted
 css/css-position/multicol/static-position/vlr-ltr-ltr-in-multicol.html FAIL
 css/css-position/multicol/static-position/vlr-ltr-rtl-in-multicol.tentative.html FAIL
 css/css-position/multicol/static-position/vlr-rtl-ltr-in-multicol.tentative.html FAIL

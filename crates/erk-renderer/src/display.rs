@@ -46,8 +46,50 @@ pub(crate) enum DisplayItem {
         height: f32,
         color: Rgba,
     },
+    /// A background clipped to rounded corners.
+    RoundedRect {
+        frame: Frame,
+        radii: Radii,
+        color: Rgba,
+    },
+    /// A solid border: the ring between the border box and the padding box,
+    /// each side in its own colour.
+    Border {
+        frame: Frame,
+        /// Top, right, bottom, left.
+        widths: [f32; 4],
+        colors: [Rgba; 4],
+        radii: Radii,
+    },
+    /// An outer box shadow: a blurred rounded rectangle, never painted
+    /// inside the box that casts it (`clip`).
+    Shadow {
+        frame: Frame,
+        radius: f32,
+        blur: f32,
+        color: Rgba,
+        clip: Frame,
+        clip_radii: Radii,
+    },
+    /// Everything until the matching `PopOpacity` is composited at this
+    /// opacity, as one group.
+    PushOpacity(f32),
+    PopOpacity,
     Glyphs(GlyphRun),
 }
+
+/// A box in absolute coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Frame {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+/// Corner radii as (horizontal, vertical): top-left, top-right,
+/// bottom-right, bottom-left.
+pub(crate) type Radii = [(f32, f32); 4];
 
 pub(crate) struct GlyphRun {
     pub(crate) font: FontData,
@@ -132,6 +174,64 @@ impl DisplayList {
                 } => {
                     let _ = writeln!(out, "rect {x} {y} {width}x{height} {}", hex(*color));
                 }
+                DisplayItem::RoundedRect {
+                    frame,
+                    radii,
+                    color,
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "rrect {} {} {}x{} {} {}",
+                        frame.x,
+                        frame.y,
+                        frame.width,
+                        frame.height,
+                        radii_text(radii),
+                        hex(*color)
+                    );
+                }
+                DisplayItem::Border {
+                    frame,
+                    widths,
+                    colors,
+                    radii,
+                } => {
+                    let colors: Vec<String> = colors.iter().map(|color| hex(*color)).collect();
+                    let _ = writeln!(
+                        out,
+                        "border {} {} {}x{} {:?} {} {}",
+                        frame.x,
+                        frame.y,
+                        frame.width,
+                        frame.height,
+                        widths,
+                        radii_text(radii),
+                        colors.join(",")
+                    );
+                }
+                DisplayItem::Shadow {
+                    frame,
+                    radius,
+                    blur,
+                    color,
+                    ..
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "shadow {} {} {}x{} radius {radius} blur {blur} {}",
+                        frame.x,
+                        frame.y,
+                        frame.width,
+                        frame.height,
+                        hex(*color)
+                    );
+                }
+                DisplayItem::PushOpacity(opacity) => {
+                    let _ = writeln!(out, "opacity {opacity}");
+                }
+                DisplayItem::PopOpacity => {
+                    let _ = writeln!(out, "end opacity");
+                }
                 DisplayItem::Glyphs(run) => {
                     let (x, y) = run.glyphs.first().map_or((0.0, 0.0), |g| (g.x, g.y));
                     let _ = writeln!(
@@ -173,7 +273,15 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId, parent_origin: (f32, f32)) -> V
     context.layers.sort_by_key(|layer| layer.z);
     let (below, above): (Vec<Layer>, Vec<Layer>) =
         context.layers.into_iter().partition(|layer| layer.z < 0);
+    // An element below 1 opacity is composited as one group.
+    let opacity = walk
+        .styles
+        .computed(id)
+        .map_or(1.0, |style| style.get_effects().opacity);
     let mut items = Vec::new();
+    if opacity < 1.0 {
+        items.push(DisplayItem::PushOpacity(opacity.max(0.0)));
+    }
     for layer in below {
         items.extend(stacking_context(walk, layer.id, layer.parent_origin));
     }
@@ -181,6 +289,9 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId, parent_origin: (f32, f32)) -> V
     items.append(&mut context.inline);
     for layer in above {
         items.extend(stacking_context(walk, layer.id, layer.parent_origin));
+    }
+    if opacity < 1.0 {
+        items.push(DisplayItem::PopOpacity);
     }
     items
 }
@@ -205,12 +316,20 @@ fn add_box(
         return;
     };
     let style = walk.styles.computed(id);
+    // A positioned element, or one below 1 opacity, paints as a unit; an
+    // unpositioned one with opacity as if positioned with z-index 0 (CSS
+    // Color 4 §9).
     if !context_root
         && let Some(style) = &style
-        && crate::layout::is_positioned(style)
+        && (crate::layout::is_positioned(style) || style.get_effects().opacity < 1.0)
     {
+        let z = if crate::layout::is_positioned(style) {
+            style.clone_z_index().integer_or(0)
+        } else {
+            0
+        };
         context.layers.push(Layer {
-            z: style.clone_z_index().integer_or(0),
+            z,
             id,
             parent_origin,
         });
@@ -226,18 +345,28 @@ fn add_box(
 
     if let Some(style) = &style
         && visible
-        && Some(id) != walk.canvas_source
     {
-        let color = background(style);
-        if color[3] != 0 {
-            context.backgrounds.push(DisplayItem::Rect {
-                x,
-                y,
-                width: layout.size.width,
-                height: layout.size.height,
-                color,
-            });
-        }
+        let frame = Frame {
+            x,
+            y,
+            width: layout.size.width,
+            height: layout.size.height,
+        };
+        let widths = [
+            layout.border.top,
+            layout.border.right,
+            layout.border.bottom,
+            layout.border.left,
+        ];
+        // The canvas already shows the root's (or body's) background.
+        let paint_background = Some(id) != walk.canvas_source;
+        box_decoration(
+            style,
+            frame,
+            widths,
+            paint_background,
+            &mut context.backgrounds,
+        );
     }
 
     if let Some(shaped) = walk.layouts.text(id)
@@ -278,17 +407,34 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
     let mut items: Vec<DisplayItem> = shaped
         .decorations
         .iter()
-        .map(|rect| {
+        .flat_map(|rect| {
             let (left, top) = ((origin.0 + rect.x).round(), (origin.1 + rect.y).round());
             let right = (origin.0 + rect.x + rect.width).round();
             let bottom = (origin.1 + rect.y + rect.height).round();
-            DisplayItem::Rect {
-                x: left,
-                y: top,
-                width: right - left,
-                height: bottom - top,
-                color: rect.color,
+            let mut items = Vec::new();
+            if rect.color[3] != 0 {
+                items.push(DisplayItem::Rect {
+                    x: left,
+                    y: top,
+                    width: right - left,
+                    height: bottom - top,
+                    color: rect.color,
+                });
             }
+            if rect.border.iter().any(|width| *width > 0.0) {
+                items.push(DisplayItem::Border {
+                    frame: Frame {
+                        x: left,
+                        y: top,
+                        width: right - left,
+                        height: bottom - top,
+                    },
+                    widths: rect.border,
+                    colors: rect.border_colors,
+                    radii: [(0.0, 0.0); 4],
+                });
+            }
+            items
         })
         .collect();
     items.extend(glyph_runs(&shaped.text, &shaped.layout, origin));
@@ -333,6 +479,143 @@ fn glyph_runs(text: &str, shaped: &InlineLayout, origin: (f32, f32)) -> Vec<Disp
 
 fn background(style: &ComputedValues) -> Rgba {
     srgb_bytes(style.resolve_color(&style.get_background().background_color))
+}
+
+/// A box's decoration in CSS's painting order (CSS Backgrounds 3): outer
+/// shadows, the background clipped to the rounded border box, the border.
+/// Border styles other than `none` and `hidden` are drawn solid.
+fn box_decoration(
+    style: &ComputedValues,
+    frame: Frame,
+    widths: [f32; 4],
+    paint_background: bool,
+    out: &mut Vec<DisplayItem>,
+) {
+    let radii = corner_radii(style, frame.width, frame.height);
+    let rounded = radii.iter().any(|(x, y)| *x > 0.0 && *y > 0.0);
+    // The first shadow is on top, so it is painted last.
+    for shadow in style.get_effects().box_shadow.0.iter().rev() {
+        if shadow.inset {
+            continue;
+        }
+        let color = srgb_bytes(style.resolve_color(&shadow.base.color));
+        if color[3] == 0 {
+            continue;
+        }
+        let spread = shadow.spread.px();
+        let blur = shadow.base.blur.0.px();
+        let shadow_frame = Frame {
+            x: frame.x + shadow.base.horizontal.px() - spread,
+            y: frame.y + shadow.base.vertical.px() - spread,
+            width: (frame.width + 2.0 * spread).max(0.0),
+            height: (frame.height + 2.0 * spread).max(0.0),
+        };
+        // One radius for the blurred shape: the corners' mean, grown by the
+        // spread like every radius.
+        let mean = radii.iter().map(|(x, y)| (x + y) / 2.0).sum::<f32>() / 4.0;
+        let radius = if rounded {
+            (mean + spread).max(0.0)
+        } else {
+            0.0
+        };
+        out.push(DisplayItem::Shadow {
+            frame: shadow_frame,
+            radius,
+            blur,
+            color,
+            clip: frame,
+            clip_radii: radii,
+        });
+    }
+    let color = background(style);
+    if paint_background && color[3] != 0 {
+        if rounded {
+            out.push(DisplayItem::RoundedRect {
+                frame,
+                radii,
+                color,
+            });
+        } else {
+            out.push(DisplayItem::Rect {
+                x: frame.x,
+                y: frame.y,
+                width: frame.width,
+                height: frame.height,
+                color,
+            });
+        }
+    }
+    let border = style.get_border();
+    let colors = [
+        &border.border_top_color,
+        &border.border_right_color,
+        &border.border_bottom_color,
+        &border.border_left_color,
+    ]
+    .map(|color| srgb_bytes(style.resolve_color(color)));
+    let visible = widths
+        .iter()
+        .zip(&colors)
+        .any(|(width, color)| *width > 0.0 && color[3] != 0);
+    if visible {
+        out.push(DisplayItem::Border {
+            frame,
+            widths,
+            colors,
+            radii,
+        });
+    }
+}
+
+/// The corner radii of a box `width` × `height`: percentages of the box's
+/// size, then all scaled down together if adjacent radii would overlap
+/// along a side (CSS Backgrounds 3 §5.5).
+fn corner_radii(style: &ComputedValues, width: f32, height: f32) -> Radii {
+    use erk_style::style::values::computed::Length;
+    let border = style.get_border();
+    let mut radii = [
+        &border.border_top_left_radius,
+        &border.border_top_right_radius,
+        &border.border_bottom_right_radius,
+        &border.border_bottom_left_radius,
+    ]
+    .map(|corner| {
+        (
+            corner.0.width.0.resolve(Length::new(width)).px().max(0.0),
+            corner.0.height.0.resolve(Length::new(height)).px().max(0.0),
+        )
+    });
+    let [tl, tr, br, bl] = radii;
+    let scale = [
+        width / (tl.0 + tr.0),
+        width / (bl.0 + br.0),
+        height / (tl.1 + bl.1),
+        height / (tr.1 + br.1),
+    ]
+    .into_iter()
+    .filter(|factor| factor.is_finite())
+    .fold(1.0_f32, f32::min);
+    if scale < 1.0 {
+        for corner in &mut radii {
+            corner.0 *= scale;
+            corner.1 *= scale;
+        }
+    }
+    radii
+}
+
+fn radii_text(radii: &Radii) -> String {
+    radii
+        .iter()
+        .map(|(x, y)| {
+            if x == y {
+                format!("{x}")
+            } else {
+                format!("{x}/{y}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn child_element(doc: &Document, parent: NodeId, name: &erk_dom::LocalName) -> Option<NodeId> {

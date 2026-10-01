@@ -160,7 +160,7 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1.6: Renkler, kenarlıklar, görüntüler
 
-- [ ] Display list öğeleri: kenarlık (solid, renkli, kenar başına genişlik),
+- [x] Display list öğeleri: kenarlık (solid, renkli, kenar başına genişlik),
   yuvarlak köşe (`border-radius`, kırpma dahil), `box-shadow`, `opacity`.
 - [ ] Görüntüler: `<img>` ve `background-image` (png, jpeg), sözleşmenin
   kaynak API'siyle (tür + MIME). Demo kabuğun sağlayıcısı: açılan dosyanın
@@ -488,3 +488,35 @@ konuyor. Sağlamlık üretecine uç flex değerleri eklendi.
 | İş parçacığı modeli, panik yakalama, fuzzy hesabı | Artı olarak not edildi; değişiklik yok |
 
 Taban çizgisi değişmedi: 2009 sonucun hepsi aynı.
+
+**İnceleme raporu: `docs/reviews/flexbox_commit_review.md` (2026-10-01, #18).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| `resolve_cdata` `"<style"` arıyor; `< style` gibi boşluklu bir yazım gözden kaçabilir | **Geçersiz:** HTML'de de XML'de de `<`'den sonra boşluk gelirse etiket değil metindir; `< style` aramamak doğru. Raporun dokunduğu yerde gerçek bir uç durum vardı ve düzeltildi: `"<style"` araması `<styles>`'ın başını da yakalıyordu; artık adın ardından boşluk, `>` ya da `/` gelmeli (`find_token`) |
+| `tag_end`'de öznitelik değerlerinin bitişiğindeki beklenmedik semboller kenar durum doğurabilir | **Kısmen geçerli:** rapor örnek vermiyor; bulunan somut durum tırnaksız bir değerin içindeki kesme işaretiydi (`title=it's`), tırnak açılışı sanılıyordu. Artık tırnak yalnızca `=`'den hemen sonra (boşluklar arada olabilir) bir değer açıyor |
+
+İki düzeltme de testli ve mutasyonla denendi (2/2); WPT sonuçları değişmedi.
+
+**M1.6, kenarlıklar ve efektler (2026-10-01).** Adım ikiye bölündü: bu PR
+kenarlık, yuvarlak köşe, gölge ve `opacity`; görüntüler, kaynak API'si ve
+lisans kapısı ayrı PR'da (yeni çözücü bağımlılıkları lisans kapısıyla
+birlikte girmeli). Yeni `borders` referans sayfası %92,30; kutuların
+17/17'si Chrome'la 1 px içinde.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Kenarlık (solid, renkli, kenar başına genişlik) | Kenarlık kenarlık kutusuyla dolgu kutusu arasındaki halka. Tek renkte halka even-odd ile doluyor; farklı renklerde halka kırpılıp her kenar dış köşeden iç köşeye uzanan kendi yamuğuyla boyanıyor (Chrome'un çapraz birleşimi). `none`/`hidden` dışındaki her stil düz çiziliyor. Satır içi elemanlarda da: üst ve alt her satırda, sol yalnızca ilk, sağ yalnızca son parçada. Tuvale arka planını veren eleman (`body`) da kenarlığını çiziyor |
+| `border-radius`, kırpma dahil | Eliptik köşeler, yüzdeler; komşu yarıçaplar kenarı aşarsa hepsi birlikte küçültülüyor (CSS Backgrounds 3 §5.5). Arka plan köşeye göre kırpılıyor; çocukların kırpılması `overflow` ister, M2'de |
+| `box-shadow` | Dış gölgeler (konum, bulanıklık, yayılma, birden çok gölge), kutunun içine hiç düşmeden (kutu kırpma katmanıyla dışarıda bırakılıyor). İlk gölge en üstte. **Bulanıklık:** CSS standart sapmayı yarıçapın yarısı sayıyor; vello_cpu'nun parametresi ölçümde σ·√2 çıktı (3 → σ ≈ 2,1; 5,6 → σ ≈ 4,0). Doğrudan σ verilince gölgenin kenarı Chrome'unkinden üçte bir dar düşüyordu; şimdi kenar profili Chrome'la piksel piksel çakışıyor (57/58, 76/76, 100/101, 128/127 ...). Yuvarlak bir kutunun gölgesi köşelerin ortalama yarıçapını kullanıyor. `inset` gölgeler sonra |
+| `opacity` | Eleman tek bir grup olarak birleşiyor (`opacity` katmanı) ve `z-index: 0`'lı konumlandırılmış bir eleman gibi sıralanıyor (CSS Color 4 §9) |
+| — | Referans sayfasının ilk hâlinde bulanık gölgenin uzun kuyruğu Chrome görüntüsünde 1000 pikselden fazla `[254,254,255]` bıraktı; tolerans muhafızı bunu beyazla aynı sayılabilecek bir "düz renk" olarak yakaladı. Gölge kısaltıldı |
+| — | **WPT'de 29 rastlantı ortaya çıktı.** Kenarlıklar ve opaklık boyanınca daha önce boş karede eşleşen testler düştü: 17'si yüklenmeyen bir görüntüye ya da boyutlandırılmayan bir yerine konan elemana (`<img>`, `<iframe>`) dayanıyor, 7'si inline içinde blok (Erk bloğu satır içi içerik gibi diziyor; inline'ın kenarlığı bunu görünür kıldı), 2'si betik, 1'i `fieldset`, 2'si gerçek flex farkı (`column wrap`'te germe, `inline-flex`'te yüzdelik dolgu). Hepsi taban çizgisinde gerekçesiyle. Boş karede geçen test sayısı normal-flow'da 6'dan 0'a, css-position'da 6'dan 4'e, flexbox'ta 20'den 13'e indi |
+| — | Bilinen sınır görünür oldu: satır sonunda başlayan kenarlıklı bir satır içi eleman, sol kenarını ve dolgusunu önceki satırda bırakıp metnini alt satıra taşıyor; Parley her satır içi kutudan sonra kırabiliyor. `borders` sayfasının skoru bu farkı taşıyor. Çözümü satır kırmanın içine girmeyi istiyor; açık |
+
+Mutasyonlar (8/8 yakalandı): kenarlık kutunun tamamını dolduruyor; her kenara
+tek renk; yarıçaplar küçültülmüyor; gölge kutunun içine de düşüyor;
+bulanıklık parametresinde √2 yok (Chrome referans testi yakaladı); opaklık yok
+sayılıyor; satır içi yan kenarlıklar her satırda; tuval elemanı kenarlığını
+kaybediyor. Sağlamlık üretecine uç kenarlık, köşe, gölge ve opaklık değerleri
+eklendi.

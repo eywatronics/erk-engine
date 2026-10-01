@@ -5,6 +5,7 @@
 #   name score  # lowered: reason
 # Rules: the project rules file, section "Referans testi".
 blocks 100.00
+borders 92.30
 canvas-alpha 97.81
 flex-form 97.21
 inline-boxes 75.10

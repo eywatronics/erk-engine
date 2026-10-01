@@ -128,9 +128,8 @@ first interactive demo, is the acceptance test of M2.
 Today Erk does **not**:
 
 - offer an embedding API or C ABI (M3), or handle input and events (M2, M4);
-- load images, or paint borders (border widths take space but are not
-  drawn) (M1);
-- support `vertical-align`, `position`, or verified flexbox (M1);
+- load images (M1);
+- draw dotted, dashed or double borders (drawn solid), or inset shadows;
 - load system fonts: text uses the embedded Noto Sans (M1);
 - render incrementally: every change redraws the whole page (M5).
 
