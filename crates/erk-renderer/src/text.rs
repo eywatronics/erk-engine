@@ -66,6 +66,8 @@ pub(crate) struct Paragraph {
     base: TextStyle,
     /// Ranges of `text` styled differently from `base`, in order.
     spans: Vec<(Range<usize>, TextStyle)>,
+    /// The block's `text-align`.
+    align: Alignment,
 }
 
 impl Paragraph {
@@ -102,7 +104,12 @@ impl Paragraph {
                 spans.push((start..text.len(), style));
             }
         }
-        Self { text, base, spans }
+        Self {
+            text,
+            base,
+            spans,
+            align: alignment(block),
+        }
     }
 }
 
@@ -145,6 +152,20 @@ pub(crate) fn glyph_run_ranges(line: &parley::Line<'_, TextBrush>) -> Vec<Range<
         ranges.push(range.unwrap_or(start..start));
     }
     ranges
+}
+
+/// The block's `text-align` as Parley's alignment. The legacy `-moz-` values
+/// come from the `align` presentational attribute.
+fn alignment(block: &ComputedValues) -> Alignment {
+    use erk_style::style::values::computed::TextAlign;
+    match block.get_inherited_text().clone_text_align() {
+        TextAlign::End => Alignment::End,
+        TextAlign::Left | TextAlign::MozLeft => Alignment::Left,
+        TextAlign::Right | TextAlign::MozRight => Alignment::Right,
+        TextAlign::Center | TextAlign::MozCenter => Alignment::Center,
+        TextAlign::Justify => Alignment::Justify,
+        _ => Alignment::Start,
+    }
 }
 
 fn is_document_whitespace(c: char) -> bool {
@@ -288,7 +309,7 @@ impl TextEngine {
         }
         let mut layout = builder.build(&paragraph.text);
         layout.break_all_lines(max_advance);
-        layout.align(Alignment::Start, AlignmentOptions::default());
+        layout.align(paragraph.align, AlignmentOptions::default());
         layout
     }
 
@@ -328,6 +349,7 @@ mod tests {
                 color: TextBrush::default(),
             },
             spans: Vec::new(),
+            align: Alignment::Start,
         }
     }
 

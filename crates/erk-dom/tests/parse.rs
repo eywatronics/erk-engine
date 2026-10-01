@@ -115,3 +115,39 @@ fn attributes_are_kept() {
     assert_eq!(element.attr(&local_name!("id")), Some("giriş"));
     assert_eq!(element.attr(&local_name!("class")), Some("a b"));
 }
+
+/// How many elements deep the chain of first element children below the
+/// body goes.
+fn depth_below_body(doc: &Document) -> usize {
+    let first_element = |id: NodeId| {
+        doc.children(id).find(|&child| {
+            doc.node(child)
+                .is_some_and(|node| node.as_element().is_some())
+        })
+    };
+    let html = first_element(doc.root()).expect("html");
+    let mut node = doc
+        .children(html)
+        .find(|&child| {
+            doc.node(child)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| element.name.local == local_name!("body"))
+        })
+        .expect("body");
+    let mut depth = 0;
+    while let Some(child) = first_element(node) {
+        node = child;
+        depth += 1;
+    }
+    depth
+}
+
+#[test]
+fn nesting_stops_where_chrome_stops() {
+    // Chrome nests at most 511 elements below the body; deeper ones become
+    // siblings of the deepest. A deeper tree overflowed the renderer's stack.
+    let nested = |n: usize| format!("<body>{}x{}", "<div>".repeat(n), "</div>".repeat(n));
+    assert_eq!(depth_below_body(&Document::parse_html(&nested(300))), 300);
+    assert_eq!(depth_below_body(&Document::parse_html(&nested(600))), 511);
+    assert_eq!(depth_below_body(&Document::parse_html(&nested(5000))), 511);
+}

@@ -1,7 +1,7 @@
 # Erk Engine yol haritası
 
-Erk gömülü bir HTML/CSS masaüstü UI motorudur: JavaScript yok, host uygulama
-DOM'u sürer. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
+Erk gömülü bir HTML/CSS masaüstü UI motorudur: çekirdekte JavaScript yok
+(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
 tanımlar. Yön değişikliğinin gerekçesi [p1-embedded.md](../design/p1-embedded.md),
 render hattının ve DOM modelinin ayrıntısı
 [p0-architecture.md](../design/p0-architecture.md).
@@ -13,6 +13,9 @@ gösterilebilir bir çıktıyla biter — pencerede bir sayfa, bir PNG, bir taba
 **Süre tahmini yok.** Bu tek kişilik, AI destekli bir proje; zamanın büyük kısmı
 kod yazmaya değil spesifikasyon okumaya ve kütüphaneler arası hata ayıklamaya
 gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
+
+**Karar zamanı.** Mimari tartışma yalnızca o anki taşı bloke ediyorsa
+yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 
 ---
 
@@ -27,7 +30,7 @@ gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
 | **M4** | Etkileşimli DOM | Yeni |
 | **M5** | Artımlı render ve formlar | Yeni |
-| **M6** | Python | Yeni |
+| **M6** | Bağlamalar: Python, Go, JavaScript | Yeni |
 | **M7** | Geliştirici araçları | Yeni |
 | **M8** | Ürünleşme | Yeni |
 | **M9** | Kompozitör ve performans | Yeni |
@@ -42,6 +45,13 @@ güvenliği, M3'te kum havuzu). Rota gömülü bir UI motoruna çevrildi: taray�
 çok yıllık katmanlarının hiçbiri masaüstü UI için gerekmiyor, M0'da kurulan her
 şey ise yeni hedefe doğrudan yarıyor. Gerekçe ve değerlendirme
 [p1-embedded.md](../design/p1-embedded.md)'de.
+
+### JavaScript kararı (2026-10-01)
+
+Çekirdekte JavaScript yok; JS, Python ve Go gibi isteğe bağlı bir bağlama
+olarak M6'da geliyor (`erk-script`). Sayaç demosu M4'ten M2'nin kabulüne
+çekildi. Gerekçe ve dış eleştirinin değerlendirmesi
+[p1-embedded.md](../design/p1-embedded.md) §3.1'de.
 
 ### Neden önce piksel
 
@@ -126,7 +136,7 @@ kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla geli
 | M1.0 | Ölçüm ve M0 eksikleri: yayın ikilisinin boyutu, 1000 düğümlü bir sayfada boştaki bellek, ilk kare süresi (bütçe buradan konur); blok ve metin karışık ebeveynde düşen metin (anonim kutular). Span stillerinin düzleşmesi IFC'nin kendisi olduğu için M1.3'te | Bitti |
 | M1.1 | Tek satır metin: Parley ile şekillenen bir Taffy yaprağı | M0'da var (`a_paragraph_is_one_line_high`) |
 | M1.2 | Satır kırma: daralan kutuda metin alt satıra iner | M0'da var (`narrow_width_breaks_into_more_lines`) |
-| M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Başladı: stil aralıkları var |
+| M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Başladı: stil aralıkları, `text-align` ve sağlamlık var; satır içi kutular ve `vertical-align` kaldı |
 | M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Yeni |
 | M1.5 | Flexbox doğrulaması (Taffy) | Yeni |
 | M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Yeni |
@@ -177,6 +187,11 @@ layout'u kararı gerekçesiyle belgelenmiş.
 - Geliştirici araçlarının ilk parçası: `inspect_at(x, y)` (hit-test'in
   döndürdüğü `NodeId`) ve seçili düğümün kutusunu gösteren bir vurgu
   kaplaması (display list'e eklenen, belgeye ait olmayan bir öğe)
+- **Sayaç demosu:** düğmeye basılır, demo host'un (Rust) sayacı artar,
+  sayının metni değişir, kare yeniden çizilir. Bunun için M4'ün `Mutation`
+  API'sinin ilk parçası M2'de gelir: bir düğümün metnini değiştirmek.
+  Tıklama, hit-test'in bulduğu düğümle host'a mesaj olarak döner; mesajlar
+  düz veri kuralında kalır
 - macOS CI
 
 **Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
@@ -184,7 +199,9 @@ layout'u kararı gerekçesiyle belgelenmiş.
 ölçümleri bir performans iddiası değil, M5'in kıyaslanacağı tabandır.
 
 **Kabul:** Uzun bir sayfa kayıyor, hover stili değiştiriyor, bir tık doğru
-`NodeId`'yi raporluyor (otomatik test). GPU yolu yoksa CPU'ya düşüyor. Tam
+`NodeId`'yi raporluyor (otomatik test). Sayaç demosu çalışıyor: otomatik bir
+test tıklama gönderip sayının değiştiği kareyi altın görüntüyle doğruluyor.
+GPU yolu yoksa CPU'ya düşüyor. Tam
 yeniden hesaplamanın kare süresi kaydedilmiş.
 
 ---
@@ -218,12 +235,11 @@ döndürüyor (test). Her muhafız kasıtlı bir ihlalle denenmiş.
   gönderim, klavye, odak
 - `querySelector` ve `querySelectorAll` (selectors crate'i)
 - `Mutation` dizileri fuzz'lanır (eski `NodeId`'ler dahil)
-- İlk demo bir sayaç: Rust host ve HTML/CSS, düğmeye basıldıkça sayı artıyor.
-  Tıklama olayını, metin değişikliğini ve yeniden çizimi uçtan uca bağlayan en
-  küçük uygulama
+- M2'nin sayaç demosu genel API'ye taşınır; TodoMVC eleman oluşturmayı,
+  silmeyi ve listeyi uçtan uca sınar
 
-**Kabul:** Sayaç demosu ve JS'siz, Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil
-döngüsünde bellek büyümüyor. Mutation fuzz'ı yeşil.
+**Kabul:** Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil döngüsünde
+bellek büyümüyor. Mutation fuzz'ı yeşil.
 
 ---
 
@@ -237,6 +253,10 @@ döngüsünde bellek büyümüyor. Mutation fuzz'ı yeşil.
 - Odak ve Tab gezinmesi
 - Erişilebilirlik: AccessKit ile DOM'un işletim sistemi erişilebilirlik ağacına
   çevrilmesi
+- Davranışı olan standart elemanlar: `<details>`/`<summary>`, `<dialog>`,
+  `popover` özniteliği, `commandfor`/`command`. Açılır menü, akordeon ve
+  diyalog betiksiz ve host'a gitmeden çalışır; her biri Chrome referans
+  sayfasıyla
 - Canlı CSS düzenleme için temel: bir düğümün satır içi stilini ya da bir
   kuralı değiştirip artımlı yeniden stille görmek
 
@@ -246,18 +266,40 @@ girişi çalışıyor. Bir ekran okuyucu form etiketlerini okuyor.
 
 ---
 
-## M6 — Python ve Go
+## M6 — Bağlamalar: Python, Go, JavaScript
+
+Sıra: önce Python (ilk bağlama kararı), sonra Go, sonra JavaScript.
 
 - `erk-python`: C-ABI üstünde cffi, maturin ile platform wheel'leri
 - Nesne yönelimli sarmalayıcı (`App`, `Element`, `on("click", ...)`)
 - `erk-go`: C-ABI üstünde cgo sarmalayıcısı. Seçici tabanlı kolaylıklar
   (`OnClick("send", ...)`) düşük seviye `NodeId` API'sinin üstünde durur,
   onun yerini almaz
+- `erk-script`: isteğe bağlı JavaScript bağlaması
+  ([p1-embedded.md](../design/p1-embedded.md) §3.1). C-ABI'nin değil `erk`'in
+  Rust API'sinin üstünde, gömülü bir JS motoruyla. JS tarafı düğümlere
+  yalnızca `NodeId` ile başvurur, DOM JS nesnesi tutmaz. DOM API'sinin küçük
+  bir alt kümesi (seçiciler, metin, öznitelikler, `classList`, `style`,
+  oluştur/ekle/sil, `addEventListener`); Web API'si yok; zamanlayıcılar
+  host'un saatiyle. Varsayılan kapalı: Cargo özelliği açılmazsa ikiliye JS
+  motoru girmez
+- JS motoru ölçülerek seçilir: Boa (saf Rust) ile QuickJS (`rquickjs`, C)
+  ikiliye eklediği boyut, açılış süresi ve TodoMVC'nin 10 bin işlemlik
+  süresiyle karşılaştırılır; sonuç bu taşın planına yazılır. QuickJS
+  seçilirse yeni bir C bağımlılığı olduğu için `docs/design/` altında ayrı
+  bir karar belgesi gerekir
+- Muhafızlar `erk-script`'le aynı PR'da: çekirdek crate'ler, `erk` ve
+  `erk-ffi` hiçbir JS motoruna bağımlı değil (`cargo tree`); `erk-script`
+  projeden yalnızca `erk`'e bağımlı. Boyut bütçesi özelliksiz ikiliyi
+  ölçmeye devam eder; betikli derleme kendi bütçe satırını alır
 - Diğer diller topluluğa açık; C başlığı ve örnekler yeterli
 
 **Kabul:** `pip install erk` Windows ve Linux'ta çalışıyor; README'deki Python
 örneği bir pencere açıp bir tıklamaya yanıt veriyor. Aynı örnek Go ile de
-çalışıyor.
+çalışıyor. Sayaç ve TodoMVC JavaScript ile yazılmış halde aynı host
+kabuğunda çalışıyor; silinmiş bir düğüme dokunan betik istisna alıyor,
+süreç çökmüyor. JS özelliği kapalı derlemenin bağımlılık ağacında JS motoru
+yok.
 
 ---
 
@@ -303,7 +345,8 @@ gösteriyor. DevTools'un kendisi de Erk ile çiziliyor.
 
 **Kabul:** `erk build` dış dosyasız tek parça bir `.exe` ve AppImage üretiyor.
 Gerçek bir uygulama kıyası: Nexus Mail'in bir ekranı hem Wails + React hem
-Go + Erk ile yazılmış; ikili boyutu, bellek ve açılış süresi aynı makinede
+Go + Erk ile yazılmış (gelen kutusu ve okuma paneli; yazma penceresi
+kapsam dışı, p1-embedded §4); ikili boyutu, bellek ve açılış süresi aynı makinede
 ölçülüp yayımlanmış.
 
 ---
@@ -353,10 +396,11 @@ testi); bir video bir surface içinde oynuyor.
 
 ## M12 — Bileşenler ve ekosistem
 
-JavaScript olmadığı için React, Vue ya da Svelte bileşenleri çalışmaz. Yerine:
+Erk'in JavaScript'i bir tarayıcı ortamı değil (M6, DOM'un küçük bir alt
+kümesi); React, Vue ya da Svelte bileşenleri çalışmaz. Yerine:
 
-- Yerel kontroller motorun içinde (M5'teki form kontrolleri; `<dialog>`,
-  `<details>` gibi davranışı olan HTML elemanları)
+- Yerel kontroller motorun içinde (M5'teki form kontrolleri ve
+  `<dialog>`, `<details>`, `popover` gibi davranışı olan HTML elemanları)
 - HTML ve CSS kalıpları ve Tailwind gibi yalnızca CSS üreten araçlar (CSS
   değişkenleri ve seçicileri Stylo'nun işi)
 - Karmaşık bileşenler (tarih seçici, zengin metin düzenleyici) host tarafında,
@@ -371,7 +415,8 @@ referans sayfası.
 
 | Ne | Neden |
 |---|---|
-| JavaScript ve her türlü betik | Motorun ilkesi; iş mantığı host'ta |
+| Çekirdekte betik; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | JS isteğe bağlı bir bağlama (M6) ve DOM'un küçük bir alt kümesi; iş mantığı host'ta |
+| Zengin metin düzenleme (`contenteditable`) | M5'in form kontrollerinden çok daha büyük bir iş; bir e-posta istemcisinin yazma penceresi gibi ekranlar Erk'in alanı dışında (p1-embedded §4) |
 | Ağ, HTTP, Fetch, çerezler | Host'un işi; motor ağa hiç erişmez |
 | Kum havuzu, çoklu süreç, site izolasyonu | İçerik host'un kendisi; mesajlar serileştirilebilir kaldığı için ihtiyaç olursa sonradan eklenebilir |
 | Float, clear, tablo düzeni, multi-column, print/paged media | Masaüstü UI'ı flex ile kurulur; ayrıntı css-support.md'de |

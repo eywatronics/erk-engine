@@ -281,3 +281,87 @@ fn an_inline_element_keeps_its_own_colour() {
         .collect();
     assert_eq!(red, ["kırmızı"]);
 }
+
+/// Each line of `id`'s paragraph: where it starts and how wide it is
+/// without its trailing whitespace, relative to the content box.
+fn lines(layouts: &Layouts, id: NodeId) -> Vec<(f32, f32)> {
+    let shaped = layouts.text(id).expect("a paragraph");
+    shaped
+        .layout
+        .lines()
+        .map(|line| {
+            // Justification widens the clusters, not the line's metrics, so
+            // the width comes from where the glyph runs actually end.
+            let runs: Vec<(f32, f32)> = line
+                .items()
+                .filter_map(|item| match item {
+                    parley::PositionedLayoutItem::GlyphRun(run) => {
+                        Some((run.offset(), run.advance()))
+                    }
+                    parley::PositionedLayoutItem::InlineBox(_) => None,
+                })
+                .collect();
+            let start = runs.first().expect("a glyph run").0;
+            let end = runs
+                .iter()
+                .map(|(offset, advance)| offset + advance)
+                .fold(start, f32::max);
+            (start, end - start - line.metrics().trailing_whitespace)
+        })
+        .collect()
+}
+
+fn paragraph_lines(style: &str) -> Vec<(f32, f32)> {
+    let (doc, layouts) = lay_out(&format!(
+        r#"<p style="width: 400px; margin: 0; {style}">Erk ortalar.</p>"#
+    ));
+    lines(&layouts, all(&doc, &local_name!("p"))[0])
+}
+
+#[test]
+fn text_align_moves_the_line_within_the_box() {
+    let [(start, width)] = paragraph_lines("")[..] else {
+        panic!("one line");
+    };
+    assert!(start.abs() < 0.5, "left by default, started at {start}");
+    let [(center, _)] = paragraph_lines("text-align: center")[..] else {
+        panic!("one line");
+    };
+    assert!(
+        (center - (400.0 - width) / 2.0).abs() < 0.5,
+        "centre at {center}"
+    );
+    let [(right, _)] = paragraph_lines("text-align: right")[..] else {
+        panic!("one line");
+    };
+    assert!((right - (400.0 - width)).abs() < 0.5, "right at {right}");
+}
+
+#[test]
+fn the_align_attribute_aligns_text() {
+    let (doc, layouts) = lay_out(r#"<p align="center" style="width: 400px; margin: 0">Erk</p>"#);
+    let [(start, width)] = lines(&layouts, all(&doc, &local_name!("p"))[0])[..] else {
+        panic!("one line");
+    };
+    assert!(
+        (start - (400.0 - width) / 2.0).abs() < 0.5,
+        "started at {start}"
+    );
+}
+
+#[test]
+fn justified_lines_fill_the_box_except_the_last() {
+    let (doc, layouts) = lay_out(
+        r#"<p style="width: 300px; margin: 0; text-align: justify">Erk bu paragrafı iki yana yaslar: her satır kutunun iki kenarına dayanır, kelimeler arasındaki boşluklar büyür; son satır ise doğal genişliğinde kalır.</p>"#,
+    );
+    let lines = lines(&layouts, all(&doc, &local_name!("p"))[0]);
+    assert!(lines.len() >= 3, "{lines:?}");
+    let (last, full) = lines.split_last().unwrap();
+    for (start, width) in full {
+        assert!(
+            start.abs() < 0.5 && (width - 300.0).abs() < 1.0,
+            "{lines:?}"
+        );
+    }
+    assert!(last.1 < 290.0, "the last line is stretched: {lines:?}");
+}

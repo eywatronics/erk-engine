@@ -46,7 +46,7 @@ yazıldığında doldurulur.
 | `erk-renderer` pencere katmanını bilmez | CI `guards`: `cargo tree -p erk-renderer --target all --all-features` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1.0 | 2026-09-30, yakaladı |
 | Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
 | WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
-| `render_html` hiçbir girdide paniklemez | `cargo test` içinde tohumlu girdi testi ve çökme korpusu; `fuzz/` altında cargo-fuzz, ayrı ve zaman sınırlı CI job'ı | Bozuk girdide `unwrap` eden bir yol | M1 | — |
+| `render_html` hiçbir girdide paniklemez ya da çökmez | `tests/robustness.rs`: sabit tohumlu 300 bozuk belge, `tests/robustness/` korpusu, gerçek renderer iş parçacığında 5000 düzey iç içelik; ayrıştırıcı derinliği Chrome gibi sınırlar (`erk-dom`, `nesting_stops_where_chrome_stops`), renderer iş parçacığının yığını 16 MiB. cargo-fuzz job'ı ayrı PR'da | Derinlik sınırını kaldırmak; renderer yığınını varsayılana döndürmek (ikisi de yığın taşması); bir kontrol karakterinde panik | M1.3 | 2026-10-01, yakaladı |
 | İkili boyutu bütçede, bütçe gerekçesiz yükselmez | CI `size` job'ı (`check-size-budget.sh`): Linux yayın ikilisi `.github/size-budget.txt`'teki tavanın altında; tavanı yükseltmek, taban commit'e göre yeni bir `# raised:` gerekçesi ister | Tavanın üstünde bir ikili (ilk gerçek Linux ölçümü geçici tavanı aştı); bütçesiz dosya; eksik ikili; gerekçesiz, boş gerekçeli ve eski gerekçeli yükseltme | M1.0 | 2026-09-30, yakaladı |
 | CSS matrisindeki her "Supported" satırın testi var | CI `guards` (`check-css-support.sh`): her Supported satır bir test fonksiyonu ya da test dosyası adlandırır ve o test var | Var olmayan bir test adı; test adı olmayan satır; var olmayan test dosyası | M1.0 | 2026-09-30, yakaladı |
 | `unsafe` yalnızca `erk-style` ve `erk-ffi`'de | Lint devralma istisna listesi; `erk-ffi` de `deny` + öğe başına izin | `erk`'e `unsafe` blok | M3 | — |
@@ -54,6 +54,7 @@ yazıldığında doldurulur.
 | C örneği derlenir ve çalışır | CI: C örneği `erk-ffi`'ye bağlanıp bir sayfa açar | C-ABI'de uyumsuz bir imza | M3 | — |
 | FFI'dan panik sızmaz, eski id ve yanlış iş parçacığı hata kodu döner | `erk-ffi` testleri | `catch_unwind`'i kaldırmak; iş parçacığı denetimini kaldırmak | M3 | — |
 | `Mutation` dizileri motoru bozamaz | cargo-fuzz, eski `NodeId`'ler dahil | Nesil denetimini kaldırmak | M4 | — |
+| Çekirdekte JS motoru yok | CI `guards`: `cargo tree --target all --all-features --locked` ile çekirdek crate'lerin, `erk`'in ve `erk-ffi`'nin ağacında bilinen JS motorları (`boa_engine`, `rquickjs`, `quickjs`, `v8`, `deno_core`) yok; `erk-script`'in projeden tek bağımlılığı `erk` | Çekirdeğe bir JS motoru eklemek; `erk-script`'i `erk-dom`'a bağlamak; motoru bir özelliğin arkasına saklamak | M6 | — |
 
 İç bağımlılık yönü bugün `cargo tree` adımlarıyla denetleniyor; crate sayısı
 artarsa (M3'te `erk`, `erk-ffi`) bir `xtask arch-check`'e taşınması

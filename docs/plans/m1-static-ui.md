@@ -130,9 +130,9 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 - [ ] **Step 3: Inline kutular.** Satır içi görseller ve `inline-block`
   Parley'nin `InlineBox`'larıyla. Kenarlıklı ve dolgulu `<span>`'lar satırlar
   arasında kırılır.
-- [ ] **Step 4:** `text-align` (start, end, center, justify), temel
+- [x] **Step 4:** `text-align` (start, end, center, justify), temel
   `vertical-align` (baseline, middle, top, bottom; Blitz'te yok, Erk'in işi).
-- [ ] **Step 5: Sağlamlık.** `tests/robustness.rs`: sabit tohumlu bir üreteçle
+- [x] **Step 5: Sağlamlık.** `tests/robustness.rs`: sabit tohumlu bir üreteçle
   bozuk HTML ve CSS (kapanmamış etiketler, dev sayılar, derin iç içe
   yapılar, geçersiz UTF-8'den dönüştürülmüş metin) `render_html`'den geçer,
   panik yok. Çökme korpusu `tests/robustness/` altında. `fuzz/` altında
@@ -315,3 +315,31 @@ satır sonları Chrome'la örtüşüyor; skor, metinle dolu sayfalarda glif
 kenarlarındaki kenar yumuşatma farkı yüzünden `paragraphs` gibi düşük.
 
 1000 elemanlı sayfanın süresi değişmedi (sıcak medyan 68,5 ms).
+
+**Step 4, `text-align` (2026-10-01).** Bloğun `text-align`'ı Parley'nin
+hizalamasına çevriliyor: start, end, left, right, center, justify ve `align`
+özniteliğinin ürettiği eski `-moz-` değerleri. Parley iki yana yaslamayı
+satırın ölçülerini değil kümelerin genişliğini büyüterek yapıyor; testler bu
+yüzden glif run'larının gerçek ucunu, satır sonundaki (kenardan taşan)
+boşluğu düşerek ölçüyor. Yeni `text-align` referans sayfası %93,48, kutuları
+6/6 Chrome'la aynı. **`vertical-align` yapılmadı:** satır içi kutulara bağlı,
+Step 3 ile gelir.
+
+**Step 5, sağlamlık (2026-10-01).** Deneme, gerçek bir çökme buldu: 1000 düzey
+iç içe `<div>`, renderer iş parçacığının yığınını taşırıp süreci
+öldürüyordu (layout her düzeyde bir kez özyineleniyor). Chrome'da ölçüldü:
+ayrıştırıcı derinliği `<body>`'nin 511 altında kesiyor, daha derin elemanlar
+kardeş oluyor (Blink, `kMaximumHTMLParserDOMTreeDepth`). Erk'in ayrıştırıcısı
+artık aynı kuralı uyguluyor, ağaç Chrome'unkiyle aynı. 512 düzey hata
+ayıklama derlemesinde yine de 2 MiB'tan fazla yığın istiyor; renderer iş
+parçacığına 16 MiB verildi (yalnızca adres alanı).
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Sağlamlık testi bozuk HTML/CSS'te panik aramak | Panikten önce bir çökme çıktı: derin iç içelik yığını taşırıyordu. Yığın taşması panik değil süreç ölümüdür, `catch_unwind` yakalayamaz; derin belge testi bu yüzden gerçek renderer iş parçacığından geçiyor |
+| cargo-fuzz hedefi bu adımda | **Yapılmadı:** ayrı bir nightly ve CI job'ı istiyor; sabit tohumlu üreteç ve korpus bugünkü kapıyı karşılıyor. Fuzz hedefi M1 bitmeden ayrı bir PR'da |
+| — | Sözleşmeye açık bir soru eklendi: M3'te layout UI iş parçacığında çalışacak, ama Windows'ta ana iş parçacığının yığını 1 MB. Ya layout'un özyinelemesi kaldırılacak ya da gereken yığın ölçülüp belgelenecek |
+
+Mutasyonlar: derinlik sınırı ya da büyük yığın kaldırılınca test süreci yığın
+taşmasıyla çöküyor; bir kontrol karakterinde enjekte edilen panik, belgesiyle
+birlikte raporlanıyor.

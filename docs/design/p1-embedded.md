@@ -15,14 +15,15 @@
 Erk bir tarayıcı değil, **gömülü bir HTML/CSS masaüstü UI motoru**dur.
 Host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u sürer, Erk
 stil, layout ve boyamayı yapar, kullanıcı olaylarını host'a bildirir.
-Motorda betik dili yoktur.
+Çekirdekte betik dili yoktur. JavaScript isteğe bağlı bir bağlamadır:
+Python gibi aynı API'nin üstünde durur, açılmazsa ikiliye girmez (§3.1).
 
 ```
-host uygulama (Rust, Python, C)      iş mantığı, durum, dosyalar
+host uygulama (Rust, Python, C, JS)  iş mantığı, durum, dosyalar
         │   ▲
         │   │  NodeId'ler, toplu değişiklikler, olaylar
         ▼   │
-erk (Rust API) ── erk-ffi (C-ABI, erk.h)
+erk (Rust API) ── erk-ffi (C-ABI, erk.h) · erk-script (isteğe bağlı JS)
         │
 çekirdek: erk-dom · erk-style · erk-renderer     G/Ç yok, saat yok, ortam yok
         │
@@ -40,7 +41,10 @@ sonra C-ABI; ayrı süreç modu ancak ihtiyaç olursa); ilk dil bağlaması Pyth
 
 ## 2. İlkeler
 
-1. **Sıfır JS, sıfır GC.** `<script>` ayrıştırılır ama hiçbir zaman çalışmaz.
+1. **Çekirdekte sıfır JS, sıfır GC.** Çekirdek `<script>`'i ayrıştırır ama
+   çalıştırmaz. JavaScript isteğe bağlı `erk-script` bağlamasıdır: Python
+   bağlaması gibi `erk`'in genel API'sini kullanır, düğümlere yalnızca
+   `NodeId` ile başvurur; DOM hiçbir JS nesnesi tutmaz (§3.1).
 2. **DOM arenanındır.** Dış dünya düğümlere yalnızca `NodeId` ile başvurur
    (u32 indeks + u32 nesil; C tarafında opak `uint64_t`). Silinmiş bir
    düğümün id'si çökme değil hata kodu üretir.
@@ -91,7 +95,7 @@ Sonra gelen bir "ana plan" önerisinin M0.5 sonrası değerlendirmesi:
 | M1'i mikro adımlara bölmek | Alındı: M1.0–M1.7. İlk iki adım (tek satır metin, satır kırma) M0'da zaten var ve testli |
 | Float ve tablo görülünce sessizce `display: none` | Reddedildi: içeriği gizler. Float `none` gibi dizilir; tablo için tablo algoritması yok (css-support.md) |
 | "< 5 MB" ikili | Değişmedi: bütçe M1.0'da ölçülen tabandan konur |
-| Sayaç uygulaması | Alındı: M4'ün ilk demosu; kabul ölçütü daha güçlü olan TodoMVC olarak kalır |
+| Sayaç uygulaması | Alındı: M4'ün ilk demosu; kabul ölçütü daha güçlü olan TodoMVC olarak kalır. 2026-10-01'de M2'nin kabulüne çekildi (§3.1) |
 
 Geliştirici araçları önerisinin (F12 ile açılan, Erk ile yazılmış DevTools)
 değerlendirmesi:
@@ -142,21 +146,91 @@ doğrulanmış hali geçerli:
 - "İki haftalık zaman kutusu" süre tahmini yasağıyla çelişir; karar kapısı
   bir test sonucuna bağlanır.
 
+### 3.1 Ağır eleştiri ve JavaScript kararı (2026-10-01)
+
+Dışarıdan gelen sert bir eleştiri beş nokta sıraladı. Değerlendirme:
+
+| Eleştiri | Değerlendirme | Karar |
+|---|---|---|
+| Sıfır JS, açılır menü gibi salt görsel bir durum için bile host'a tur demek ("1998'in CGI'ı") | Gecikme iddiası yanlış: süreç içi bir FFI çağrısı bir fonksiyon çağrısıdır, ağ ya da süreç turu yoktur; stil, layout ve boyama maliyeti JS'li bir tarayıcıda da aynıdır. Haklı olan geliştirici deneyimi: salt görsel durum için host'ta kod yazmak sürtünmedir. Sciter örneği yanlış: Sciter JS'siz başlayıp vazgeçmedi, ilk sürümünden beri kendi betik dili (TIScript) vardı, 2020'de QuickJS'e geçti | İsteğe bağlı JS bağlaması (aşağıda); standart deklaratif davranışlar (`<details>`, `<dialog>`, `popover`) motorda (M5) |
+| Kütüphane yamalı bohçası (html5ever, Stylo, Taffy, Parley, Vello) | Betimleme yanlış: html5ever Servo ekibinin bakımında; Stylo C++ değil, Firefox'un da kullandığı Rust stil motoru; aynı yığını Blitz kullanıyor, Servo da Stylo, html5ever ve grid için Taffy kullanıyor. Haklı olan bağımlılık riski | Değişmedi: sürümler sabit; Chrome piksel ve geometri testi bir gerilemenin hangi kutuda başladığını gösteriyor |
+| Bikeshedding (`NodeId` bitleri) | Haklı: tartışma M3'e kadar tek satır kodu etkilemiyordu ve iki tur sürdü | Kural: mimari tartışma yalnızca o anki taşı bloke ediyorsa yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır |
+| Pazar: web geliştiricisi React'ten, sistem programcısı egui ya da Slint'ten vazgeçmez | Büyük ölçüde haklı. "Tauri ya da Electron'un yerini alır" iddiası yapılmaz | Konumlandırma daraltıldı (§4) |
+| Tek kişilik ordu | Haklı; cevabı kapsam. Chrome kâhin testi köşe durumları için var, ama kapsamı test değil plan küçültür | "Butona bas, sayı artsın" M4'ten M2'nin kabulüne çekildi: etkileşim uçtan uca erken çalışır |
+
+**JavaScript kararı: çekirdekte yok, isteğe bağlı bir bağlama olarak var.**
+Değerlendirilen üç yol:
+
+| Yol | Artı | Eksi |
+|---|---|---|
+| A. Betik yok; standart deklaratif HTML davranışları motorda | Çekirdek basit; menü, akordeon, diyalog host'a gitmeden çalışır | Bu kalıpların dışındaki her yerel UI mantığı host'ta |
+| **B. İsteğe bağlı JS, host tarafında, aynı API üzerinden (seçilen)** | Web geliştiricisinin alışkanlığı; yerel UI mantığı betikte; açılmazsa ikili ve çekirdek değişmez | Bakım yükü; motor seçimi (aşağıda) |
+| C. Kendi deklaratif dilimiz | — | Sciter'ın dersi: yeni bir dili kimse istemez. Reddedildi |
+
+B seçildi; A'nın standart elemanları da plana girdi (M5). İkisi birbirinin
+alternatifi değil: deklaratif bir davranışın yettiği yerde betik yazılmaz.
+
+B'nin burada tarayıcıdaki kadar pahalı olmamasının sebebi `NodeId`:
+
+- **`erk-script` bir bağlamadır, motor özelliği değil.** Python
+  bağlamasıyla aynı yerde durur, `erk`'in genel Rust API'sinin üstünde.
+  Çekirdek crate'ler (`erk-dom`, `erk-style`, `erk-renderer`), `erk` ve
+  `erk-ffi` hiçbir JS motoruna bağımlı değildir.
+- **DOM ile GC arasında döngü yok.** Tarayıcıları yıllarca uğraştıran sorun,
+  DOM düğümü ile JS nesnesinin birbirini tutmasıdır. Burada JS'teki eleman
+  nesnesi yalnızca bir `NodeId` taşır ve DOM hiçbir JS nesnesi tutmaz.
+  Dinleyiciler `erk-script`'in kendi tablosunda abonelik kimliğiyle durur;
+  düğüm silinince sözleşmenin `destroy` callback'iyle (p1-contract §5)
+  bırakılır. Silinmiş bir düğümün id'si JS'te istisna olur, çökme olmaz.
+- **Tarayıcı ortamı değil.** DOM API'sinin küçük bir alt kümesi:
+  `querySelector`, `getElementById`, `textContent`, öznitelikler,
+  `classList`, `style`, eleman oluşturma, ekleme ve silme,
+  `addEventListener`. Web API'si yok (`fetch`, depolama, worker,
+  `XMLHttpRequest`); React, Vue ya da Svelte çalışmaz. Zamanlayıcılar host'un
+  saatiyle (`now_ns`) sürülür. Betik dosyaya ya da ağa erişemez; host bir
+  işlev açarsa yalnızca ona erişir.
+- **Varsayılan kapalı.** Cargo özelliği açılmazsa ikiliye JS motoru girmez.
+  Açıksa betikleri host verir ya da `<script>` elemanlarını açıkça
+  etkinleştirir; betiğin kaynağı yine host'un kaynak callback'inden gelir.
+  `onclick` gibi olay öznitelikleri ilk sürümde yok.
+- **Motor seçimi ölçülerek.** Boa (saf Rust) ile QuickJS (`rquickjs`; daha
+  küçük ve hızlı ama C kodu) karşılaştırılır: ikiliye eklediği boyut, açılış
+  süresi, TodoMVC'nin 10 bin işlemlik süresi. Varsayılan tercih Boa, çünkü
+  `unsafe` ve C politikası değişmez. QuickJS ancak ölçüm farkı bunu
+  gerektirirse ve yeni bir C bağımlılığı olduğu için ayrı bir tasarım
+  belgesiyle seçilir.
+- **Yeri M6.** `erk-script` M3'ün API'sine ve M4'ün değişiklik, olay ve
+  seçici API'lerine dayanır; Python'dan ve Go'dan sonra, aynı taşta.
+
 ## 4. Konumlandırma
 
 Bu alanda boş bir yer yok; farkı dürüst yazmak gerekiyor.
 
 | Proje | Ne | Erk'ten farkı |
 |---|---|---|
-| Sciter | HTML/CSS gömülü UI motoru, C-API, çok dilli bağlamalar | Kapalı kaynak; kendi betik dili var |
+| Sciter | HTML/CSS gömülü UI motoru, C-API, çok dilli bağlamalar | Kapalı kaynak; betik dili baştan beri motorda (TIScript, 2020'den beri QuickJS) |
 | Blitz / Dioxus Native | Rust, JS'siz HTML/CSS renderer | API yalnızca Rust'tan; Erk'in ilk dili de Rust ama C-ABI ve Python hedefte |
 | Ultralight | WebKit tabanlı gömülü motor | Kapalı kaynak, JS var |
 | Tauri, Electron | Sistem webview'ı ya da Chromium | JS ile çalışır; Electron büyük, Tauri platformun webview'ına bağımlı |
 | Slint, egui, Qt | Yerel UI araç takımları | HTML/CSS değil |
 
-Erk'in iddiası: standart HTML/CSS'in açıkça sınırlanmış bir alt kümesi, sıfır
-JS, kararlı bir C-ABI ve Python, her makinede aynı çizim, küçük ikili. Boyut
-ve bellek iddiaları ölçülmeden yazılmaz.
+Erk'in iddiası: standart HTML/CSS'in açıkça sınırlanmış bir alt kümesi,
+çekirdekte sıfır JS (JS isteğe bağlı bir bağlama), kararlı bir C-ABI ve
+Python, her makinede aynı çizim, küçük ikili. Boyut ve bellek iddiaları
+ölçülmeden yazılmaz.
+
+**Kime:** arayüzünü HTML/CSS ile çizmek isteyen ama bir JS yığını ya da
+webview taşımak istemeyen Rust, Python ve Go geliştiricileri. Hedef
+uygulamalar küçük ve orta boy masaüstü araçları: kurulum sihirbazları,
+başlatıcılar, tepsi ve ayar panelleri, iç araçlar, endüstriyel paneller.
+Erk "Tauri ya da Electron'un yerini alır" iddiasında bulunmaz: React
+ekosistemini taşımak isteyen bir web ekibi için doğru araç onlardır.
+
+Sınır bir örnekle: bir e-posta istemcisinin gelen kutusu ve okuma paneli
+Erk'in alanında, yazma penceresi değil. Zengin metin düzenleme
+(`contenteditable` düzeyinde bir düzenleme motoru) M5'in form
+kontrollerinden çok daha büyük bir iş ve planda yok; M8'in Nexus Mail kıyası
+bu yüzden yazma penceresini kapsamaz.
 
 ## 5. Mimari
 
@@ -182,7 +256,8 @@ bunu kendisi yapar ve DOM'a değişiklik olarak verir.
 
 | Ne | Neden |
 |---|---|
-| JavaScript ve her türlü betik | Motorun ilkesi (§2.1) |
+| Çekirdekte betik; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | `erk-script` isteğe bağlı ve DOM'un küçük bir alt kümesi (§3.1) |
+| Zengin metin düzenleme (`contenteditable`) | M5'in form kontrollerinden çok daha büyük bir iş (§4) |
 | Ağ, HTTP, Fetch, çerezler | Host'un işi |
 | Kum havuzu, çoklu süreç | İçerik host'un kendisi; ihtiyaç olursa mesaj disiplini sayesinde sonradan eklenir |
 | Float, tablo düzeni, multi-column, print/paged media | [css-support.md](../css-support.md) "Not planned" |

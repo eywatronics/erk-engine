@@ -19,7 +19,9 @@ does not lay out or paint is not supported.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `<script>`, event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Erk runs no scripts. The host subscribes to events through the embedding API |
+| `<script>` and scripts the host runs | Later (M6) | Off by default. The engine core runs no scripts; the optional `erk-script` binding runs JavaScript on top of the public API, with a small DOM subset (selectors, text, attributes, `classList`, `style`, create/insert/remove, `addEventListener`) |
+| Event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Listen with `addEventListener` in `erk-script`, or subscribe from the host through the embedding API |
+| Web APIs (`fetch`, storage, workers, `XMLHttpRequest`) | Not planned | A script reaches files or the network only through functions the host exposes |
 
 ## Selectors and cascade
 
@@ -61,7 +63,7 @@ does not lay out or paint is not supported.
 | `color`, `font-size`, `font-weight` (regular and bold) | Supported | `bold_uses_the_bold_face`, `headings_are_larger_than_paragraphs` |
 | Line breaking, whitespace collapsing, `line-height: normal` | Supported | `narrow_width_breaks_into_more_lines`, `whitespace_collapses_and_trims`, `a_paragraph_is_one_line_high` |
 | Turkish and other Latin text | Supported | `turkish_letters_all_have_glyphs` |
-| `text-align` (including `justify`), `align` attribute | M1 | Styled today (`align_sets_text_align`), not yet laid out |
+| `text-align` (`start`, `end`, `left`, `right`, `center`, `justify`), `align` attribute | Supported | `text_align_moves_the_line_within_the_box`, `justified_lines_fill_the_box_except_the_last`, `the_align_attribute_aligns_text` |
 | System fonts and font fallback (CJK, emoji) | M1 | Today only the embedded Noto Sans |
 | `text-transform` with the element's `lang` (Turkish `i → İ`) | M1 | |
 | Text selection, caret, IME input | M5 | |
@@ -100,4 +102,5 @@ does not lay out or paint is not supported.
 | Feature | Status | Test / notes |
 |---|---|---|
 | HTML parsing (full HTML5 algorithm) | Supported | `erk-dom/tests/parse.rs` |
+| `<details>`/`<summary>`, `<dialog>`, the `popover` attribute, `commandfor`/`command` | Later (M5) | Built-in behaviour: menus, disclosure widgets and dialogs work without script or a host round trip |
 | `<audio>`, `<video>`, `<canvas>`, `<iframe>`, SVG | Not planned for now | Revisited after M9 |

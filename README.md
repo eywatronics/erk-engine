@@ -1,9 +1,9 @@
 # Erk Engine
 
 **Erk** is an embeddable HTML/CSS UI engine for desktop applications, written
-in Rust. There is no JavaScript: your application (in Rust, and later C or
-Python) owns the logic and drives the document, Erk lays it out, paints it and
-reports what the user did.
+in Rust. The engine core runs no JavaScript: your application (in Rust, and
+later C, Python, Go or, optionally, JavaScript) owns the logic and drives the
+document, Erk lays it out, paints it and reports what the user did.
 
 - Built on mature Rust components: html5ever, Stylo, Taffy, Parley, Vello
 - Original work where none of them reach: inline layout, the embedding API
