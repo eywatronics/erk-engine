@@ -281,7 +281,7 @@ bağımlı; düğüme bağlı veri yan tablolarda.
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
 hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. p2-incremental §4'ün
-B1–B10 ölçümleri tabana karşı yayımlı. Kısmi kare ile tam kare piksel piksel
+B1–B11 ölçümleri tabana karşı yayımlı. Kısmi kare ile tam kare piksel piksel
 aynı. Türkçe ve CJK IME girişi çalışıyor. Bir ekran okuyucu form etiketlerini
 okuyor.
 
