@@ -26,7 +26,7 @@ sürekli bir altyapı.
 | Mimari muhafızlar | Çekirdek G/Ç, `unsafe`, bağımlılık yönü, renderer yüzeyi, boyut bütçesi | `.github/scripts/`, CI `guards` ve `size` | Var |
 | Sağlamlık | Bozuk HTML/CSS'te panik yok, derin iç içelikte yığın taşması yok (sabit tohumlu 300 belge, çökme korpusu, 5000 düzey) | `erk-renderer/tests/robustness.rs`, `tests/robustness/` | Var |
 | Fuzz | Açık uçlu arama; sonra `Mutation` dizileri ve FFI | `fuzz/` | M1 içinde ayrı PR, M4, M3 |
-| WPT | CSS dizinlerinin reftest'leri, taban çizgisi iki yönlü, düşüş gerekçe ister | `crates/erk-wpt`, `tests/wpt/` | Var (normal-flow, css-position); css-text ve css-flexbox sonra |
+| WPT | CSS dizinlerinin reftest'leri, taban çizgisi iki yönlü, düşüş gerekçe ister | `crates/erk-wpt`, `tests/wpt/` | Var (normal-flow, css-position, css-flexbox); css-text sonra |
 | FFI | Rust → C → Rust, hata kodları, iş parçacığı, ömür | `erk-ffi` testleri, C örneği (ASan) | M3 |
 
 ## Chrome'la karşılaştırma iki ölçüyle

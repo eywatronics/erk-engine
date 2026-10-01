@@ -139,7 +139,7 @@ kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla geli
 | M1.2 | Satır kırma: daralan kutuda metin alt satıra iner | M0'da var (`narrow_width_breaks_into_more_lines`) |
 | M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Bitti: stil aralıkları, `text-align`, sağlamlık, satır içi kutular, `inline-block`, `vertical-align`. Satır içi görseller `<img>` ile M1.6'da; cargo-fuzz job'ı M1 bitmeden ayrı PR'da |
 | M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Bitti: konumlandırma, `z-index`, float, WPT altyapısı (normal-flow %42,8, css-position %16,3), akış layout'u kararı (geçici: Taffy) |
-| M1.5 | Flexbox doğrulaması (Taffy) | Yeni |
+| M1.5 | Flexbox doğrulaması (Taffy) | Bitti: `order`, flex kapsayıcıda metin, absolute elemanların statik konumu; `css/css-flexbox` %53,2 |
 | M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Yeni |
 | M1.7 | Sistem fontları ve fallback (fontique; gömülü font yalnızca testlerde), HiDPI cihaz ölçeği, `lang`'a göre `text-transform` (`icu_casemap`: Türkçede `i → İ`, `ı → I`) | Yeni |
 

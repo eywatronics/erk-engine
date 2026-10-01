@@ -24,8 +24,11 @@
 //! parent's inline content and does not split it. It becomes a Taffy child
 //! of its containing block, the nearest positioned ancestor with a box, or
 //! the viewport (CSS 2 §10.1); a fixed element's is always the viewport.
-//! Its static position, used when its insets are `auto`, is the containing
-//! block's content edge rather than where it would have sat in the flow.
+//! Where its insets are `auto` it sits at its static position, where it
+//! would have been in the flow (CSS 2 §10.3.7): a zero-size placeholder
+//! between blocks, or a zero-width anchor in a line, marks that place, and
+//! after layout the box is moved there. In a flex or grid container the
+//! static position is the container's content edge.
 //! Floats are laid out as if `float: none` (css-support.md): Parley's lines
 //! do not flow around them.
 //!
@@ -134,6 +137,7 @@ pub(crate) fn layout(
 
     let LayoutTree { mut nodes, .. } = tree;
     snap_locations(&mut nodes, usize::from(root));
+    place_at_static_positions(doc, &mut nodes);
     relative_to_dom(doc, &mut nodes);
     let mut text: Vec<Option<ShapedText>> = nodes
         .iter_mut()
@@ -190,13 +194,8 @@ fn snap_locations(nodes: &mut [LayoutNode], root: usize) {
     }
 }
 
-/// Make every element's position relative to its nearest DOM ancestor with
-/// a box. Layout places a box relative to its parent in the layout tree,
-/// which differs from the DOM for atomic inlines inside inline elements or
-/// anonymous boxes, and for absolutely positioned elements, whose parent is
-/// their containing block. Anonymous boxes stay relative to their block.
-fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
-    // Each box's absolute position, down the layout tree.
+/// Each box's absolute position, down the layout tree.
+fn absolute_positions(doc: &Document, nodes: &[LayoutNode]) -> Vec<Point<f32>> {
     let mut absolute = vec![Point::ZERO; nodes.len()];
     let mut stack = vec![(doc.root().index() as usize, Point::ZERO)];
     while let Some((index, parent)) = stack.pop() {
@@ -210,6 +209,87 @@ fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
             stack.push((usize::from(*child), here));
         }
     }
+    absolute
+}
+
+/// Move each absolutely positioned element whose insets are `auto` along an
+/// axis to its static position on that axis. Taffy has placed it in its
+/// containing block already, at that block's content edge; it has no
+/// boxes in flow after it, so moving it changes nothing else. An element
+/// whose static position is inside another such element sees that one's
+/// position before the move (rare; not handled).
+fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
+    let absolute = absolute_positions(doc, nodes);
+    let round = |value: f32| (value + 0.5).floor();
+    for index in 0..nodes.len() {
+        let Some(source) = nodes[index].static_position else {
+            continue;
+        };
+        let inset = nodes[index].style.inset;
+        let (auto_x, auto_y) = (
+            inset.left.is_auto() && inset.right.is_auto(),
+            inset.top.is_auto() && inset.bottom.is_auto(),
+        );
+        if !auto_x && !auto_y {
+            continue;
+        }
+        let content = |box_index: usize| {
+            let layout = &nodes[box_index].layout;
+            Point {
+                x: absolute[box_index].x + layout.border.left + layout.padding.left,
+                y: absolute[box_index].y + layout.border.top + layout.padding.top,
+            }
+        };
+        let static_point = match source {
+            StaticPosition::Placeholder(placeholder) => absolute[placeholder],
+            StaticPosition::ContentStart(container) => content(container),
+            StaticPosition::Line(paragraph) => {
+                let origin = content(paragraph);
+                let anchor = nodes[paragraph].shaped.as_ref().and_then(|shaped| {
+                    shaped
+                        .anchor_positions()
+                        .iter()
+                        .find(|(element, ..)| *element == index)
+                        .copied()
+                });
+                let Some((_, x, top, bottom)) = anchor else {
+                    continue;
+                };
+                if nodes[index].block_level {
+                    Point {
+                        x: origin.x,
+                        y: origin.y + round(bottom),
+                    }
+                } else {
+                    Point {
+                        x: origin.x + round(x),
+                        y: origin.y + round(top),
+                    }
+                }
+            }
+        };
+        let layout = nodes[index].layout;
+        let parent = Point {
+            x: absolute[index].x - layout.location.x,
+            y: absolute[index].y - layout.location.y,
+        };
+        let location = &mut nodes[index].layout.location;
+        if auto_x {
+            location.x = static_point.x + layout.margin.left - parent.x;
+        }
+        if auto_y {
+            location.y = static_point.y + layout.margin.top - parent.y;
+        }
+    }
+}
+
+/// Make every element's position relative to its nearest DOM ancestor with
+/// a box. Layout places a box relative to its parent in the layout tree,
+/// which differs from the DOM for atomic inlines inside inline elements or
+/// anonymous boxes, and for absolutely positioned elements, whose parent is
+/// their containing block. Anonymous boxes stay relative to their block.
+fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
+    let absolute = absolute_positions(doc, nodes);
     // Down the DOM, with the absolute position of the nearest box above.
     let mut stack = vec![(doc.root(), Point::ZERO)];
     while let Some((id, above)) = stack.pop() {
@@ -240,6 +320,12 @@ struct LayoutNode {
     paragraph: Option<Paragraph>,
     /// A paragraph's lines as its final layout broke them.
     shaped: Option<InlineLayout>,
+    /// For an absolutely positioned element: where it would have been, and
+    /// whether it was block-level before it was taken out of the flow.
+    static_position: Option<StaticPosition>,
+    block_level: bool,
+    /// The CSS `order` of a flex or grid item.
+    order: i32,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     cache: Cache,
@@ -269,6 +355,20 @@ enum Entry {
     Block(NodeId, StyleArc),
     /// A text node, or an inline element with everything inside it.
     Inline(Vec<Token>, Atoms),
+    /// An absolutely positioned child: where it would have been.
+    OutOfFlow(NodeId),
+}
+
+/// Where an absolutely positioned element would have been in the flow.
+#[derive(Clone, Copy, Debug)]
+enum StaticPosition {
+    /// A zero-size placeholder box between blocks, by index.
+    Placeholder(usize),
+    /// An anchor in the lines of a paragraph box, by index; a block-level
+    /// element starts below the anchor's line, an inline one at the anchor.
+    Line(usize),
+    /// The content edge of a flex or grid container, by index.
+    ContentStart(usize),
 }
 
 /// Build the layout tree: which slots generate boxes, their Taffy styles,
@@ -296,6 +396,14 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
             .as_ref()
             .is_some_and(|style| is_positioned(style));
         let container = if positioned { parent } else { outer_container };
+        // Only a block container lays its inline content out as lines; in a
+        // flex or grid container each run of text is an anonymous item.
+        let block_container = parent_style.as_ref().is_none_or(|style| {
+            matches!(
+                style.get_box().clone_display().inside(),
+                DisplayInside::Flow | DisplayInside::FlowRoot
+            )
+        });
         // The children in tree order: block-level elements, and everything
         // inline (text nodes, inline elements, atomic inlines). Absolutely
         // positioned elements are set aside for their containing block.
@@ -320,6 +428,7 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     };
                     if is_out_of_flow(&computed) {
                         out_of_flow.push((child, computed, container));
+                        entries.push(Entry::OutOfFlow(child));
                     } else if is_atomic_inline(&computed) {
                         entries.push(Entry::Inline(
                             vec![InlineToken::Atom(child.index() as usize, computed.clone())],
@@ -349,12 +458,18 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
         // A paragraph: only inline content, laid out as one run. A positioned
         // block keeps a block box with an anonymous paragraph inside, so the
         // absolutely positioned elements it contains are laid out by Taffy.
-        if !has_blocks && !positioned && parent != doc.root() {
+        if !has_blocks && !positioned && block_container && parent != doc.root() {
             let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
-                if let Entry::Inline(more_tokens, more_atoms) = entry {
-                    tokens.extend(more_tokens);
-                    atoms.extend(more_atoms);
+                match entry {
+                    Entry::Inline(more_tokens, more_atoms) => {
+                        tokens.extend(more_tokens);
+                        atoms.extend(more_atoms);
+                    }
+                    Entry::OutOfFlow(child) => {
+                        tokens.push(InlineToken::Anchor(child.index() as usize));
+                    }
+                    Entry::Block(..) => {}
                 }
             }
             if let Some(computed) = parent_style {
@@ -378,6 +493,45 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     run.tokens.extend(tokens);
                     run.atoms.extend(atoms);
                 }
+                Entry::OutOfFlow(child) => {
+                    let index = child.index() as usize;
+                    if !block_container {
+                        // A placeholder would be a flex or grid item of its
+                        // own. When the container is also the containing
+                        // block, Taffy places the element as if it were the
+                        // sole item (CSS Flexbox §4.1); otherwise it starts at
+                        // the container's content edge.
+                        if container != parent {
+                            nodes[index].static_position =
+                                Some(StaticPosition::ContentStart(parent.index() as usize));
+                        }
+                    } else if run.has_content() {
+                        // Inside a line: an anchor in the anonymous paragraph.
+                        run.tokens.push(InlineToken::Anchor(index));
+                    } else {
+                        run.close(
+                            &mut nodes,
+                            &mut calcs,
+                            &mut stack,
+                            &mut children,
+                            parent,
+                            &parent_style,
+                            container,
+                        );
+                        nodes.push(LayoutNode {
+                            in_tree: true,
+                            style: Style {
+                                display: Display::Block,
+                                ..Style::DEFAULT
+                            },
+                            ..LayoutNode::default()
+                        });
+                        let placeholder = nodes.len() - 1;
+                        nodes[index].static_position =
+                            Some(StaticPosition::Placeholder(placeholder));
+                        children.push(taffy::NodeId::from(placeholder));
+                    }
+                }
                 Entry::Block(child, computed) => {
                     let style = taffy_style(&computed);
                     if style.display == Display::None {
@@ -396,6 +550,7 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     let node = &mut nodes[child.index() as usize];
                     node.in_tree = true;
                     node.style = style;
+                    node.order = computed.clone_order();
                     children.push(taffy_id(child));
                     stack.push((child, container));
                 }
@@ -410,8 +565,26 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
             &parent_style,
             container,
         );
+        // Taffy lays out flex and grid items in child order and has no
+        // `order` property: sort the items by it, keeping tree order between
+        // equal values (CSS Flexbox §5.4). Anonymous items have order 0.
+        if !block_container {
+            children.sort_by_key(|child| nodes[usize::from(*child)].order);
+        }
         nodes[parent.index() as usize].children = children;
         add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
+    }
+
+    // Anchors in lines: their paragraph is the static position.
+    for index in 0..nodes.len() {
+        let anchors: Vec<usize> = nodes[index]
+            .paragraph
+            .as_ref()
+            .map(Paragraph::anchors)
+            .unwrap_or_default();
+        for element in anchors {
+            nodes[element].static_position = Some(StaticPosition::Line(index));
+        }
     }
 
     (nodes, calcs)
@@ -440,6 +613,7 @@ fn add_out_of_flow(
         let node = &mut nodes[id.index() as usize];
         node.in_tree = true;
         node.style = taffy_style(&computed);
+        node.block_level = computed.get_box().original_display.outside() == DisplayOutside::Block;
         nodes[container.index() as usize]
             .children
             .push(taffy_id(id));
@@ -494,6 +668,16 @@ struct Run {
 }
 
 impl Run {
+    /// Whether the run holds anything a line would be made of: visible
+    /// text, an atomic inline or an anchor.
+    fn has_content(&self) -> bool {
+        self.tokens.iter().any(|token| match token {
+            InlineToken::Text(text, _) => text.chars().any(|c| !c.is_ascii_whitespace()),
+            InlineToken::Atom(..) | InlineToken::Anchor(_) => true,
+            InlineToken::Open(_) | InlineToken::Close => false,
+        })
+    }
+
     /// Close the run: unless it is only whitespace, it becomes an anonymous
     /// paragraph box after the children so far, styled like its block.
     #[allow(clippy::too_many_arguments)]
@@ -596,6 +780,7 @@ fn inline_tokens(
             Some(NodeData::Element(_)) => {
                 if let Some(child_style) = styles.computed(child) {
                     if is_out_of_flow(&child_style) {
+                        tokens.push(InlineToken::Anchor(child.index() as usize));
                         out_of_flow.push((child, child_style, container));
                     } else if is_atomic_inline(&child_style) {
                         tokens.push(InlineToken::Atom(
