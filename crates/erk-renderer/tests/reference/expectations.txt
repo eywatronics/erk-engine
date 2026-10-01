@@ -6,6 +6,7 @@
 # Rules: the project rules file, section "Referans testi".
 blocks 100.00
 canvas-alpha 97.81
+inline-boxes 75.10
 inline-styles 48.60
 merhaba 91.26
 mixed-content 98.33

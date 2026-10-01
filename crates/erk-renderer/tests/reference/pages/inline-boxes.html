@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Satır içi kutular</title>
+<style>
+  body { margin: 24px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 16px; }
+  p { width: 420px; }
+  .isaret { background: #fde68a; padding: 2px 6px; }
+  .etiket { background: #bfdbfe; padding: 0 12px; margin: 0 4px; }
+  .dugme { display: inline-block; background: #1d4ed8; color: #ffffff; padding: 6px 14px; }
+  .kare { display: inline-block; width: 40px; height: 40px; background: #10b981; }
+</style>
+</head>
+<body>
+  <p>Bu satırda <span class="isaret">işaretlenmiş bir parça</span> var; arka planı
+  dolgusuyla birlikte boyanır ve <span class="isaret">satır sonuna gelen uzun bir
+  işaret alt satıra kırılır</span>, her satırda kendi parçasıyla.</p>
+  <p>Etiketler: <span class="etiket">yeni</span><span class="etiket">önemli</span>
+  ve kenar boşluklarıyla birlikte yer kaplar.</p>
+  <p>Düğmeler satırın içinde durur: <span class="dugme">Kaydet</span>
+  <span class="dugme">İptal</span> ve metin onlarla aynı taban çizgisinde.</p>
+  <p>Kutu <span class="kare"></span> taban çizgisinin üstünde durur ve satırı
+  yükseltir; sonraki satır onun altından başlar.</p>
+</body>
+</html>
