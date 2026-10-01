@@ -273,6 +273,21 @@ struct Decoration {
     /// How far `vertical-align` raises the element.
     raise: f32,
     color: Rgba,
+    /// Border widths (top, right, bottom, left) and colours; the left and
+    /// right sides belong to the element's first and last line only.
+    border: [f32; 4],
+    border_colors: [Rgba; 4],
+}
+
+/// How an inline element is decorated: what `Decoration` holds besides
+/// where it is.
+#[derive(Clone, Copy, Debug)]
+struct InlineLook {
+    above: f32,
+    below: f32,
+    color: Rgba,
+    border: [f32; 4],
+    border_colors: [Rgba; 4],
 }
 
 /// Text raised or lowered by `vertical-align`: its inline box takes
@@ -293,7 +308,11 @@ pub(crate) struct DecorationRect {
     pub(crate) y: f32,
     pub(crate) width: f32,
     pub(crate) height: f32,
+    /// The background; transparent when the element has only a border.
     pub(crate) color: Rgba,
+    /// The border on this line (top, right, bottom, left) and its colours.
+    pub(crate) border: [f32; 4],
+    pub(crate) border_colors: [Rgba; 4],
 }
 
 /// Everything needed to shape one paragraph.
@@ -319,7 +338,7 @@ struct OpenElement {
     open: Option<(usize, f32)>,
     end_spacer: f32,
     end_margin: f32,
-    decoration: Option<(f32, f32, Rgba)>,
+    decoration: Option<InlineLook>,
     /// Its text style and how far it is raised: the parent box of what it
     /// contains.
     style: TextStyle,
@@ -480,16 +499,18 @@ impl Paragraph {
                 below: element.extents.1,
             });
         }
-        if let Some((above, below, color)) = element.decoration {
+        if let Some(look) = element.decoration {
             self.decorations.push(Decoration {
                 text,
                 boxes: element.first_box..self.items.len(),
                 open: element.open,
                 close,
-                above,
-                below,
+                above: look.above,
+                below: look.below,
                 raise: element.raise,
-                color,
+                color: look.color,
+                border: look.border,
+                border_colors: look.border_colors,
             });
         }
     }
@@ -581,14 +602,14 @@ fn fixed(length: &erk_style::style::values::computed::LengthPercentage) -> f32 {
     length.to_length().map_or(0.0, |length| length.px())
 }
 
-/// An inline element's painted background, as `(above, below, colour)`, or
-/// `None` if it has none.
-fn decoration_of(style: &ComputedValues) -> Option<(f32, f32, Rgba)> {
+/// How an inline element is painted: its background and border, the
+/// extent of both around the baseline; `None` if it paints neither.
+fn decoration_of(style: &ComputedValues) -> Option<InlineLook> {
     use erk_style::style::computed_values::visibility::T as Visibility;
-    let color = srgb_bytes(style.resolve_color(&style.get_background().background_color));
-    if color[3] == 0 || style.clone_visibility() != Visibility::Visible {
+    if style.clone_visibility() != Visibility::Visible {
         return None;
     }
+    let color = srgb_bytes(style.resolve_color(&style.get_background().background_color));
     let font = TextStyle::of(style);
     let (ascent, descent) = font_extents(font.font_size, font.weight);
     let padding = style.get_padding();
@@ -602,15 +623,33 @@ fn decoration_of(style: &ComputedValues) -> Option<(f32, f32, Rgba)> {
                 width.0.to_f32_px()
             }
         };
-    Some((
-        ascent
-            + fixed(&padding.padding_top.0)
-            + border_width(&border.border_top_width, border.border_top_style),
-        descent
-            + fixed(&padding.padding_bottom.0)
-            + border_width(&border.border_bottom_width, border.border_bottom_style),
+    let widths = [
+        border_width(&border.border_top_width, border.border_top_style),
+        border_width(&border.border_right_width, border.border_right_style),
+        border_width(&border.border_bottom_width, border.border_bottom_style),
+        border_width(&border.border_left_width, border.border_left_style),
+    ];
+    let border_colors = [
+        &border.border_top_color,
+        &border.border_right_color,
+        &border.border_bottom_color,
+        &border.border_left_color,
+    ]
+    .map(|color| srgb_bytes(style.resolve_color(color)));
+    let has_border = widths
+        .iter()
+        .zip(&border_colors)
+        .any(|(width, color)| *width > 0.0 && color[3] != 0);
+    if color[3] == 0 && !has_border {
+        return None;
+    }
+    Some(InlineLook {
+        above: ascent + fixed(&padding.padding_top.0) + widths[0],
+        below: descent + fixed(&padding.padding_bottom.0) + widths[2],
         color,
-    ))
+        border: widths,
+        border_colors,
+    })
 }
 
 /// A shaped, line-broken paragraph, with the line boxes adjusted for
@@ -670,6 +709,7 @@ impl InlineLayout {
             let baseline = line.metrics().baseline + self.shifts.get(index).copied().unwrap_or(0.0);
             for decoration in &paragraph.decorations {
                 let mut extent: Option<(f32, f32)> = None;
+                let (mut starts, mut ends) = (false, false);
                 for segment in &segments {
                     let (mut x0, mut x1) = (segment.x0, segment.x1);
                     let inside = match segment.kind {
@@ -677,9 +717,11 @@ impl InlineLayout {
                         SegmentKind::Box(id) => {
                             if decoration.open.is_some_and(|(open, _)| open == id) {
                                 x0 += decoration.open.map_or(0.0, |(_, margin)| margin);
+                                starts = true;
                             }
                             if decoration.close.is_some_and(|(close, _)| close == id) {
                                 x1 -= decoration.close.map_or(0.0, |(_, margin)| margin);
+                                ends = true;
                             }
                             decoration.boxes.contains(&id)
                         }
@@ -692,12 +734,22 @@ impl InlineLayout {
                 if let Some((x0, x1)) = extent
                     && x1 > x0
                 {
+                    // The left and right borders close the element's first
+                    // and last line only (box-decoration-break: slice).
+                    let [top, right, bottom, left] = decoration.border;
                     rects.push(DecorationRect {
                         x: x0,
                         y: baseline - decoration.raise - decoration.above,
                         width: x1 - x0,
                         height: decoration.above + decoration.below,
                         color: decoration.color,
+                        border: [
+                            top,
+                            if ends { right } else { 0.0 },
+                            bottom,
+                            if starts { left } else { 0.0 },
+                        ],
+                        border_colors: decoration.border_colors,
                     });
                 }
             }

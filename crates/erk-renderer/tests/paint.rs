@@ -241,3 +241,134 @@ fn z_index_orders_positioned_boxes() {
     assert_eq!(rgb_at(&frame, 120, 10), [255, 255, 0]);
     assert_eq!(rgb_at(&frame, 105, 10), [0, 255, 0]);
 }
+
+fn render(body: &str) -> Frame {
+    render_html(
+        &format!("<style>body {{ margin: 0 }}</style>{body}"),
+        WIDTH,
+        HEIGHT,
+    )
+}
+
+#[test]
+fn a_solid_border_is_painted_around_the_padding_box() {
+    let frame =
+        render(r#"<div style="width: 40px; height: 40px; border: 5px solid #ff0000"></div>"#);
+    assert_eq!(rgb_at(&frame, 2, 20), [255, 0, 0]);
+    assert_eq!(rgb_at(&frame, 47, 20), [255, 0, 0]);
+    assert_eq!(rgb_at(&frame, 25, 25), [255, 255, 255]);
+    assert_eq!(rgb_at(&frame, 52, 20), [255, 255, 255]);
+}
+
+#[test]
+fn each_border_side_keeps_its_own_colour() {
+    let frame = render(
+        r#"<div style="width: 40px; height: 40px; border: 6px solid #ff0000; border-top-color: #0000ff"></div>"#,
+    );
+    assert_eq!(rgb_at(&frame, 26, 2), [0, 0, 255]);
+    assert_eq!(rgb_at(&frame, 2, 26), [255, 0, 0]);
+    assert_eq!(rgb_at(&frame, 26, 49), [255, 0, 0]);
+}
+
+#[test]
+fn rounded_corners_clip_the_background() {
+    let frame = render(
+        r#"<div style="width: 40px; height: 40px; background: #0000ff; border-radius: 50%"></div>"#,
+    );
+    assert_eq!(rgb_at(&frame, 20, 20), [0, 0, 255]);
+    // Outside the circle, inside the box.
+    assert_eq!(rgb_at(&frame, 2, 2), [255, 255, 255]);
+    assert_eq!(rgb_at(&frame, 37, 37), [255, 255, 255]);
+    let list = frame.display_list().to_owned();
+    assert!(
+        list.lines()
+            .any(|line| line.starts_with("rrect") && line.contains(" 20,20,20,20 ")),
+        "{list}"
+    );
+}
+
+#[test]
+fn overlapping_radii_are_scaled_down_together() {
+    // 100px radii on a 40px box: scaled by 40 / 200, to 20px each.
+    let frame = render(
+        r#"<div style="width: 40px; height: 40px; background: #0000ff; border-radius: 100px"></div>"#,
+    );
+    let list = frame.display_list().to_owned();
+    assert!(
+        list.lines()
+            .any(|line| line.starts_with("rrect") && line.contains(" 20,20,20,20 ")),
+        "{list}"
+    );
+}
+
+#[test]
+fn a_box_shadow_is_cast_outside_the_box_only() {
+    // A box with no background: the shadow must not show through it.
+    let frame = render(
+        r#"<div style="margin: 20px; width: 20px; height: 20px; box-shadow: 0 0 0 5px #000000"></div>"#,
+    );
+    assert_eq!(rgb_at(&frame, 17, 30), [0, 0, 0]);
+    assert_eq!(rgb_at(&frame, 30, 30), [255, 255, 255]);
+    assert_eq!(rgb_at(&frame, 12, 30), [255, 255, 255]);
+}
+
+#[test]
+fn an_offset_blurred_shadow_lies_behind_the_background() {
+    let frame = render(
+        r#"<div style="margin: 20px; width: 30px; height: 30px; background: #ffffff; box-shadow: 15px 15px 6px #000000"></div>"#,
+    );
+    // Inside the box: its background, not the shadow.
+    assert_eq!(rgb_at(&frame, 40, 40), [255, 255, 255]);
+    // Below-right of the box, inside the offset shadow.
+    let [r, g, b] = rgb_at(&frame, 60, 60);
+    assert!(r < 40 && g < 40 && b < 40, "{r} {g} {b}");
+    // The blur softens the shadow's edge.
+    let [edge, _, _] = rgb_at(&frame, 65, 52);
+    assert!(edge > 40 && edge < 220, "{edge}");
+}
+
+#[test]
+fn opacity_composites_an_element_as_one_group() {
+    // A red child covers its parent's blue: at half opacity the group is
+    // half red over white, with no blue mixed in.
+    let frame = render(
+        r#"<div style="opacity: 0.5; background: #0000ff; width: 40px; height: 40px"><div style="background: #ff0000; height: 40px"></div></div>"#,
+    );
+    let [r, g, b] = rgb_at(&frame, 20, 20);
+    assert!(
+        r == 255 && (126..=129).contains(&g) && (126..=129).contains(&b),
+        "{r} {g} {b}"
+    );
+}
+
+#[test]
+fn an_inline_border_closes_only_the_first_and_last_line() {
+    let frame = render(
+        r#"<div style="width: 90px"><span style="border: 3px solid #00ff00">uzun bir metin satırlara bölünür</span></div>"#,
+    );
+    let list = frame.display_list().to_owned();
+    let borders: Vec<&str> = list
+        .lines()
+        .filter(|line| line.starts_with("border"))
+        .collect();
+    assert!(borders.len() >= 2, "{list}");
+    assert!(
+        borders[0].contains("[3.0, 0.0, 3.0, 3.0]"),
+        "{}",
+        borders[0]
+    );
+    assert!(
+        borders[borders.len() - 1].contains("[3.0, 3.0, 3.0, 0.0]"),
+        "{}",
+        borders[borders.len() - 1]
+    );
+}
+
+#[test]
+fn the_canvas_element_still_paints_its_border() {
+    let frame = render(
+        r#"<div></div><style>body { background: #ffff00; border: 4px solid #ff0000; height: 50px }</style>"#,
+    );
+    assert_eq!(rgb_at(&frame, 1, 20), [255, 0, 0]);
+    assert_eq!(rgb_at(&frame, 100, 20), [255, 255, 0]);
+}
