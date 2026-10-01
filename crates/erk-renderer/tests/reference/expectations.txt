@@ -8,6 +8,7 @@ blocks 100.00
 borders 92.30
 canvas-alpha 97.81
 flex-form 97.21
+images 98.12
 inline-boxes 75.10
 inline-styles 48.60
 merhaba 91.26
