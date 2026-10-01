@@ -128,7 +128,8 @@ first interactive demo, is the acceptance test of M2.
 Today Erk does **not**:
 
 - offer an embedding API or C ABI (M3), or handle input and events (M2, M4);
-- load images (M1);
+- decode images other than PNG and JPEG, or load stylesheets and fonts
+  from the host (later);
 - draw dotted, dashed or double borders (drawn solid), or inset shadows;
 - load system fonts: text uses the embedded Noto Sans (M1);
 - render incrementally: every change redraws the whole page (M5).
@@ -149,15 +150,15 @@ Measured, not claimed. Windows 11, Intel i7-10750H, CPU rendering
 | 1000-element page, full render | first call ~77 ms, then a median of ~53 ms |
 
 The [Web Platform Tests](https://web-platform-tests.org/) reftests run in
-CI against a recorded baseline: 53.2 % of `css/css-flexbox` (538 of 1012),
-43.0 % of `css/CSS2/normal-flow` (321 of 746) and 19.5 % of
-`css/css-position` (49 of 251) pass today. Most failing tests use something
-Erk does not support yet (external stylesheets, images, borders) or never
-will (tables, floats, script).
+CI against a recorded baseline: 56.1 % of `css/css-flexbox` (568 of 1012),
+56.6 % of `css/CSS2/normal-flow` (422 of 746) and 19.1 % of
+`css/css-position` (48 of 251) pass today. Most failing tests use something
+Erk does not support yet (external stylesheets, block-in-inline,
+`white-space: pre`) or never will (tables, floats, script).
 
 The Linux release binary is held under a size budget in CI. Similarity to
 Chrome 154 on the reference pages: every element box matches within 1 CSS
-pixel on all nine pages, and pixel scores range from 48 % on text-heavy
+pixel on all fourteen pages, and pixel scores range from 48 % on text-heavy
 pages (glyph antialiasing differs) to 100 % on boxes; the scores are in
 [expectations.txt](crates/erk-renderer/tests/reference/expectations.txt)
 and may only rise unless a written reason says otherwise.

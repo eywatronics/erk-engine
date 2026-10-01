@@ -124,6 +124,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | `html5ever` ve `stylo` birlikte yükseltilir | İkisi `web_atoms`/`string_cache` üzerinden aynı atom tiplerini paylaşmak zorunda; html5ever 0.40 ile Stylo 0.21 uyumsuz | `html5ever = "=0.39.0"` sabit; CI'da `web_atoms` ve `string_cache` için tek sürüm kontrolü (tüm hedefler) | M0 Task 3 |
 | Çekirdek G/Ç yapmaz, ortam ve saat okumaz | Gömülü motorda G/Ç host'undur: içerik dosya sistemine ulaşamaz, çekirdek deterministik kalır | `check-core-io.sh`: `erk-dom`, `erk-style`, `erk-renderer` `src`'sinde `std::fs`/`net`/`process`/`env`, `File::`, `TcpStream`, `Command::new`, `Instant::now`, `SystemTime` yok (yorumlar hariç) | Yön değişikliği (M0.5 öncesi) |
 | WPT sonuçları sessizce değişmez | Bir CSS özelliğinin gerçekten çalıştığının dış kanıtı spesifikasyon testleri; geçen bir test sessizce düşerse kimse fark etmez | CI `wpt` job'ı (`erk-wpt check`): sabit WPT commit'indeki reftest sonuçları `tests/wpt/expectations.txt`'ye eşit, iki yönde; `check-wpt-expectations.sh`: PASS'ten düşüş `# lowered:` gerekçesi ister | M1.4 |
+| Her bağımlılığın lisansı gözden geçirilmiş listede | Erk kapalı uygulamaların içinde de dağıtılır: atıf dışında yükümlülük getiren (GPL ailesi) bir bağımlılık host'u bağlar. MPL-2.0 (Stylo) dosya düzeyinde kalır, OFL-1.1 gömülü fontlar içindir | CI `licenses` job'ı: `cargo deny --all-features --locked check licenses`, `deny.toml`'daki her izin gerekçeli. `check-license-config.sh`: listeyi dolanan yol (istisna, `clarify`, `private`/`ignore`, `skip`, `exclude`, hedef ya da özellik daraltması, GPL ailesinden izin) yok | M1.6 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
 ## Kural takvimi
@@ -134,7 +135,6 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | Taş | Gelen kural |
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
-| M1 | Lisans izin listesi (`cargo deny check licenses`). İlk MPL-2.0 bağımlılıklar (Stylo, selectors) M0 Task 3'te girdi; liste `erk-renderer`'daki yazı tiplerinin OFL-1.1'ini de kapsamalı |
 | M1 | `render_html` hiçbir girdide paniklemez: tohumlu test ve cargo-fuzz job'ı |
 | M1 | İkili boyutu bütçenin altında (bütçe M1'in başında ölçülen tabandan) |
 | M1 | `docs/css-support.md`'deki her "Supported" satırın bir testi var |

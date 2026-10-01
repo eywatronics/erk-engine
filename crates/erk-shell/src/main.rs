@@ -10,12 +10,15 @@
 //! thread, only ever receives the document's text. The engine core does no
 //! I/O of its own; resources, time and configuration come from the host.
 
+mod resources;
 mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use erk_renderer::{FromRenderer, ToRenderer};
+
+use crate::resources::Provider;
 
 /// Screenshot size, the same as the golden images.
 const SCREENSHOT_WIDTH: u16 = 800;
@@ -54,7 +57,7 @@ fn main() -> ExitCode {
     let result = match command {
         Command::Window { page } => read_page(&page).and_then(|html| window::run(&page, html)),
         Command::Screenshot { out, page } => {
-            read_page(&page).and_then(|html| screenshot(html, &out))
+            read_page(&page).and_then(|html| screenshot(&page, html, &out))
         }
     };
     match result {
@@ -71,8 +74,10 @@ fn read_page(page: &PathBuf) -> Result<String, String> {
 }
 
 /// Paint `html` through the renderer thread, exactly as the window does, and
-/// write the frame as a PNG.
-fn screenshot(html: String, out: &PathBuf) -> Result<(), String> {
+/// write the frame as a PNG: the first frame painted after every resource
+/// request has been answered.
+fn screenshot(page: &std::path::Path, html: String, out: &PathBuf) -> Result<(), String> {
+    let provider = Provider::for_page(page);
     let (to, from, handle) = erk_renderer::spawn();
     let send = |message| {
         to.send(message)
@@ -83,9 +88,20 @@ fn screenshot(html: String, out: &PathBuf) -> Result<(), String> {
         width: SCREENSHOT_WIDTH,
         height: SCREENSHOT_HEIGHT,
     })?;
-    let FromRenderer::Frame(frame) = from
-        .recv()
-        .map_err(|_| "the renderer stopped before painting".to_owned())?;
+    // Frames painted while requests were unanswered lack their resources;
+    // the first frame with none pending is the page.
+    let frame = loop {
+        match from.recv() {
+            Ok(FromRenderer::Resources(requests)) => {
+                for request in &requests {
+                    send(provider.answer(request))?;
+                }
+            }
+            Ok(FromRenderer::Frame(frame)) if !frame.resources_pending() => break frame,
+            Ok(FromRenderer::Frame(_)) => {}
+            Err(_) => return Err("the renderer stopped before painting".to_owned()),
+        }
+    };
     send(ToRenderer::Shutdown)?;
     handle
         .join()

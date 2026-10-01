@@ -54,7 +54,10 @@ use taffy::{
     compute_leaf_layout, compute_root_layout, round_layout,
 };
 
+use std::sync::Arc;
+
 use self::calc::CalcTable;
+use crate::resources::{Image, Resources};
 use crate::text::{AtomBox, DecorationRect, InlineLayout, InlineToken, Paragraph, TextEngine};
 
 /// The result of laying out one document.
@@ -63,6 +66,8 @@ pub(crate) struct Layouts {
     text: Vec<Option<ShapedText>>,
     /// Anonymous paragraph boxes, by the index of the block they belong to.
     anonymous: Vec<Vec<AnonymousText>>,
+    /// The decoded image of each `<img>` whose image has arrived.
+    images: Vec<Option<Arc<Image>>>,
 }
 
 /// An anonymous paragraph box: a run of inline content between the block
@@ -102,18 +107,24 @@ impl Layouts {
             .get(id.index() as usize)
             .map_or(&[], Vec::as_slice)
     }
+
+    /// The image an `<img>` shows, if it has arrived.
+    pub(crate) fn image(&self, id: NodeId) -> Option<&Arc<Image>> {
+        self.images.get(id.index() as usize)?.as_ref()
+    }
 }
 
 /// Lay out `doc` in a viewport of `width` × `height` CSS pixels.
 pub(crate) fn layout(
     doc: &Document,
     styles: &Styles,
+    resources: &Resources,
     text: &mut TextEngine,
     width: f32,
     height: f32,
 ) -> Layouts {
     let slots = doc.capacity_hint();
-    let (mut nodes, calcs) = build(doc, styles);
+    let (mut nodes, calcs) = build(doc, styles, resources);
     // The initial containing block is the viewport (CSS 2 §10.1).
     nodes[doc.root().index() as usize].style.size = Size {
         width: Dimension::length(width),
@@ -161,6 +172,15 @@ pub(crate) fn layout(
         }
     }
     text.truncate(slots);
+    let images = nodes
+        .iter()
+        .take(slots)
+        .map(|node| {
+            node.replaced
+                .as_ref()
+                .and_then(|replaced| replaced.image.clone())
+        })
+        .collect();
     Layouts {
         nodes: nodes
             .into_iter()
@@ -169,6 +189,7 @@ pub(crate) fn layout(
             .collect(),
         text,
         anonymous,
+        images,
     }
 }
 
@@ -320,6 +341,8 @@ struct LayoutNode {
     paragraph: Option<Paragraph>,
     /// A paragraph's lines as its final layout broke them.
     shaped: Option<InlineLayout>,
+    /// For a replaced element (`<img>`): its image, once it has arrived.
+    replaced: Option<Replaced>,
     /// For an absolutely positioned element: where it would have been, and
     /// whether it was block-level before it was taken out of the flow.
     static_position: Option<StaticPosition>,
@@ -373,7 +396,99 @@ enum StaticPosition {
 
 /// Build the layout tree: which slots generate boxes, their Taffy styles,
 /// and the paragraphs.
-fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
+/// A replaced element: its content is an image, sized by the image's
+/// natural size and ratio rather than by children (CSS 2 §10.3.2). Until
+/// the image arrives, or if it never does, it has no natural size.
+#[derive(Clone, Default)]
+struct Replaced {
+    image: Option<Arc<Image>>,
+}
+
+/// The border-box size of a replaced element with a natural size and ratio,
+/// by CSS 2 §10.3.2, §10.6.2 and the constraint table of §10.4: an auto
+/// dimension follows the other through the ratio, and when `min-*` or
+/// `max-*` changes one, an auto other follows the changed one. Taffy
+/// applies the ratio before the limits, so a `max-width` image kept its
+/// unlimited height (found by WPT, inline-replaced-height-010). A size the
+/// parent imposes (`known_dimensions`) wins.
+fn replaced_size(
+    style: &Style<Atom>,
+    natural: Size<f32>,
+    inputs: LayoutInput,
+    calcs: &CalcTable,
+) -> Size<Option<f32>> {
+    use taffy::MaybeResolve;
+    let resolve = |ptr, basis| calcs.resolve(ptr, basis);
+    let parent = inputs.parent_size;
+    let padding = style.padding.resolve_or_zero(parent.width, resolve);
+    let border = style.border.resolve_or_zero(parent.width, resolve);
+    let inset = Size {
+        width: padding.left + padding.right + border.left + border.right,
+        height: padding.top + padding.bottom + border.top + border.bottom,
+    };
+    // Content-box sizes from the style.
+    let content = |value: Option<f32>, axis_inset: f32| {
+        value.map(|v| match style.box_sizing {
+            taffy::BoxSizing::BorderBox => (v - axis_inset).max(0.0),
+            taffy::BoxSizing::ContentBox => v,
+        })
+    };
+    let size = style.size.maybe_resolve(parent, resolve);
+    let min = style.min_size.maybe_resolve(parent, resolve);
+    let max = style.max_size.maybe_resolve(parent, resolve);
+    let (width, height) = (
+        content(size.width, inset.width),
+        content(size.height, inset.height),
+    );
+    let (min_w, min_h) = (
+        content(min.width, inset.width).unwrap_or(0.0),
+        content(min.height, inset.height).unwrap_or(0.0),
+    );
+    let (max_w, max_h) = (
+        content(max.width, inset.width).unwrap_or(f32::INFINITY),
+        content(max.height, inset.height).unwrap_or(f32::INFINITY),
+    );
+    let ratio = style
+        .aspect_ratio
+        .unwrap_or(natural.width / natural.height.max(f32::EPSILON));
+    let (mut w, mut h) = match (width, height) {
+        (Some(w), Some(h)) => (w, h),
+        (Some(w), None) => (w, w / ratio),
+        (None, Some(h)) => (h * ratio, h),
+        (None, None) => (natural.width, natural.height),
+    };
+    let width_auto = width.is_none();
+    let height_auto = height.is_none();
+    // The limits; an auto dimension follows a limited one through the ratio.
+    let clamped_w = w.clamp(min_w, max_w.max(min_w));
+    if clamped_w != w {
+        w = clamped_w;
+        if height_auto {
+            h = w / ratio;
+        }
+    }
+    let clamped_h = h.clamp(min_h, max_h.max(min_h));
+    if clamped_h != h {
+        h = clamped_h;
+        if width_auto {
+            w = (h * ratio).clamp(min_w, max_w.max(min_w));
+        }
+    }
+    let known = inputs.known_dimensions;
+    Size {
+        width: known.width.or(Some(w + inset.width)),
+        height: known.height.or(Some(h + inset.height)),
+    }
+}
+
+/// Whether element `id` is a replaced element Erk lays out: `<img>`.
+fn is_replaced(doc: &Document, id: NodeId) -> bool {
+    doc.node(id)
+        .and_then(|node| node.as_element())
+        .is_some_and(|element| element.name.local == erk_dom::local_name!("img"))
+}
+
+fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutNode>, CalcTable) {
     let mut nodes: Vec<LayoutNode> = (0..doc.capacity_hint())
         .map(|_| LayoutNode::default())
         .collect();
@@ -429,7 +544,9 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     if is_out_of_flow(&computed) {
                         out_of_flow.push((child, computed, container));
                         entries.push(Entry::OutOfFlow(child));
-                    } else if is_atomic_inline(&computed) {
+                    } else if is_atomic_inline(&computed)
+                        || (is_replaced(doc, child) && is_inline_level(&computed))
+                    {
                         entries.push(Entry::Inline(
                             vec![InlineToken::Atom(child.index() as usize, computed.clone())],
                             vec![(child, computed)],
@@ -573,6 +690,64 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
         }
         nodes[parent.index() as usize].children = children;
         add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
+    }
+
+    // Replaced elements: an `<img>` with a box shows its image, if it has
+    // arrived; its natural ratio, unless the style sets one, keeps a
+    // single given dimension in proportion.
+    let mut stack = vec![doc.root()];
+    while let Some(id) = stack.pop() {
+        let index = id.index() as usize;
+        if nodes[index].in_tree && is_replaced(doc, id) {
+            let image = doc
+                .node(id)
+                .and_then(|node| node.as_element())
+                .and_then(|element| element.attr(&erk_dom::local_name!("src")))
+                .and_then(|src| resources.image(src.trim()))
+                .cloned();
+            // Laid out by Taffy's block layout: a block-level image whose
+            // parent is a block container (a flex or grid item sizes itself
+            // from its content, and an inline one is measured in its line).
+            let in_block_flow = styles
+                .computed(id)
+                .is_some_and(|style| !is_inline_level(&style))
+                && doc
+                    .node(id)
+                    .and_then(|node| node.parent())
+                    .and_then(|parent| styles.computed(parent))
+                    .is_some_and(|parent| {
+                        matches!(
+                            parent.get_box().clone_display().inside(),
+                            DisplayInside::Flow | DisplayInside::FlowRoot
+                        )
+                    });
+            if let Some(image) = &image {
+                let style = &mut nodes[index].style;
+                if style.aspect_ratio.is_none() {
+                    style.aspect_ratio = Some(image.width() / image.height());
+                }
+                // An auto width is the natural width, or what the ratio makes
+                // of a fixed height (CSS 2 §10.3.2, §10.3.4); Taffy's block
+                // layout would stretch it to the container like a block.
+                if in_block_flow && style.size.width.is_auto() {
+                    let ratio = style.aspect_ratio.unwrap_or(1.0);
+                    let height = style.size.height.into_raw();
+                    let width = if height.tag() == taffy::CompactLength::length(0.0).tag() {
+                        height.value() * ratio
+                    } else if style.size.height.is_auto() {
+                        image.width()
+                    } else {
+                        // A percentage height: left to Taffy.
+                        f32::NAN
+                    };
+                    if width.is_finite() {
+                        style.size.width = Dimension::length(width);
+                    }
+                }
+            }
+            nodes[index].replaced = Some(Replaced { image });
+        }
+        stack.extend(doc.children(id));
     }
 
     // Anchors in lines: their paragraph is the static position.
@@ -782,7 +957,7 @@ fn inline_tokens(
                     if is_out_of_flow(&child_style) {
                         tokens.push(InlineToken::Anchor(child.index() as usize));
                         out_of_flow.push((child, child_style, container));
-                    } else if is_atomic_inline(&child_style) {
+                    } else if is_atomic_inline(&child_style) || is_replaced(doc, child) {
                         tokens.push(InlineToken::Atom(
                             child.index() as usize,
                             child_style.clone(),
@@ -851,6 +1026,34 @@ impl<'t> LayoutTree<'t> {
         inputs: LayoutInput,
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
+        if let Some(replaced) = &self.node(id).replaced {
+            // Sized by its style, else by its image's natural size; an image
+            // that has not arrived has none.
+            let natural = replaced.image.as_ref().map_or(Size::ZERO, |image| Size {
+                width: image.width(),
+                height: image.height(),
+            });
+            let style = self.node(id).style.clone();
+            let calcs = self.calcs;
+            let inputs =
+                if replaced.image.is_some() && inputs.sizing_mode == SizingMode::InherentSize {
+                    LayoutInput {
+                        known_dimensions: replaced_size(&style, natural, inputs, calcs),
+                        ..inputs
+                    }
+                } else {
+                    inputs
+                };
+            return compute_leaf_layout(
+                inputs,
+                &style,
+                |ptr, basis| calcs.resolve(ptr, basis),
+                |known, _| Size {
+                    width: known.width.unwrap_or(natural.width),
+                    height: known.height.unwrap_or(natural.height),
+                },
+            );
+        }
         if self.node(id).paragraph.is_some() {
             return self.compute_paragraph_layout(id, inputs);
         }

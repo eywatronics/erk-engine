@@ -24,7 +24,9 @@ fn a_loaded_document_is_painted_at_the_requested_size() {
     })
     .unwrap();
 
-    let FromRenderer::Frame(frame) = from.recv_timeout(PATIENCE).expect("a frame");
+    let Ok(FromRenderer::Frame(frame)) = from.recv_timeout(PATIENCE) else {
+        panic!("expected a frame");
+    };
     assert_eq!((frame.width(), frame.height()), (320, 200));
     // The same pixels the direct path paints.
     assert_eq!(frame.rgba(), render_html(PAGE, 320, 200).rgba());
@@ -64,9 +66,9 @@ fn the_last_resize_wins() {
     }
     // Queued resizes may be coalesced, so only the final state is certain.
     let last = loop {
-        let FromRenderer::Frame(frame) = from
-            .recv_timeout(PATIENCE)
-            .expect("the last resize was never painted");
+        let Ok(FromRenderer::Frame(frame)) = from.recv_timeout(PATIENCE) else {
+            panic!("the last resize was never painted");
+        };
         if frame.width() == 250 {
             break frame;
         }

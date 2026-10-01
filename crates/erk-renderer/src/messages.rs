@@ -14,6 +14,11 @@ pub enum ToRenderer {
     Load { html: String },
     /// The viewport is now `width` × `height` device pixels.
     Resize { width: u16, height: u16 },
+    /// The host's answer to a resource request.
+    Resource(ResourceResponse),
+    /// The host has no resource for request `id`; the page renders
+    /// without it.
+    ResourceMissing { id: u64 },
     /// Stop the renderer thread.
     Shutdown,
 }
@@ -22,6 +27,36 @@ pub enum ToRenderer {
 pub enum FromRenderer {
     /// A newly painted frame of the current document at the current size.
     Frame(Frame),
+    /// The document names resources the host has not been asked for yet.
+    /// Sent before the frame that is painted without them.
+    Resources(Vec<ResourceRequest>),
+}
+
+/// What a resource is for (p1-contract §6): the host may serve one URL in
+/// several forms, and Erk refuses a response of the wrong kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceKind {
+    Image,
+    Stylesheet,
+    Font,
+}
+
+/// A resource the content names: an id for the answer, the URL as the
+/// content wrote it, and its kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceRequest {
+    pub id: u64,
+    pub url: String,
+    pub kind: ResourceKind,
+}
+
+/// The host's answer to request `id`: a MIME type (empty: let the bytes
+/// decide) and the bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceResponse {
+    pub id: u64,
+    pub mime: String,
+    pub data: Vec<u8>,
 }
 
 /// A rendered page.
@@ -30,6 +65,7 @@ pub struct Frame {
     height: u16,
     rgba: Vec<u8>,
     display_list: String,
+    resources_pending: bool,
 }
 
 impl Frame {
@@ -40,7 +76,23 @@ impl Frame {
             height,
             rgba,
             display_list,
+            resources_pending: false,
         }
+    }
+
+    /// The same frame, marked as painted while resource requests were still
+    /// unanswered.
+    pub(crate) fn painted_with_resources_pending(self, pending: bool) -> Self {
+        Self {
+            resources_pending: pending,
+            ..self
+        }
+    }
+
+    /// Whether the frame was painted while some of the document's resources
+    /// were still unanswered: a later frame will show them.
+    pub fn resources_pending(&self) -> bool {
+        self.resources_pending
     }
 
     pub fn width(&self) -> u16 {

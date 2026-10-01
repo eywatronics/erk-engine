@@ -19,7 +19,14 @@ fn lay_out(body: &str) -> (Document, Layouts) {
         std::sync::Arc::new(crate::text::EmbeddedFontMetrics),
     )
     .style(&doc);
-    let layouts = layout(&doc, &styles, &mut TextEngine::new(), WIDTH, HEIGHT);
+    let layouts = layout(
+        &doc,
+        &styles,
+        &crate::resources::Resources::default(),
+        &mut TextEngine::new(),
+        WIDTH,
+        HEIGHT,
+    );
     (doc, layouts)
 }
 

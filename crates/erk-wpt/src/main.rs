@@ -27,7 +27,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use erk_renderer::render_html;
+use erk_renderer::{ResourceKind, ResourceRequest, ResourceResponse, render_html_with_resources};
 
 use crate::reftest::{Fuzzy, Reference, Relation};
 
@@ -301,10 +301,41 @@ fn run_all(root: &Path, tests: &[Test]) -> BTreeMap<String, (Status, bool)> {
     results.into_inner().expect("the workers are done")
 }
 
-/// The pixels of a page, or `None` if rendering it panicked.
+/// The pixels of a page, or `None` if rendering it panicked. Its images
+/// come from the checkout, as a browser would load them.
 fn render(root: &Path, name: &str) -> Option<Vec<u8>> {
     let markup = read_markup(&root.join(name)).ok()?;
-    std::panic::catch_unwind(|| render_html(&markup, WIDTH, HEIGHT).rgba().to_vec()).ok()
+    std::panic::catch_unwind(|| {
+        let mut provide = |request: &ResourceRequest| image(root, name, request);
+        render_html_with_resources(&markup, WIDTH, HEIGHT, &mut provide)
+            .rgba()
+            .to_vec()
+    })
+    .ok()
+}
+
+/// An image a test names, from the checkout: a relative URL from the test's
+/// directory, a `/` path from the checkout's root. Other schemes, and
+/// stylesheets and fonts (not loaded yet), are not served.
+fn image(root: &Path, page: &str, request: &ResourceRequest) -> Option<ResourceResponse> {
+    if request.kind != ResourceKind::Image
+        || request.url.contains("://")
+        || request.url.starts_with("data:")
+    {
+        return None;
+    }
+    let path = resolve(root, page, &request.url);
+    let data = std::fs::read(root.join(&path)).ok()?;
+    let mime = match path.rsplit_once('.').map(|(_, extension)| extension) {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        _ => "",
+    };
+    Some(ResourceResponse {
+        id: request.id,
+        mime: mime.to_owned(),
+        data,
+    })
 }
 
 /// A test's status, and whether its own frame was a single colour: a pass

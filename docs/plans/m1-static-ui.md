@@ -162,14 +162,14 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 - [x] Display list öğeleri: kenarlık (solid, renkli, kenar başına genişlik),
   yuvarlak köşe (`border-radius`, kırpma dahil), `box-shadow`, `opacity`.
-- [ ] Görüntüler: `<img>` ve `background-image` (png, jpeg), sözleşmenin
+- [x] Görüntüler: `<img>` ve `background-image` (png, jpeg), sözleşmenin
   kaynak API'siyle (tür + MIME). Demo kabuğun sağlayıcısı: açılan dosyanın
   dizini ve `memory://`; `url("file:///...")` hiçbir şey okumaz (test).
   Yanlış türde yanıt reddedilir (test).
-- [ ] **Lisans kapısı:** `deny.toml` ve CI'da `cargo deny check licenses`;
+- [x] **Lisans kapısı:** `deny.toml` ve CI'da `cargo deny check licenses`;
   izin listesi MIT, Apache-2.0, MPL-2.0, OFL-1.1 ve bağımlılık ağacının
   gerektirdiği diğerleri, her biri gerekçesiyle.
-- [ ] Referans sayfaları: `borders.html`, `images.html`.
+- [x] Referans sayfaları: `borders.html`, `images.html`.
 
 ### M1.7: Sistem fontları, HiDPI, text-transform
 
@@ -520,3 +520,51 @@ bulanıklık parametresinde √2 yok (Chrome referans testi yakaladı); opaklık
 sayılıyor; satır içi yan kenarlıklar her satırda; tuval elemanı kenarlığını
 kaybediyor. Sağlamlık üretecine uç kenarlık, köşe, gölge ve opaklık değerleri
 eklendi.
+
+**İnceleme raporu: `docs/reviews/borders_commit_review.md` (2026-10-01, #19).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| `rounded_rect`'te köşe yarıçaplarının toplamı kutudan büyükse orantılı küçültme görünmüyor; Bézier kontrol noktaları dışarı taşabilir | **Geçersiz:** küçültme `display.rs`'te `corner_radii`'de, yarıçaplar display list'e girmeden yapılıyor (CSS Backgrounds 3 §5.5: tek bir ortak oranla, kenar başına komşu iki yarıçapın toplamı kenarı aşmayacak kadar). `paint.rs` hep küçültülmüş yarıçaplar alıyor. Testi `overlapping_radii_are_scaled_down_together`; sağlamlık üretecinde `border-radius: 1e30px` de var |
+
+**M1.6, görüntüler, kaynak API'si ve lisans kapısı (2026-10-01).** M1.6
+bununla bitti. Yeni `images` referans sayfası %98,12; kutuların 12/12'si
+Chrome'la 1 px içinde. Diğer sayfaların skorları değişmedi.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Görüntüler, sözleşmenin kaynak API'siyle (tür + MIME) | Renderer iş parçacığı belgenin adlandırdığı her URL'yi (`<img src>`, `background-image`'ın `url()` katmanları) bir kez `FromRenderer::Resources` ile ister, kareden **önce**: hemen yanıt veren host'un yanıtları, onsuz çizilen kareyi görmeden kuyruğa girer. Yanıt `ToRenderer::Resource { id, mime, data }` ya da `ResourceMissing { id }`. Eksik kaynak beklenen karelerde `Frame::resources_pending()` doğru; kabuğun ekran görüntüsü kipi bunu bekliyor (yoksa ilk, görüntüsüz kare yazılıyordu). Kaynaklar yeniden boyutlandırmada saklanıyor, `Load`'da düşüyor. İş parçacıksız yol için `render_html_with_resources(html, w, h, provide)` |
+| Yanlış türde yanıt reddedilir (test) | MIME `image/png` ya da `image/jpeg` olmalı ve içerikle (imza baytları) uyuşmalı; MIME boşsa içerik karar verir (p1-contract §6). Stil sayfası MIME'ıyla gelen PNG, ya da JPEG etiketli PNG reddediliyor |
+| png, jpeg | PNG `png` crate'iyle, JPEG `zune-jpeg` ile (Rust, `unsafe`'siz çekirdek yolu; `image` crate'i onlarca biçim getirirdi). Pikseller önceden çarpılmış RGBA. GIF, WebP, SVG, `data:` URL sonra |
+| — | **Boyut bütçesi:** bir görüntü en çok 16384 px kenarlı ve 2²⁵ pikselli (8K ekran ve biraz fazlası, RGBA'da 128 MiB). Bütçe başlıktan, pikseller ayrılmadan önce denetleniyor. Testin ilk hâli PNG yolunun 16000 × 16000 iddia eden 59 baytlık bir dosya için önce bir gigabaytlık tamponu ayırdığını gösterdi; JPEG yolu çözmeyi bitirip sonra reddediyordu (68 s) |
+| — | **Bir istek bir kez yanıtlanır:** ikinci yanıt ya da hiç yapılmamış bir isteğin yanıtı yok sayılıyor. **Kimlikler belgeler arasında sürüyor:** ilk hâlinde `Load` sayacı sıfırlıyordu ve önceki belgenin geç gelen yanıtı yeni belgenin aynı numaralı isteğine yazılıyordu. İkisi de testle bulundu |
+| — | Sözleşme ikinci yanıtı tanımlamıyordu; karar: yok sayılır. Bir kaynağı sonradan değiştirmek (sıcak yeniden yükleme) gerekirse ayrı bir mesaj olur, M3'te API ile birlikte düşünülür |
+| `<img>` | Yerine konan eleman: doğal boyut, `width`/`height` öznitelikleri (sunumsal ipucu, piksel ya da yüzde) ve CSS boyutları CSS 2 §10.4 kısıt tablosuyla (`replaced_size`: min/max ve oran birlikte). Satır içi `<img>` bir atom, taban çizgisinde duruyor. Blok akışında `auto` genişlik doğal genişlik ya da yükseklik × oran; Taffy'nin blok yerleşimi onu kapsayıcının genişliğine geriyordu (WPT yakaladı). Gelmeyen görüntü 0 × 0 |
+| `background-image` | Konumlandırma alanı dolgu kutusu; `background-size` (`cover`, `contain`, uzunluk, yüzde, `auto`), `background-position`, `background-repeat` (`no-repeat` dışındaki her değer döşüyor; `space` ve `round` sonra), kenarlık kutusuna ve yuvarlak köşelere kırpılarak; birden çok katman, ilk katman üstte. Boyama vello'nun görüntü fırçasıyla, döşeme `Extend::Repeat` |
+| Demo kabuğun sağlayıcısı: açılan dosyanın dizini ve `memory://` | Göreli URL'ler sayfanın dizininden. Şema (`file:`, `http:`), mutlak yol (dizinin içini gösterse bile) ve dizinden `..` ile çıkan yol reddediliyor; çözülmüş yolun dizinin içinde kaldığı denetleniyor. `memory://` tanınıyor ama kabuk henüz hiçbir varlık gömmüyor, boş dönüyor |
+| — | `erk-wpt` de görüntüleri sayfanın dizininden veriyor. **WPT'de büyük sıçrama:** normal-flow 309 → 422, flexbox 534 → 568. Yedi rastlantı ortaya çıktı (dördü tablo, ikisi `white-space: pre`, biri belirli çapraz boyutta yüzde); taban çizgisinde gerekçeli |
+| **Lisans kapısı** | `deny.toml`: MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, Unlicense, 0BSD, MPL-2.0 (Stylo), OFL-1.1 (gömülü fontlar), her biri gerekçesiyle. GPL ailesi yok: `r-efi`'nin "MIT OR Apache-2.0 OR LGPL-2.1-or-later" ifadesinden MIT seçiliyor. CI `licenses` job'ı `cargo deny --all-features --locked check licenses` |
+| — | **Listeden başka yollar da kapalı:** `check-license-config.sh` `deny.toml`'da istisna (`exceptions`), açıklama (`clarify`), `private`/`ignore`, `skip`, `exclude`, hedef ya da özellik daraltması ve GPL ailesinden bir izin bulursa düşüyor; `all-features = true` zorunlu. Böyle bir karar betiği aynı PR'da değiştirmeyi istiyor |
+| — | Renderer yüzey muhafızı satır satır okuyordu: rustfmt'nin çok satıra böldüğü `pub use` listesine eklenen bir tip görünmüyordu. Artık her `pub` öğesi `;` ya da `{`'ye kadar bütün okunuyor |
+
+Muhafızlar kasıtlı ihlallerle denendi: izin listesinden MPL-2.0'ı çıkarmak
+(28 crate reddedildi); `[[licenses.exceptions]]`, `exceptions = [...]`,
+`[licenses.private]`, `ignore = true`, `[[licenses.clarify]]`, satır içi
+tabloda `skip` ve `exceptions`, tırnaklı anahtar, `targets`, `exclude`,
+`LGPL-2.1-or-later`, `MIT OR GPL-2.0`, `AGPL-3.0`, `all-features = false`,
+eksik `deny.toml` (hepsi yakalandı; yorum satırı yakalanmıyor, doğru). Yüzey
+muhafızı: çok satırlı `pub use` listesine kaçırılan bir tip (eski betik
+geçiriyordu).
+
+Mutasyonlar (15/15 yakalandı): konumlandırma alanı kenarlık kutusu;
+`no-repeat` yok sayılıyor; `cover` küçük ölçeği alıyor; konum yok sayılıyor;
+doğal oran stile girmiyor (ilk turda **geçti**: oran yalnızca blok akışındaki
+yolda okunuyordu; `display: block; height: 10px` durumu eklendi); MIME yok
+sayılıyor; `resources_pending` hep yanlış; `width` özniteliği yok sayılıyor;
+döşeme `Pad` ile boyanıyor; PNG ve JPEG başlık bütçesi ayrı ayrı kaldırılıyor;
+kabuk sağlayıcısında dizin denetimi ve şema denetimi ayrı ayrı kaldırılıyor
+(şema denetimi ilk turda **geçti**: dizin denetimi listedeki her URL'yi zaten
+reddediyordu; dizinin içini gösteren mutlak yol eklendi); `Load`'da kimlik
+sayacı sıfırlanıyor; ikinci yanıt kabul ediliyor. Sağlamlık üretecine
+gelen ve gelmeyen görüntüler, uç `background-size`/`background-position`
+değerleri ve görüntülü öğeler eklendi.

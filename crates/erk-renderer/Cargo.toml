@@ -33,10 +33,14 @@ fearless_simd = { version = "=0.4.1", features = ["force_support_fallback"] }
 # CPU rasterizer: the reference renderer and the source of golden images.
 # Single-threaded (no `multithreading` feature) so output is deterministic.
 vello_cpu = "=0.2.0"
+# Image decoders for the resources the host provides (p1-contract §6):
+# PNG is already in the tree; zune-jpeg is pure Rust (MIT OR Apache-2.0 OR
+# Zlib).
+png = "0.18"
+zune-jpeg = "0.5"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-png = "0.18"
 url = "2.5"

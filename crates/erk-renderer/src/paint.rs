@@ -1,8 +1,11 @@
 //! Painting a display list with vello_cpu.
 
-use vello_cpu::kurbo::{BezPath, Point, Rect};
-use vello_cpu::peniko::{Color, Fill};
-use vello_cpu::{Glyph, Level, Pixmap, RenderContext, RenderSettings, Resources};
+use vello_cpu::kurbo::{Affine, BezPath, Point, Rect};
+use vello_cpu::peniko::{Color, Extend, Fill, ImageQuality, ImageSampler};
+use vello_cpu::{
+    Glyph, Image as VelloImage, ImageSource, Level, Pixmap, RenderContext, RenderSettings,
+    Resources,
+};
 
 use crate::color::Rgba;
 use crate::display::{DisplayItem, DisplayList, Frame, Radii};
@@ -79,6 +82,45 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16) -> Pixmap {
                 ctx.set_paint(color(*fill));
                 ctx.fill_blurred_rounded_rect(&rect(*frame), *radius, blur_parameter(*blur), false);
                 ctx.pop_layer();
+            }
+            DisplayItem::Image {
+                image,
+                tile,
+                repeat,
+                area,
+                clip,
+                clip_radii,
+            } => {
+                let rounded = clip_radii.iter().any(|(x, y)| *x > 0.0 && *y > 0.0);
+                if rounded {
+                    ctx.push_clip_layer(&rounded_rect(*clip, clip_radii));
+                }
+                let extend = |repeat: bool| if repeat { Extend::Repeat } else { Extend::Pad };
+                ctx.set_paint(VelloImage {
+                    image: ImageSource::Pixmap(image.clone()),
+                    sampler: ImageSampler {
+                        x_extend: extend(repeat.0),
+                        y_extend: extend(repeat.1),
+                        quality: ImageQuality::Medium,
+                        alpha: 1.0,
+                    },
+                });
+                // One copy of the image maps onto the tile.
+                ctx.set_paint_transform(
+                    Affine::translate((f64::from(tile.x), f64::from(tile.y)))
+                        * Affine::scale_non_uniform(
+                            f64::from(tile.width) / f64::from(image.width()),
+                            f64::from(tile.height) / f64::from(image.height()),
+                        ),
+                );
+                let painted = rect(*area).intersect(rect(*clip));
+                if painted.width() > 0.0 && painted.height() > 0.0 {
+                    ctx.fill_rect(&painted);
+                }
+                ctx.reset_paint_transform();
+                if rounded {
+                    ctx.pop_layer();
+                }
             }
             DisplayItem::PushOpacity(opacity) => ctx.push_opacity_layer(*opacity),
             DisplayItem::PopOpacity => ctx.pop_layer(),

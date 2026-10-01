@@ -23,12 +23,25 @@ forbid() {
 # 1. The renderer's public surface is exactly this. Every module is private,
 #    so an item public elsewhere is reachable only through lib.rs. A change
 #    here is a design change: update this list in the same pull request.
-expected='pub use messages::{ElementBox, Frame, FromRenderer, ToRenderer};
+#    Each public item is read whole, however rustfmt wraps it: a type added
+#    to a multi-line `pub use` list must show up here too.
+expected='pub use messages::{ ElementBox, Frame, FromRenderer, ResourceKind, ResourceRequest, ResourceResponse, ToRenderer, };
 pub use thread::spawn;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
-pub fn element_boxes(html: &str, width: u16, height: u16) -> Vec<ElementBox> {'
-actual=$(grep -E '^[[:space:]]*pub\b' "$src/lib.rs" | sed 's/^[[:space:]]*//')
+pub fn render_html_with_resources( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
+pub fn element_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<ElementBox> {'
+actual=$(awk '
+  /^[[:space:]]*pub[[:space:]]/ { item = ""; open = 1 }
+  open {
+    line = $0
+    sub(/^[[:space:]]+/, "", line)
+    item = item (item == "" ? "" : " ") line
+    # A `pub use` list ends at its `;`, an item with a body at its `{`.
+    if (item ~ /^pub use/ ? line ~ /;[[:space:]]*$/ : line ~ /[;{][[:space:]]*$/) {
+      print item; open = 0
+    }
+  }' "$src/lib.rs")
 if [ "$actual" != "$expected" ]; then
   echo "erk-renderer's public surface is not the reviewed one; lib.rs has:"
   echo "$actual"

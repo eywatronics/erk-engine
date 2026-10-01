@@ -211,6 +211,24 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash .github/scripts/check-size-budget.sh target/release/erk "$BASE"
 
+  # Every dependency's licence against the reviewed allow list in deny.toml.
+  # Erk ships inside closed applications: nothing copyleft beyond the
+  # file-level MPL-2.0, and no way past the list but changing it.
+  licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deny.toml has no way past the allow list
+        run: bash .github/scripts/check-license-config.sh deny.toml
+
+      - name: Every licence is on the allow list
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+          arguments: --all-features --locked
+
   # The Web Platform Tests reftests of tests/wpt/dirs.txt, at the commit in
   # tests/wpt/WPT_COMMIT, against the baseline in tests/wpt/expectations.txt.
   # Any change fails: a regression must be fixed, an improvement recorded.

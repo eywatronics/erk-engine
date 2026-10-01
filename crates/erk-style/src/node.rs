@@ -748,6 +748,19 @@ fn presentational_hints(
                 Color::from_absolute_color(AbsoluteColor::srgb_legacy(r, g, b, 1.0)),
             ));
         }
+        // `<img width height>`: dimension attributes, a non-negative number
+        // of pixels or a percentage (HTML §15.3.3, "maps to the dimension
+        // property").
+        if element.name.local == local_name!("img")
+            && (attr.name.local == local_name!("width") || attr.name.local == local_name!("height"))
+            && let Some(size) = parse_dimension(value)
+        {
+            if attr.name.local == local_name!("width") {
+                push(PropertyDeclaration::Width(size));
+            } else {
+                push(PropertyDeclaration::Height(size));
+            }
+        }
         if attr.name.local == local_name!("align") {
             use style::values::computed::text::TextAlign as Keyword;
             use style::values::specified::TextAlign;
@@ -762,6 +775,31 @@ fn presentational_hints(
             }
         }
     }
+}
+
+/// A dimension attribute value: leading digits (with an optional fraction),
+/// then `%` for a percentage; anything else is ignored, as HTML's rules for
+/// dimension values say.
+fn parse_dimension(value: &str) -> Option<style::values::specified::Size> {
+    use style::values::generics::NonNegative;
+    use style::values::specified::length::NoCalcLength;
+    use style::values::specified::{LengthPercentage, Size};
+    let value = value.trim_start();
+    let end = value
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(value.len());
+    let number: f32 = value[..end].parse().ok()?;
+    if !number.is_finite() {
+        return None;
+    }
+    let length = if value[end..].starts_with('%') {
+        LengthPercentage::Percentage(style::values::specified::percentage::NoCalcPercentage::new(
+            number / 100.0,
+        ))
+    } else {
+        LengthPercentage::Length(NoCalcLength::from_px(number))
+    };
+    Some(Size::LengthPercentage(NonNegative(length)))
 }
 
 fn parse_hex_color(value: &str) -> Option<(u8, u8, u8)> {

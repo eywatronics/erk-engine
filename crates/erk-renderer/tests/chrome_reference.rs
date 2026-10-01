@@ -86,6 +86,27 @@ fn reference_dir() -> PathBuf {
     manifest().join("tests/reference")
 }
 
+/// The resource provider of the reference pages: `images/<file>` from
+/// tests/reference/images, nothing else. The pages are compared with
+/// Chrome, which loads the same files from beside the page.
+fn provide(request: &erk_renderer::ResourceRequest) -> Option<erk_renderer::ResourceResponse> {
+    let file = request.url.strip_prefix("images/")?;
+    if file.contains(['/', '\\']) || file.starts_with('.') {
+        return None;
+    }
+    let data = std::fs::read(reference_dir().join("images").join(file)).ok()?;
+    let mime = match file.rsplit_once('.').map(|(_, extension)| extension) {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        _ => "",
+    };
+    Some(erk_renderer::ResourceResponse {
+        id: request.id,
+        mime: mime.to_owned(),
+        data,
+    })
+}
+
 /// Every reference page: `(name, path)`. The pages directory may hold only
 /// `.html` files, so a misnamed page cannot silently drop out of the test.
 fn pages() -> Vec<(String, PathBuf)> {
@@ -330,7 +351,7 @@ fn erk_matches_its_recorded_distance_from_chrome() {
                  delete chrome/{name}.png and capture it again (see module docs)"
             ));
         }
-        let erk_png = erk_renderer::render_html(&html, WIDTH, HEIGHT)
+        let erk_png = erk_renderer::render_html_with_resources(&html, WIDTH, HEIGHT, &mut provide)
             .to_png()
             .expect("non-empty frame");
         let result = compare(&decode(&erk_png), &decode(&chrome_png));
@@ -514,7 +535,12 @@ fn capture_chrome_references() {
 
     let work = manifest().join("../../target/chrome-capture");
     let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(work.join("images")).unwrap();
+    // The pages' images, beside them as the pages expect.
+    for entry in std::fs::read_dir(reference_dir().join("images")).unwrap() {
+        let path = entry.unwrap().path();
+        std::fs::copy(&path, work.join("images").join(path.file_name().unwrap())).unwrap();
+    }
 
     // Chrome must draw with the same fonts Erk embeds.
     let fonts = manifest().join("assets/fonts");
@@ -673,7 +699,7 @@ fn erk_boxes_match_chrome() {
             continue;
         };
         let html = std::fs::read_to_string(path).unwrap();
-        let erk = erk_renderer::element_boxes(&html, WIDTH, HEIGHT);
+        let erk = erk_renderer::element_boxes(&html, WIDTH, HEIGHT, &mut provide);
         let (mut compared, mut matched, mut skipped) = (0, 0, 0);
         for line in chrome.lines().filter(|line| !line.trim().is_empty()) {
             let fields: Vec<&str> = line.split_whitespace().collect();
