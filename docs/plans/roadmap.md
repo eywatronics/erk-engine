@@ -247,14 +247,31 @@ bellek büyümüyor. Mutation fuzz'ı yeşil.
 
 ## M5 — Artımlı render ve formlar
 
-- Kalıcı stil verisi ve Stylo'nun yeniden stil ipuçları; kalıcı layout yan
-  tabloları ve Taffy önbelleği; kirlenme bitleri
+Mimari: [p2-incremental.md](../design/p2-incremental.md), Erk Invalidation
+Core (EIC), nihai. Adımlar M5.0–M5.8; ilk adım ölçüm altyapısı, taban M2'nin
+tam yeniden hesabı. Kirlenme `erk-invalidation` crate'inde, yalnızca `erk-dom`'a
+bağımlı; düğüme bağlı veri yan tablolarda.
+
+- Mutation journal: kare içi birikim, birleştirme, iç içe transaction (M4'ün
+  `Mutation` API'si üstüne)
+- Tek invalidation sözlüğü (stil, metin, layout, boyama, erişilebilirlik)
+  ve her kirlenmenin nedeni; nedenler M7'nin DevTools'unda görünür
+- Kalıcı stil verisi; seçici invalidation Stylo'nun (snapshot'lar, yeniden
+  stil ipuçları, `:has()`), stil hasarı Erk'in bitlerine çevrilir
+- Kalıcı layout yan tabloları ve Taffy önbelleği; hesaplanmış stilden
+  yeniden yerleşim sınırları (`contain: size layout`, sabit boyut) ve erken
+  kesme (çıktısı değişmeyen kutu yayılmayı durdurur)
+- Kalıcı metin şekillendirmesi; kutu başına display list parçaları, hasar
+  bölgesi, arka uçtan bağımsız `RenderBackend`, kısmi sunum
+- Her artımlı yol tam yeniden hesapla karşılaştırılır: aynı mutasyon dizisi
+  iki yoldan aynı display list'i vermek zorunda (M4 fuzz'ına bağlı)
 - Form kontrolleri: `input` (metin, onay kutusu, radyo), `textarea`, `button`,
   `select`
 - İmleç, seçim, pano; IME (Windows TSF ile Türkçe ve CJK)
 - Odak ve Tab gezinmesi
 - Erişilebilirlik: AccessKit ile DOM'un işletim sistemi erişilebilirlik ağacına
-  çevrilmesi
+  çevrilmesi; ağaç yardımcı teknoloji etkinleşince kurulur, sonra yalnızca
+  kirli düğümler gönderilir
 - Davranışı olan standart elemanlar: `<details>`/`<summary>`, `<dialog>`,
   `popover` özniteliği, `commandfor`/`command`. Açılır menü, akordeon ve
   diyalog betiksiz ve host'a gitmeden çalışır; her biri Chrome referans
@@ -263,8 +280,10 @@ bellek büyümüyor. Mutation fuzz'ı yeşil.
   kuralı değiştirip artımlı yeniden stille görmek
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
-hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. Türkçe ve CJK IME
-girişi çalışıyor. Bir ekran okuyucu form etiketlerini okuyor.
+hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. p2-incremental §4'ün
+B1–B10 ölçümleri tabana karşı yayımlı. Kısmi kare ile tam kare piksel piksel
+aynı. Türkçe ve CJK IME girişi çalışıyor. Bir ekran okuyucu form etiketlerini
+okuyor.
 
 ---
 
@@ -358,6 +377,9 @@ kapsam dışı, p1-embedded §4); ikili boyutu, bellek ve açılış süresi ayn
 
 - CSS animasyonları ve geçişleri (zaman host'un `now_ns`'inden)
 - Kaydırma katmanı başına tile cache, kompozitör iş parçacığında kaydırma
+- Ölçüm kapısı: bağımsız alt ağaçların layout'u ve erişilebilirlik eşitlemesi
+  için bir iş grafiği (p2-incremental §3.9), ancak M5'in ölçümleri tek iş
+  parçacıklı yolun kare bütçesini aştığını gösterirse
 
 **Açık soru (M5 sonrası):** geçişler masaüstü arayüzünde temel bir beklenti
 (hover'da renk geçişi). M5'in artımlı render ölçümü kare bütçesinin yettiğini

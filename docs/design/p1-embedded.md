@@ -6,6 +6,7 @@
   bölümleri (§2.1 süreç izolasyonu, §5.3 JS sahipliği, §7 ağ, §8 JS) bu
   belge geçersiz kılar.
 - **Sözleşme:** [p1-contract.md](p1-contract.md)
+- **Artımlı render (M5):** [p2-incremental.md](p2-incremental.md)
 - **Yol haritası:** [roadmap.md](../plans/roadmap.md)
 
 ---

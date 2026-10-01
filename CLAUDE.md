@@ -125,6 +125,7 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | M3 | `unsafe` istisnası: `erk-ffi` (C-ABI); üretilen `erk.h` depodakiyle aynı; C örneği CI'da derlenip çalışır |
 | M3 | FFI'dan panik sızmaz; eski `NodeId` ve yanlış iş parçacığı hata kodu döner |
 | M4 | `Mutation` dizileri fuzz'lanır |
+| M5 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı; artımlı her yol tam yeniden hesapla aynı display list'i verir (fuzz) |
 | M6 | Çekirdek crate'ler, `erk` ve `erk-ffi` hiçbir JS motoruna bağımlı değil; `erk-script` projeden yalnızca `erk`'e bağımlı (`cargo tree`) |
 
 ## unsafe ve C/C++ politikası

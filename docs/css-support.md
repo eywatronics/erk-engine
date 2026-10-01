@@ -52,6 +52,8 @@ does not lay out or paint is not supported.
 | Flexbox | M1 | Laid out by Taffy today, not yet verified |
 | `position: absolute`, `relative`, `fixed` | M1 | |
 | `overflow: auto`, `scroll`, scroll containers | M2 | |
+| `contain: size layout paint` | M5 | A relayout and repaint boundary for incremental rendering |
+| `content-visibility` | Later | |
 | Grid | Later | Laid out by Taffy; verified after flexbox |
 | `float`, `clear` | Not planned | Desktop UI is built with flexbox; floats are the most edge-case-heavy part of CSS. A floated element is laid out as if `float: none` (M1) |
 | Table layout (`display: table`, `<table>` as a grid of cells) | Not planned | Use grid or flexbox. Tables parse and are styled, but there is no table layout algorithm |
