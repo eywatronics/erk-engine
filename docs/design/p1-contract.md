@@ -144,6 +144,13 @@ dışında) ve onu da `now_ns` olarak verir.
   - `erk_resource_complete(...)` (§6).
 - macOS'ta pencere ana iş parçacığı ister; orada UI iş parçacığı ana iş
   parçacığı olmalıdır.
+- **Açık soru (M3): UI iş parçacığının yığını.** Layout her iç içelik
+  düzeyinde bir kez özyinelenir; ayrıştırıcı derinliği Chrome gibi 512'de
+  keser. Renderer iş parçacığı bugün 16 MiB yığınla çalışıyor, ama §1.1'e
+  göre M3'te layout UI iş parçacığına geçecek ve Windows'ta ana iş
+  parçacığının yığını 1 MB. M3'te ya layout'un özyinelemesi kaldırılır ya da
+  en derin belgenin gerektirdiği yığın ölçülüp sözleşmeye yazılır; host'tan
+  büyük bir yığın beklemek C host'ları için gerçekçi değil.
 
 ## 5. Callback'ler
 

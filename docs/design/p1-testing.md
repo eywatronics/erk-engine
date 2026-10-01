@@ -24,7 +24,8 @@ sürekli bir altyapı.
 | **Chrome geometri** | Her kutunun konumu ve boyutu Chrome'unkiyle aynı mı | aynı dosya | M1.3'te eklendi |
 | Renderer iş parçacığı | Mesajlar, boyut birleştirme, kapanış | `erk-renderer/tests/thread.rs` | Var |
 | Mimari muhafızlar | Çekirdek G/Ç, `unsafe`, bağımlılık yönü, renderer yüzeyi, boyut bütçesi | `.github/scripts/`, CI `guards` ve `size` | Var |
-| Sağlamlık ve fuzz | Bozuk HTML/CSS'te panik yok; sonra `Mutation` dizileri ve FFI | `tests/robustness.rs`, `fuzz/` | M1.3, M4, M3 |
+| Sağlamlık | Bozuk HTML/CSS'te panik yok, derin iç içelikte yığın taşması yok (sabit tohumlu 300 belge, çökme korpusu, 5000 düzey) | `erk-renderer/tests/robustness.rs`, `tests/robustness/` | Var |
+| Fuzz | Açık uçlu arama; sonra `Mutation` dizileri ve FFI | `fuzz/` | M1 içinde ayrı PR, M4, M3 |
 | WPT | CSS dizinlerinde taban çizgisi, gerileme yasağı | `tests/wpt/` | M1.4 |
 | FFI | Rust → C → Rust, hata kodları, iş parçacığı, ömür | `erk-ffi` testleri, C örneği (ASan) | M3 |
 
