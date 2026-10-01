@@ -5,6 +5,10 @@ projeye aittir.
 
 ## Ürün
 
+**Hedef:** modern, açık kaynaklı, Rust ile güçlendirilmiş yeni nesil bir
+Sciter. Sciter'la API ya da CSS uzantısı uyumluluğu hedef değil; ölçüt web
+standartları ve Chrome (karşılaştırma: p1-embedded §4).
+
 Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: çekirdekte
 JavaScript yok, host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u
 `NodeId` ile sürer, Erk çizer ve olayları bildirir. JavaScript isteğe bağlı bir

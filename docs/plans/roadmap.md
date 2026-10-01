@@ -1,7 +1,8 @@
 # Erk Engine yol haritası
 
 Erk gömülü bir HTML/CSS masaüstü UI motorudur: çekirdekte JavaScript yok
-(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
+(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Hedef:
+modern, açık kaynaklı, Rust ile güçlendirilmiş yeni nesil bir Sciter. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
 tanımlar. Yön değişikliğinin gerekçesi [p1-embedded.md](../design/p1-embedded.md),
 render hattının ve DOM modelinin ayrıntısı
 [p0-architecture.md](../design/p0-architecture.md).

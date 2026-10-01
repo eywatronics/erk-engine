@@ -5,6 +5,10 @@ in Rust. The engine core runs no JavaScript: your application (in Rust, and
 later C, Python, Go or, optionally, JavaScript) owns the logic and drives the
 document, Erk lays it out, paints it and reports what the user did.
 
+Erk aims at the space Sciter has proven, as an open-source engine built in
+Rust on standard CSS: no proprietary CSS extensions, and Chrome as the
+reference for how a page should look.
+
 - Built on mature Rust components: html5ever, Stylo, Taffy, Parley, Vello
 - Original work where none of them reach: inline layout, the embedding API
   and its C ABI, incremental rendering and form controls

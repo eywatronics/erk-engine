@@ -36,6 +36,9 @@ her biri çok yıllık işlerdir. Masaüstü UI için bunların hiçbiri gerekme
 kurulan her şey ise yeni hedefe doğrudan yarıyor: arena DOM, Stylo, Taffy,
 Parley, vello ve yalnızca düz veri mesajlarla konuşan renderer.
 
+**Hedef:** modern, açık kaynaklı, Rust ile güçlendirilmiş yeni nesil bir
+Sciter (§4).
+
 **Kullanıcının kararları:** entegrasyon süreç içi bir kütüphane (önce Rust API,
 sonra C-ABI; ayrı süreç modu ancak ihtiyaç olursa); ilk dil bağlaması Python.
 
@@ -213,6 +216,27 @@ Bu alanda boş bir yer yok; farkı dürüst yazmak gerekiyor.
 | Ultralight | WebKit tabanlı gömülü motor | Kapalı kaynak, JS var |
 | Tauri, Electron | Sistem webview'ı ya da Chromium | JS ile çalışır; Electron büyük, Tauri platformun webview'ına bağımlı |
 | Slint, egui, Qt | Yerel UI araç takımları | HTML/CSS değil |
+
+### Hedef: yeni nesil bir Sciter
+
+Projenin hedefi (2026-10-01): **modern, açık kaynaklı, Rust ile
+güçlendirilmiş yeni nesil bir Sciter.** Sciter bu alanın kanıtlanmış ürünü:
+HTML/CSS ile çizilen masaüstü arayüzü, gömülebilir küçük bir motor, C-API ve
+çok dilli bağlamalar. Erk aynı ürün biçimini hedefler; farkı nasıl yapıldığı:
+
+| | Sciter | Erk |
+|---|---|---|
+| Lisans | Kapalı kaynak; ikili ücretsiz, kaynak kodu ücretli lisansla | Açık kaynak, MIT OR Apache-2.0 |
+| Dil ve bellek güvenliği | C++ | Rust; `unsafe` yalnızca adıyla listelenmiş crate'lerde |
+| CSS | Kendi uzantıları (`flow`, `behavior`, `1*` esnek birimleri) | Standart CSS, Stylo'nun ayrıştırması ve kaskadı; uzantı yok. Neyin desteklendiği [css-support.md](../css-support.md)'de, Chrome'a yakınlık referans testiyle ölçülür |
+| Betik | QuickJS motorun parçası | İsteğe bağlı bağlama, varsayılan kapalı (§3.1) |
+| G/Ç | Motor kaynakları kendisi yükleyebilir | Çekirdek G/Ç yapmaz; kaynak ve zaman host'tan gelir (§2.4) |
+| Bağlamalar | C-API üzerinden birçok dil | C-ABI; önce Rust ve Python, sonra Go ve JS |
+
+Sciter'ın API'siyle ya da CSS uzantılarıyla uyumluluk hedef değildir: Erk'in
+ölçütü web standartları ve Chrome'un çizdiği. "Yeni nesil Sciter" ürünün
+biçimini anlatır; README'de ve dışa dönük metinlerde Sciter'ın adı yalnızca
+karşılaştırma için geçer.
 
 Erk'in iddiası: standart HTML/CSS'in açıkça sınırlanmış bir alt kümesi,
 çekirdekte sıfır JS (JS isteğe bağlı bir bağlama), kararlı bir C-ABI ve
