@@ -1,0 +1,13 @@
+0 body block 24 24 752 323
+1 p block 24 24 752 53
+2 img inline 187.53125 24 48 48
+3 div flex 24 93 752 134
+4 div block 24 93 176 134
+5 img block 32 101 160 90
+6 p block 32 197 160 22
+7 div block 224 93 120 80
+8 div block 368 93 120 80
+9 div flex 24 251 752 96
+10 div block 24 251 120 80
+11 div block 168 251 96 96
+12 img block 288 251 96 96

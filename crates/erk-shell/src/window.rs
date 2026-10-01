@@ -12,6 +12,8 @@ use std::sync::mpsc::Sender;
 
 use erk_renderer::{Frame, FromRenderer, ToRenderer};
 use softbuffer::{Context, Surface};
+
+use crate::resources::Provider;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
@@ -36,12 +38,25 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
 
     let (to_renderer, from_renderer, renderer) = erk_renderer::spawn();
     let proxy = event_loop.create_proxy();
+    // The forwarder also answers the renderer's resource requests: the host
+    // reads files, the renderer never does.
+    let provider = Provider::for_page(page);
+    let answers = to_renderer.clone();
     let forwarder = std::thread::Builder::new()
         .name("erk-frames".to_owned())
         .spawn(move || {
-            for FromRenderer::Frame(frame) in from_renderer {
-                if proxy.send_event(UserEvent::Frame(frame)).is_err() {
-                    return; // the event loop has exited
+            for message in from_renderer {
+                match message {
+                    FromRenderer::Frame(frame) => {
+                        if proxy.send_event(UserEvent::Frame(frame)).is_err() {
+                            return; // the event loop has exited
+                        }
+                    }
+                    FromRenderer::Resources(requests) => {
+                        for request in &requests {
+                            let _ = answers.send(provider.answer(request));
+                        }
+                    }
                 }
             }
             // Fails harmlessly when the event loop has already exited, as it
@@ -224,7 +239,9 @@ mod tests {
         })
         .unwrap();
         to.send(ToRenderer::Resize { width, height }).unwrap();
-        let FromRenderer::Frame(frame) = from.recv().unwrap();
+        let Ok(FromRenderer::Frame(frame)) = from.recv() else {
+            panic!("expected a frame");
+        };
         to.send(ToRenderer::Shutdown).unwrap();
         renderer.join().unwrap();
         frame

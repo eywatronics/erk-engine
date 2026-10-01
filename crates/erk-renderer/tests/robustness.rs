@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use erk_renderer::{FromRenderer, ToRenderer, render_html, spawn};
+use erk_renderer::{
+    FromRenderer, ResourceRequest, ResourceResponse, ToRenderer, render_html_with_resources, spawn,
+};
 
 const WIDTH: u16 = 320;
 const HEIGHT: u16 = 240;
@@ -103,10 +105,18 @@ const DECLARATIONS: &[&str] = &[
     "}",
     "{{{",
     ";;;",
+    "background: url(i.png) no-repeat 1e9px -1e9px",
+    "background: url(i.png); background-size: 0.0001px",
+    "background: url(i.png); background-size: cover; border-radius: 50%",
+    "background: url(i.png), url(gone.png), url(i.png); background-size: contain, 1e30px",
+    "background-image: url(); background-position: 50% 50%",
 ];
 
 const TEXT: &[&str] = &[
     "merhaba",
+    r#"<img src="i.png">"#,
+    r#"<img src="gone.png" width="-5" height="1e30">"#,
+    r#"<img src="i.png" width="100%" height="0">"#,
     "İstanbul ılık şişe göç üzüm ağaç",
     " ",
     "\n\t  \n",
@@ -166,6 +176,20 @@ fn failures_dir() -> PathBuf {
 /// need it, and a test thread's default would overflow first.
 const RENDERER_STACK: usize = 16 * 1024 * 1024;
 
+/// A 3 × 2 PNG, served for `i.png`; every other URL is missing, so pages
+/// exercise both images that arrive and ones that never do.
+fn tiny_png() -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 3, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[90; 3 * 2 * 4]).unwrap();
+    }
+    out
+}
+
 /// Render `html` on a thread with the renderer's stack and report a panic as
 /// an error, keeping the page so it can be added to the corpus.
 fn renders(name: &str, html: &str) -> Result<(), String> {
@@ -173,7 +197,15 @@ fn renders(name: &str, html: &str) -> Result<(), String> {
     let result = std::thread::Builder::new()
         .stack_size(RENDERER_STACK)
         .spawn(move || {
-            render_html(&page, WIDTH, HEIGHT);
+            let image = tiny_png();
+            let mut provide = |request: &ResourceRequest| {
+                (request.url == "i.png").then(|| ResourceResponse {
+                    id: request.id,
+                    mime: "image/png".to_owned(),
+                    data: image.clone(),
+                })
+            };
+            render_html_with_resources(&page, WIDTH, HEIGHT, &mut provide);
         })
         .expect("a render thread starts")
         .join();
@@ -237,6 +269,7 @@ fn deep_nesting_does_not_overflow_the_renderer_thread() {
     .unwrap();
     match from.recv_timeout(Duration::from_secs(120)) {
         Ok(FromRenderer::Frame(frame)) => assert_eq!(frame.width(), WIDTH),
+        Ok(FromRenderer::Resources(_)) => panic!("the page names no resource"),
         Err(RecvTimeoutError::Timeout) => panic!("no frame for a deeply nested page"),
         Err(RecvTimeoutError::Disconnected) => panic!("the renderer thread died"),
     }

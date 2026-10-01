@@ -1,0 +1,38 @@
+# The license gate (p0-verification): `cargo deny check licenses` in CI.
+#
+# Erk is shipped inside closed applications too, so every dependency must be
+# usable there without obligations beyond attribution. Each allowed licence
+# says why it is here; adding one is a reviewed decision, not a CI fix.
+
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    # Permissive, attribution only: the bulk of the Rust ecosystem.
+    "MIT",
+    "Apache-2.0",
+    # rustix and the wasi crates (Bytecode Alliance).
+    "Apache-2.0 WITH LLVM-exception",
+    # arrayref; tiny-skia (vello's path and pixmap types); a few servo crates.
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    # libloading and other small system crates.
+    "ISC",
+    # The ICU4X crates under parley and url: Unicode data licence, permissive.
+    "Unicode-3.0",
+    # encoding_rs (with MIT/Apache); zune-jpeg and zune-core offer it too.
+    "Zlib",
+    # Public-domain-like, no obligations.
+    "Unlicense",
+    "0BSD",
+    # Stylo and its servo crates. File-level copyleft: modified MPL files stay
+    # open, the application around them does not. Erk does not patch them.
+    "MPL-2.0",
+    # The Noto fonts embedded in erk-renderer: free to embed and redistribute.
+    "OFL-1.1",
+]
+# Not allowed, on purpose: GPL and LGPL in any version (they would bind the
+# host application). r-efi offers "MIT OR Apache-2.0 OR LGPL-2.1-or-later";
+# the gate takes MIT from that choice.

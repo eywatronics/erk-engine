@@ -28,8 +28,13 @@ use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::{ComputedValues, Styles};
 use parley::{FontData, PositionedLayoutItem};
 
+use std::sync::Arc;
+
+use vello_cpu::Pixmap;
+
 use crate::color::{Rgba, srgb_bytes};
 use crate::layout::{Layouts, ShapedText};
+use crate::resources::{Resources, image_url};
 use crate::text::InlineLayout;
 
 pub(crate) struct DisplayList {
@@ -68,6 +73,16 @@ pub(crate) enum DisplayItem {
         radius: f32,
         blur: f32,
         color: Rgba,
+        clip: Frame,
+        clip_radii: Radii,
+    },
+    /// An image: one copy fills `tile`, repeated along an axis where
+    /// `repeat` says so; `area` is the region painted, clipped to `clip`.
+    Image {
+        image: Arc<Pixmap>,
+        tile: Frame,
+        repeat: (bool, bool),
+        area: Frame,
         clip: Frame,
         clip_radii: Radii,
     },
@@ -114,12 +129,18 @@ struct Walk<'a> {
     doc: &'a Document,
     styles: &'a Styles,
     layouts: &'a Layouts,
+    resources: &'a Resources,
     /// The element whose background became the canvas colour.
     canvas_source: Option<NodeId>,
 }
 
 impl DisplayList {
-    pub(crate) fn build(doc: &Document, styles: &Styles, layouts: &Layouts) -> Self {
+    pub(crate) fn build(
+        doc: &Document,
+        styles: &Styles,
+        layouts: &Layouts,
+        resources: &Resources,
+    ) -> Self {
         let mut list = Self {
             canvas: WHITE,
             items: Vec::new(),
@@ -128,6 +149,7 @@ impl DisplayList {
             doc,
             styles,
             layouts,
+            resources,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
         };
         list.items = stacking_context(&walk, doc.root(), (0.0, 0.0));
@@ -224,6 +246,24 @@ impl DisplayList {
                         frame.width,
                         frame.height,
                         hex(*color)
+                    );
+                }
+                DisplayItem::Image {
+                    image,
+                    tile,
+                    repeat,
+                    ..
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "image {}x{} at {} {} {}x{} repeat {:?}",
+                        image.width(),
+                        image.height(),
+                        tile.x,
+                        tile.y,
+                        tile.width,
+                        tile.height,
+                        repeat
                     );
                 }
                 DisplayItem::PushOpacity(opacity) => {
@@ -365,8 +405,36 @@ fn add_box(
             frame,
             widths,
             paint_background,
+            walk.resources,
             &mut context.backgrounds,
         );
+        // A replaced element's image fills its content box.
+        if let Some(image) = walk.layouts.image(id) {
+            let content = Frame {
+                x: x + layout.border.left + layout.padding.left,
+                y: y + layout.border.top + layout.padding.top,
+                width: layout.size.width
+                    - layout.border.left
+                    - layout.border.right
+                    - layout.padding.left
+                    - layout.padding.right,
+                height: layout.size.height
+                    - layout.border.top
+                    - layout.border.bottom
+                    - layout.padding.top
+                    - layout.padding.bottom,
+            };
+            if content.width > 0.0 && content.height > 0.0 {
+                context.backgrounds.push(DisplayItem::Image {
+                    image: image.pixmap.clone(),
+                    tile: content,
+                    repeat: (false, false),
+                    area: content,
+                    clip: content,
+                    clip_radii: [(0.0, 0.0); 4],
+                });
+            }
+        }
     }
 
     if let Some(shaped) = walk.layouts.text(id)
@@ -489,6 +557,7 @@ fn box_decoration(
     frame: Frame,
     widths: [f32; 4],
     paint_background: bool,
+    resources: &Resources,
     out: &mut Vec<DisplayItem>,
 ) {
     let radii = corner_radii(style, frame.width, frame.height);
@@ -545,6 +614,9 @@ fn box_decoration(
             });
         }
     }
+    if paint_background {
+        background_images(style, frame, widths, radii, resources, out);
+    }
     let border = style.get_border();
     let colors = [
         &border.border_top_color,
@@ -563,6 +635,113 @@ fn box_decoration(
             widths,
             colors,
             radii,
+        });
+    }
+}
+
+/// The `background-image` layers that have arrived, last layer first (the
+/// first is on top). Each is placed in the padding box by
+/// `background-size`, `background-position` and `background-repeat`, and
+/// clipped to the border box (CSS Backgrounds 3 §3). `space` and `round`
+/// repeat plainly.
+fn background_images(
+    style: &ComputedValues,
+    frame: Frame,
+    widths: [f32; 4],
+    radii: Radii,
+    resources: &Resources,
+    out: &mut Vec<DisplayItem>,
+) {
+    use erk_style::style::values::computed::Length;
+    use erk_style::style::values::generics::background::GenericBackgroundSize;
+    use erk_style::style::values::generics::length::GenericLengthPercentageOrAuto;
+    use erk_style::style::values::specified::background::BackgroundRepeatKeyword;
+
+    let background = style.get_background();
+    let layers = &background.background_image.0;
+    let [top, right, bottom, left] = widths;
+    let area = Frame {
+        x: frame.x + left,
+        y: frame.y + top,
+        width: (frame.width - left - right).max(0.0),
+        height: (frame.height - top - bottom).max(0.0),
+    };
+    let nth = |slice: usize, index: usize| index % slice.max(1);
+    for (index, layer) in layers.iter().enumerate().rev() {
+        let Some(image) = image_url(layer).and_then(|url| resources.image(&url).cloned()) else {
+            continue;
+        };
+        let (natural_w, natural_h) = (image.width(), image.height());
+        let sizes = &background.background_size.0;
+        let (width, height) = match sizes.get(nth(sizes.len(), index)) {
+            Some(GenericBackgroundSize::Cover) => {
+                let scale = (area.width / natural_w).max(area.height / natural_h);
+                (natural_w * scale, natural_h * scale)
+            }
+            Some(GenericBackgroundSize::Contain) => {
+                let scale = (area.width / natural_w).min(area.height / natural_h);
+                (natural_w * scale, natural_h * scale)
+            }
+            Some(GenericBackgroundSize::ExplicitSize { width, height }) => {
+                let resolve = |value: &GenericLengthPercentageOrAuto<_>, basis: f32| match value {
+                    GenericLengthPercentageOrAuto::LengthPercentage(length) => {
+                        let length: &erk_style::style::values::computed::NonNegativeLengthPercentage =
+                            length;
+                        Some(length.0.resolve(Length::new(basis)).px())
+                    }
+                    GenericLengthPercentageOrAuto::Auto => None,
+                };
+                match (resolve(width, area.width), resolve(height, area.height)) {
+                    (Some(w), Some(h)) => (w, h),
+                    (Some(w), None) => (w, w * natural_h / natural_w),
+                    (None, Some(h)) => (h * natural_w / natural_h, h),
+                    (None, None) => (natural_w, natural_h),
+                }
+            }
+            None => (natural_w, natural_h),
+        };
+        if width <= 0.0 || height <= 0.0 {
+            continue;
+        }
+        let xs = &background.background_position_x.0;
+        let ys = &background.background_position_y.0;
+        let x = xs
+            .get(nth(xs.len(), index))
+            .map_or(0.0, |x| x.resolve(Length::new(area.width - width)).px());
+        let y = ys
+            .get(nth(ys.len(), index))
+            .map_or(0.0, |y| y.resolve(Length::new(area.height - height)).px());
+        let repeats = &background.background_repeat.0;
+        let (repeat_x, repeat_y) =
+            repeats
+                .get(nth(repeats.len(), index))
+                .map_or((true, true), |repeat| {
+                    (
+                        repeat.0 != BackgroundRepeatKeyword::NoRepeat,
+                        repeat.1 != BackgroundRepeatKeyword::NoRepeat,
+                    )
+                });
+        let tile = Frame {
+            x: area.x + x,
+            y: area.y + y,
+            width,
+            height,
+        };
+        // A repeating axis covers the whole border box; a single copy only
+        // its own extent.
+        let painted = Frame {
+            x: if repeat_x { frame.x } else { tile.x },
+            y: if repeat_y { frame.y } else { tile.y },
+            width: if repeat_x { frame.width } else { tile.width },
+            height: if repeat_y { frame.height } else { tile.height },
+        };
+        out.push(DisplayItem::Image {
+            image: image.pixmap.clone(),
+            tile,
+            repeat: (repeat_x, repeat_y),
+            area: painted,
+            clip: frame,
+            clip_radii: radii,
         });
     }
 }

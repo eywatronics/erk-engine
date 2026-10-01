@@ -13,10 +13,13 @@ mod display;
 mod layout;
 mod messages;
 mod paint;
+mod resources;
 mod text;
 mod thread;
 
-pub use messages::{ElementBox, Frame, FromRenderer, ToRenderer};
+pub use messages::{
+    ElementBox, Frame, FromRenderer, ResourceKind, ResourceRequest, ResourceResponse, ToRenderer,
+};
 pub use thread::spawn;
 
 use std::sync::Arc;
@@ -28,6 +31,7 @@ use vello_cpu::color::PremulRgba8;
 
 use crate::display::DisplayList;
 use crate::layout::Layouts;
+use crate::resources::Resources;
 use crate::text::{EmbeddedFontMetrics, TextEngine};
 
 impl Frame {
@@ -53,31 +57,90 @@ impl Frame {
 }
 
 /// Parse, style, lay out and paint `html` in a `width` × `height` viewport
-/// of CSS pixels (1 CSS pixel = 1 device pixel in M0).
+/// of CSS pixels (1 CSS pixel = 1 device pixel in M0). No resource is
+/// loaded: images render as missing.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
+    render_document(html, width, height, &mut Resources::default()).0
+}
+
+/// Like [`render_html`], answering the document's resource requests with
+/// `provide` before painting: the synchronous form of the host's resource
+/// callback (p1-contract §6). `None` means the resource does not exist.
+pub fn render_html_with_resources(
+    html: &str,
+    width: u16,
+    height: u16,
+    provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
+) -> Frame {
+    let mut resources = Resources::default();
+    let (frame, requests) = render_document(html, width, height, &mut resources);
+    if requests.is_empty() {
+        return frame;
+    }
+    answer(&mut resources, &requests, provide);
+    render_document(html, width, height, &mut resources).0
+}
+
+/// Answer `requests` with `provide`, each response under its request's id.
+fn answer(
+    resources: &mut Resources,
+    requests: &[ResourceRequest],
+    provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
+) {
+    for request in requests {
+        match provide(request) {
+            Some(response) => resources.complete(&ResourceResponse {
+                id: request.id,
+                ..response
+            }),
+            None => resources.missing(request.id),
+        }
+    }
+}
+
+/// Parse, style, lay out and paint `html` with the resources that have
+/// arrived; also return requests for the URLs it names that were not
+/// known before.
+pub(crate) fn render_document(
+    html: &str,
+    width: u16,
+    height: u16,
+    resources: &mut Resources,
+) -> (Frame, Vec<ResourceRequest>) {
     let (w, h) = (f32::from(width), f32::from(height));
     let doc = Document::parse_html(html);
     let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
+    let requests = resources.requests(&doc, &styles);
     let mut text = TextEngine::new();
-    let layouts = layout::layout(&doc, &styles, &mut text, w, h);
-    let list = DisplayList::build(&doc, &styles, &layouts);
+    let layouts = layout::layout(&doc, &styles, resources, &mut text, w, h);
+    let list = DisplayList::build(&doc, &styles, &layouts, resources);
     let pixmap = paint::paint(&list, width, height);
-    Frame::new(
+    let frame = Frame::new(
         width,
         height,
         pixmap.data_as_u8_slice().to_vec(),
         list.dump(),
-    )
+    );
+    (frame, requests)
 }
 
 /// The border box of every element of `html`'s body that generates a box,
-/// laid out like [`render_html`] would. For the renderer's own tests, which
-/// compare the boxes with Chrome's; the inspection queries of M3 replace it.
-pub fn element_boxes(html: &str, width: u16, height: u16) -> Vec<ElementBox> {
+/// laid out like [`render_html_with_resources`] would. For the renderer's
+/// own tests, which compare the boxes with Chrome's; the inspection queries
+/// of M3 replace it.
+pub fn element_boxes(
+    html: &str,
+    width: u16,
+    height: u16,
+    provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
+) -> Vec<ElementBox> {
     let (w, h) = (f32::from(width), f32::from(height));
     let doc = Document::parse_html(html);
     let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
-    let layouts = layout::layout(&doc, &styles, &mut TextEngine::new(), w, h);
+    let mut resources = Resources::default();
+    let requests = resources.requests(&doc, &styles);
+    answer(&mut resources, &requests, provide);
+    let layouts = layout::layout(&doc, &styles, &resources, &mut TextEngine::new(), w, h);
     let mut boxes = Vec::new();
     let mut index = 0;
     collect_boxes(

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Görüntüler</title>
+<style>
+  body { margin: 24px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 16px; }
+  .satir { display: flex; gap: 24px; align-items: flex-start; margin-bottom: 24px; }
+  .kart { width: 160px; padding: 8px; background: #f1f5f9; }
+  .kart img { display: block; }
+  .desen { width: 120px; height: 80px; background-image: url("images/checker.png"); }
+  .tek { width: 120px; height: 80px; background: #fde68a url("images/logo.png") no-repeat 50% 50%; }
+  .serit { width: 120px; height: 80px; background: #e0e7ff url("images/checker.png") repeat-x 0 32px; }
+  .yuvarlak { width: 96px; height: 96px; border-radius: 50%; background: url("images/checker.png"); }
+</style>
+</head>
+<body>
+  <p>Satırın içinde bir logo <img src="images/logo.png" alt="logo"> taban çizgisinde durur.</p>
+  <div class="satir">
+    <div class="kart"><img src="images/photo.jpg" alt="fotoğraf"><p style="margin: 6px 0 0">Bir JPEG</p></div>
+    <div class="desen"></div>
+    <div class="tek"></div>
+  </div>
+  <div class="satir">
+    <div class="serit"></div>
+    <div class="yuvarlak"></div>
+    <img src="images/logo.png" alt="büyük logo" width="96">
+  </div>
+</body>
+</html>
