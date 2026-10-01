@@ -172,7 +172,11 @@ fn paragraphs_stack_with_collapsed_margins() {
 fn inline_elements_contribute_their_text() {
     let (doc, layouts) = lay_out("<p>Merhaba <b>dünya</b></p>");
     let p = all(&doc, &local_name!("p"))[0];
-    let text = &layouts.text(p).expect("paragraph has shaped text").layout;
+    let text = &layouts
+        .text(p)
+        .expect("paragraph has shaped text")
+        .layout
+        .layout;
     assert_eq!(text.len(), 1);
     assert!(
         text.width() > 50.0,
@@ -240,7 +244,7 @@ fn whitespace_between_blocks_makes_no_anonymous_box() {
 fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, [u8; 4])> {
     let shaped = layouts.text(id).expect("a paragraph");
     let mut runs = Vec::new();
-    for line in shaped.layout.lines() {
+    for line in shaped.layout.layout.lines() {
         let ranges = crate::text::glyph_run_ranges(&line);
         let glyph_runs = line.items().filter_map(|item| match item {
             parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
@@ -287,6 +291,7 @@ fn an_inline_element_keeps_its_own_colour() {
 fn lines(layouts: &Layouts, id: NodeId) -> Vec<(f32, f32)> {
     let shaped = layouts.text(id).expect("a paragraph");
     shaped
+        .layout
         .layout
         .lines()
         .map(|line| {
@@ -364,4 +369,174 @@ fn justified_lines_fill_the_box_except_the_last() {
         );
     }
     assert!(last.1 < 290.0, "the last line is stretched: {lines:?}");
+}
+
+/// The width of a paragraph's widest line.
+fn line_width(body: &str) -> f32 {
+    let (doc, layouts) = lay_out(body);
+    let p = all(&doc, &local_name!("p"))[0];
+    layouts.text(p).expect("a paragraph").layout.width()
+}
+
+#[test]
+fn inline_padding_border_and_margin_take_room_in_the_line() {
+    let plain = line_width("<p><span>a</span>b</p>");
+    let padded = line_width(r#"<p><span style="padding: 0 20px">a</span>b</p>"#);
+    let all_sides = line_width(
+        r#"<p><span style="padding: 0 5px; border: 3px solid; margin: 0 2px">a</span>b</p>"#,
+    );
+    assert_eq!(padded - plain, 40.0);
+    assert_eq!(all_sides - plain, 20.0);
+}
+
+#[test]
+fn inline_padding_extends_the_background_but_not_the_line() {
+    let (doc, layouts) =
+        lay_out(r#"<p><span style="background: red; padding: 5px 10px">abc</span></p>"#);
+    let p = all(&doc, &local_name!("p"))[0];
+    let shaped = layouts.text(p).expect("a paragraph");
+    let [rect] = shaped.decorations[..] else {
+        panic!("expected one background, got {:?}", shaped.decorations);
+    };
+    // The content area is the font's ascent and descent (17 + 5), then the
+    // padding.
+    assert_eq!(rect.height, 22.0 + 10.0);
+    assert_eq!(rect.x, 0.0);
+    assert!((rect.width - shaped.layout.width()).abs() < 0.01);
+    let baseline = shaped.layout.baseline(0).unwrap();
+    assert_eq!(rect.y, baseline - 17.0 - 5.0);
+    assert_eq!(
+        boxes(&doc, &layouts, &local_name!("p"))[0].size.height,
+        one_line()
+    );
+}
+
+#[test]
+fn a_wrapped_inline_background_gets_one_rectangle_per_line() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="width: 120px"><p><span style="background: red">uzun bir metin satırlara bölünür</span></p></div>"#,
+    );
+    let p = all(&doc, &local_name!("p"))[0];
+    let shaped = layouts.text(p).expect("a paragraph");
+    let lines = shaped.layout.line_count();
+    assert!(lines > 1);
+    assert_eq!(shaped.decorations.len(), lines);
+    for (index, rect) in shaped.decorations.iter().enumerate() {
+        let baseline = shaped.layout.baseline(index).unwrap();
+        assert_eq!(rect.y, baseline - 17.0, "line {index}");
+        assert!(
+            rect.width > 0.0 && rect.x + rect.width <= 120.0,
+            "line {index}: {rect:?}"
+        );
+    }
+}
+
+#[test]
+fn a_collapsed_space_stays_in_the_element_it_was_written_in() {
+    let rect = |body: &str| {
+        let (doc, layouts) = lay_out(body);
+        let p = all(&doc, &local_name!("p"))[0];
+        layouts.text(p).expect("a paragraph").decorations[0]
+    };
+    let a = line_width("<p>a</p>");
+    let a_space_b = line_width("<p>a b</p>");
+    // `a <span>b</span>`: the space is before the span.
+    let after = rect(r#"<p>a <span style="background: red">b</span></p>"#);
+    assert!(after.x > a, "{after:?}");
+    // `<span>a </span>b`: the space is inside it.
+    let inside = rect(r#"<p><span style="background: red">a </span>b</p>"#);
+    assert!(inside.width > a && inside.width < a_space_b, "{inside:?}");
+}
+
+#[test]
+fn an_inline_block_is_laid_out_and_sits_on_the_baseline() {
+    let (doc, layouts) = lay_out(
+        r#"<p>ab <span style="display: inline-block; width: 50px; height: 30px; margin-left: 4px"></span> cd</p>"#,
+    );
+    let p = all(&doc, &local_name!("p"))[0];
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    assert_eq!((span.size.width, span.size.height), (50.0, 30.0));
+    let shaped = layouts.text(p).expect("a paragraph");
+    // Without line boxes, an inline-block's baseline is its bottom margin
+    // edge: the box stands on the line's baseline.
+    let baseline = shaped.layout.baseline(0).unwrap();
+    assert_eq!(span.location.y + span.size.height, baseline);
+    assert!(span.location.x >= line_width("<p>ab </p>") + 4.0);
+    // The line grows to hold it: 30px above the baseline, the strut's 5px
+    // below.
+    assert_eq!(
+        boxes(&doc, &layouts, &local_name!("p"))[0].size.height,
+        35.0
+    );
+}
+
+#[test]
+fn an_inline_block_with_text_aligns_its_text_with_the_line() {
+    let (doc, layouts) =
+        lay_out(r#"<p>x<span style="display: inline-block; padding: 4px">OK</span>y</p>"#);
+    let p = all(&doc, &local_name!("p"))[0];
+    let span_id = all(&doc, &local_name!("span"))[0];
+    let span = *layouts.get(span_id).unwrap();
+    let outer = layouts.text(p).unwrap().layout.baseline(0).unwrap();
+    let inner = layouts.text(span_id).unwrap().layout.baseline(0).unwrap();
+    assert_eq!(span.location.y + 4.0 + inner, outer);
+    // 4px of padding above and below the text's line: the line box is 8px
+    // taller than one line of text.
+    assert_eq!(
+        boxes(&doc, &layouts, &local_name!("p"))[0].size.height,
+        one_line() + 8.0
+    );
+    assert_eq!(span.size.height, one_line() + 8.0);
+}
+
+#[test]
+fn text_after_a_tall_line_moves_down() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="width: 60px"><p>a <span style="display: inline-block; width: 10px; height: 40px"></span> bbbbbb cc</p></div>"#,
+    );
+    let p = all(&doc, &local_name!("p"))[0];
+    let shaped = &layouts.text(p).unwrap().layout;
+    assert!(shaped.line_count() >= 2);
+    let first = shaped.baseline(0).unwrap();
+    let second = shaped.baseline(1).unwrap();
+    // The second line starts below the first line's 40px box and the strut
+    // below its baseline, then has its own 17px above its baseline.
+    assert_eq!(first, 40.0);
+    assert_eq!(second, 40.0 + 5.0 + 17.0);
+}
+
+#[test]
+fn an_inline_block_beside_blocks_is_placed_relative_to_its_block() {
+    let (doc, layouts) = lay_out(
+        r#"<div><p style="margin: 0">blok</p>metin <span style="display: inline-block; width: 10px; height: 10px"></span></div>"#,
+    );
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    // Below the block paragraph's line, standing on the anonymous line's
+    // baseline (17px down in its 22px line).
+    assert_eq!(span.location.y, one_line() + 17.0 - 10.0);
+}
+
+#[test]
+fn an_inline_block_inside_an_inline_element_gets_a_box() {
+    let (doc, layouts) = lay_out(
+        r#"<p>a <b>kalın <span style="display: inline-block; width: 12px; height: 12px"></span></b></p>"#,
+    );
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    assert_eq!((span.size.width, span.size.height), (12.0, 12.0));
+    assert!(span.location.x > 0.0);
+}
+
+#[test]
+fn a_background_stops_before_the_space_a_line_breaks_at() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="width: 120px"><p><span style="background: red">uzun bir metin satırlara bölünür</span></p></div>"#,
+    );
+    let p = all(&doc, &local_name!("p"))[0];
+    let rect = layouts.text(p).unwrap().decorations[0];
+    let (start, width) = lines(&layouts, p)[0];
+    assert!((rect.x - start).abs() < 0.01, "{rect:?}");
+    assert!(
+        (rect.x + rect.width - (start + width)).abs() < 0.01,
+        "{rect:?}"
+    );
 }

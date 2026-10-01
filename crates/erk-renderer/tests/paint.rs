@@ -94,3 +94,91 @@ fn a_frame_without_pixels_has_no_png() {
     let frame = render_html("<p>x</p>", 0, 100);
     assert!(frame.to_png().is_none());
 }
+
+#[test]
+fn an_inline_background_lies_between_its_block_and_its_text() {
+    // Blue block, red span background, black text: the red must cover the
+    // blue, and the text the red.
+    let frame = render_html(
+        r#"<style>body { margin: 0 }</style>
+        <div style="background: #0000ff; height: 80px; font-size: 30px">
+        <span style="background: #ff0000; padding: 0 10px">HH</span></div>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    let list = frame.display_list();
+    let lines: Vec<&str> = list.lines().collect();
+    let red = lines
+        .iter()
+        .position(|line| line.starts_with("rect") && line.ends_with("#ff0000ff"))
+        .unwrap_or_else(|| panic!("no red background:\n{list}"));
+    let blue = lines
+        .iter()
+        .position(|line| line.ends_with("#0000ffff"))
+        .unwrap_or_else(|| panic!("no blue background:\n{list}"));
+    let glyphs = lines
+        .iter()
+        .position(|line| line.starts_with("glyphs"))
+        .unwrap_or_else(|| panic!("no text:\n{list}"));
+    assert!(blue < red && red < glyphs, "blue, red, then text:\n{list}");
+    // Its edges follow the text but are snapped to whole pixels, as Chrome
+    // snaps them: `rect x y WxH colour`.
+    let geometry: Vec<&str> = lines[red].split(' ').skip(1).take(3).collect();
+    assert!(
+        geometry.iter().all(|value| !value.contains('.')),
+        "{}",
+        lines[red]
+    );
+
+    let count = |test: fn([u8; 4]) -> bool| {
+        (0..80)
+            .flat_map(|y| (0..WIDTH as usize).map(move |x| (x, y)))
+            .filter(|&(x, y)| test(pixel(&frame, x, y)))
+            .count()
+    };
+    let reds = count(|[r, g, b, _]| r > 200 && g < 60 && b < 60);
+    let darks = count(|[r, g, b, _]| r < 80 && g < 80 && b < 80);
+    assert!(
+        reds > 300,
+        "the span background should show, {reds} red pixels"
+    );
+    assert!(
+        darks > 100,
+        "the text should show over it, {darks} dark pixels"
+    );
+}
+
+#[test]
+fn an_inline_block_inside_an_inline_element_is_painted() {
+    let frame = render_html(
+        r#"<style>body { margin: 0 }</style>
+        <p style="margin: 0">a <b>b <span style="display: inline-block; width: 30px; height: 20px; background: #00ff00"></span></b></p>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    let list = frame.display_list();
+    assert!(
+        list.lines()
+            .any(|line| line.starts_with("rect") && line.ends_with("#00ff00ff")),
+        "the inline-block's background is missing:\n{list}"
+    );
+}
+
+#[test]
+fn text_after_a_tall_line_is_painted_lower() {
+    // The second line's baseline is below the first line's 40px box and the
+    // strut under it (5px), plus its own 17px ascent: 62.
+    let frame = render_html(
+        r#"<style>body { margin: 0 }</style>
+        <div style="width: 60px"><p style="margin: 0">a <span style="display: inline-block; width: 10px; height: 40px"></span> bbbbbb cc</p></div>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    let list = frame.display_list();
+    let second = list
+        .lines()
+        .find(|line| line.starts_with("glyphs") && line.contains("bbbbbb"))
+        .unwrap_or_else(|| panic!("no second line:\n{list}"));
+    let y: f32 = second.split(' ').nth(2).unwrap().parse().unwrap();
+    assert_eq!(y, 62.0, "{second}");
+}
