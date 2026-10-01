@@ -248,8 +248,9 @@ bellek büyümüyor. Mutation fuzz'ı yeşil.
 ## M5 — Artımlı render ve formlar
 
 Mimari: [p2-incremental.md](../design/p2-incremental.md), Erk Invalidation
-Core (EIC). Adımlar M5.0–M5.8; ilk adım ölçüm altyapısı, taban M2'nin tam
-yeniden hesabı.
+Core (EIC), nihai. Adımlar M5.0–M5.8; ilk adım ölçüm altyapısı, taban M2'nin
+tam yeniden hesabı. Kirlenme `erk-invalidation` crate'inde, yalnızca `erk-dom`'a
+bağımlı; düğüme bağlı veri yan tablolarda.
 
 - Mutation journal: kare içi birikim, birleştirme, iç içe transaction (M4'ün
   `Mutation` API'si üstüne)

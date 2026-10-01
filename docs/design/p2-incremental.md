@@ -8,7 +8,10 @@
   M5.
 
 Bu belge dışarıdan gelen bir M5 mimari önerisinin, **Erk Invalidation Core
-(EIC)**, iki sürümünün ve ona yapılan eleştirinin değerlendirmesidir.
+(EIC)**, üç sürümünün, onlara yapılan eleştirilerin ve uygulama tuzakları
+notunun değerlendirmesidir. **Bu, nihai hâlidir:** v3 ile birlikte tasarım
+tartışması kapandı. Bundan sonraki değişiklikler M5'in yürütme notlarına
+ölçüm ve kodla gelir.
 Önerinin adı korunur. İçeriği, Erk'in bugünkü kodu ve kullandığı
 kütüphanelerin zaten yaptığı işler üzerine yeniden kurulur.
 
@@ -51,6 +54,20 @@ tablosu ve önbelleği, şekillendirilmiş metin, display list.
 | "Style/layout/paint/a11y/signal'i birleştiren ilk modern Rust UI motoru" | **Alınmadı.** Masonry/Xilem'in geçiş bayrakları, Flutter'ın sınırları, Blink'in LayoutNG önbelleği bu alanın kanıtlanmış işleri. Erk'in iddiası §6'da, "ilk" ve "en hızlı" demeden |
 | M5.0–M5.13, on dört adım | **Sıkıştırıldı:** dokuz adım (§5). İlk adım ölçüm altyapısı; formlar, IME ve davranışı olan elemanlar M5'te kalıyor |
 
+v3'ün ve uygulama tuzakları notunun değerlendirmesi:
+
+| Öneri | Karar |
+|---|---|
+| Work Graph bir aşama zamanlayıcısı değil, veri bağımlılığı grafiği; `DependencyKind` kenarları (stil girdisi, ebeveyn/kardeş/ata stili, çocuk layout'u, ebeveyn kısıtı, kaynak) | **Sözlük olarak alındı, zamanlayıcı yine M9'da** (§3.9). Kenar türleri iki işe yarar: nedensellik zincirinin dili (§3.3) ve M9'daki değerlendirmenin başlangıcı. Stil kenarları (`SiblingStyle`, `AncestorStyle`) Stylo'nun içinde kalır; `:has()` Erk'te ayrı bir kenar türü olarak değil, Stylo'nun ipucu olarak gelir |
+| `RenderDependencyMap`: DOM düğümü → render parçaları → hasar | **Alındı** (§3.7). Örnek vaka belgeye girdi: `color` değişince yalnızca o düğümün arka plan parçası, `width` değişince düğümün ve alt ağacının bütün parçaları |
+| Nedenler düğümde değil journal'da | **Alındı;** zaten halka tampondaydı (§3.3). Açma kapama derleme profiline değil bir Cargo özelliğine (`inspect`) bağlı: geliştirme derlemelerinde açık, yayında kapalı. Yalnızca `debug_assertions`'a bağlamak, M7'nin DevTools'unu yayın derlemesinde imkânsız kılardı |
+| Biçimsel cebir: tekrar uygulama, monotonluk, yakınsama, birleşim üzerine dağılma | **Alındı, `clamp` olmadan** (§3.11). v3'ün tanımı `clamp`'i sonuca uyguluyor; boş girdide bile bit eklediği için `P(∅) = ∅` bozuluyor ve yürüyüş durmuyor. Sınırın kendi `LAYOUT_SELF`'i yayılmanın değil tohumun işi. Birleşim üzerine dağılma yayılmanın birleştirmeyle uyumunu kanıtlar; journal birleştirmesinin doğruluğunu (son DOM durumu sırayla uygulamayla aynı) ayrıca fuzz kanıtlar |
+| Beş epoch (kare + dört aşama) | **Alınmadı:** kare sayacı yeter (§2'deki karar). Taffy'nin önbelleği girdi anahtarlı; bitler ve erken kesme aşama epoch'larının yanıtladığı soruyu zaten yanıtlıyor. Ölçüm aksini gösterirse M5'in yürütme notlarına girer |
+| Döşeme boyutu parametre, uyarlanır döşeme sonra | **Alındı:** M5'te sabit varsayılan ve ayar; 16, 32, 64 ölçülüp kazanan varsayılan olur. Uyarlanır döşeme M9'da (kompozitör), önerinin dediği M6'da değil: M6 bağlamaların taşı |
+| Tuzak 1: `HashMap<NodeId, …>` yerine yan tablolar | **Alındı, kural olarak** (§3.12). Düğüme bağlı her veri `NodeId::index()` ile indekslenen düz bir vektörde, nesil denetimiyle; layout ve stil durumunun bugün durduğu gibi. Taslaktaki journal haritası da yan tabloya çevrildi (§3.2) |
+| Tuzak 2: Work Graph'ta döngü ve kilitlenme | **M9'a yazıldı.** Kenarlar yalnızca ağaç yapısından ve aşama sırasından gelirse graf yapı gereği döngüsüzdür; topolojik sıralama ve döngü testi o kapının kabulüne girer. Yüzdelik çocuklu içsel boyut gibi CSS döngüleri grafla değil, CSS'in döngüsel yüzde kurallarıyla Taffy'de çözülür |
+| Tuzak 3: EIC `erk-dom`'a giremez, `erk-dom` kirlenme bitlerini bilmez | **Alındı** (§3.12). Yeni `erk-invalidation` crate'i yalnızca `erk-dom`'a bağımlı; muhafızı kendisiyle aynı PR'da |
+
 ## 3. Mimari
 
 ### 3.1 Akış
@@ -89,8 +106,11 @@ satır içi stil) değişmez. M5 kare içi birikimi ekler:
 ```rust
 pub struct MutationJournal {
     records: Vec<Mutation>,
-    /// The last record per (node, slot), for coalescing.
-    slots: HashMap<(NodeId, Slot), usize>,
+    /// Per node (a side table indexed by `NodeId::index()`): its last record
+    /// for each slot this frame, for coalescing. Only the touched entries
+    /// are reset at the frame boundary.
+    slots: Vec<SlotRecords>,
+    touched: Vec<NodeId>,
 }
 ```
 
@@ -128,9 +148,20 @@ pub enum InvalidationCause {
 ```
 
 Bitler düğüm başına bir yan tabloda tutulur, `NodeId::index()` ile, layout ve
-stil durumunun durduğu gibi. Her tohum `(düğüm, bitler, neden)` olarak bir
-halka tampona da yazılır. Hata ayıklama derlemesinde ve DevTools açıkken
-(M7) bu tampon "neden" sorusunu yanıtlar. Yayın derlemesinde kapalıdır.
+stil durumunun durduğu gibi. Neden düğümde tutulmaz. Her tohum ve her
+yayılma adımı `(sıra, düğüm, bitler, neden)` olarak bir halka tampona
+yazılır; böylece zincir geriye doğru okunabilir:
+
+```
+Düğüm 742: STYLE + LAYOUT
+  ← ChildLayout(743)
+    ← Text (düğüm 743)
+      ← Mutation, sıra 1284
+```
+
+Kayıt `inspect` Cargo özelliğinin arkasındadır: geliştirme derlemelerinde
+ve DevTools'lu derlemelerde (M7) açık, yayında kapalı ve sıfır maliyetli.
+Sıcak yolda (120 Hz sürükleme) açık olması ölçülür.
 
 ### 3.4 Stil: Stylo'nun invalidation'ı
 
@@ -177,10 +208,25 @@ Hizalama ve satır kayması (M1.3) şekillendirme olmadan yeniden hesaplanır.
 ### 3.7 Boyama ve hasar
 
 Display list kutu başına parçalara bölünür: arka plan, satır içi arka
-planlar, glif run'ları, atom. Her parça düğümüne bağlıdır. `PAINT_SELF` o
-düğümün parçasını yeniden üretir. Hasar, değişen her parçanın eski ve yeni
-sınırlarının birleşimidir. Boyama sırası (CSS 2 Ek E) parçaların sırasıyla
-korunur.
+planlar, glif run'ları, atom. Bir DOM düğümü birden çok parça üretebilir
+(bir düğmenin arka planı, metni, odak halkası). Düğümden parçalarına
+eşleme bir yan tablodur (`Vec<SmallVec<[ChunkId; 2]>>`, `NodeId::index()`
+ile). Hasar, değişen her parçanın eski ve yeni sınırlarının birleşimidir.
+Boyama sırası (CSS 2 Ek E) parçaların sırasıyla korunur.
+
+Örnek vaka, EIC'nin ne kazandırdığını gösteren:
+
+```
+color: kırmızı → mavi            width: 100px → 120px
+  Stylo hasarı: yalnızca boyama    Stylo hasarı: layout
+  → PAINT_SELF (düğüm 42)          → LAYOUT_SELF (düğüm 42)
+  → parça 17 yeniden üretilir      → düğüm ve alt ağacı yeniden yerleşir;
+  → hasar: parça 17'nin sınırı       genişliği değişmezse (erken kesme)
+                                     atalar yerinde kalır
+                                   → 42'nin bütün parçaları ve yer değişen
+                                     torunlarınınkiler; hasar: eski ve yeni
+                                     sınırların birleşimi
+```
 
 ```rust
 pub struct DamageRegion {
@@ -213,8 +259,16 @@ M5'te genel bir iş grafiği yok. Paralellik üç yerden gelir: Stylo'nun
 paralel stil geçişi, renderer iş parçacığı ve `vello_cpu`'nun çok iş
 parçacıklı rasterı. M9'da (kompozitör) ölçüm gösterirse, bağımsız alt
 ağaçların layout'u ya da erişilebilirlik eşitlemesi için bir iş grafiği
-değerlendirilir. Önerideki `DependencyKind` (stil girdisi, layout girdisi,
-çocuk layout'u, kaynak) o değerlendirmenin başlangıcıdır.
+değerlendirilir. O değerlendirmenin girdileri bugünden yazılı:
+
+- **Kenarlar veri bağımlılığıdır, aşama sırası değil:** `LayoutInput`,
+  `PaintInput`, `A11yInput`, `ChildLayout`, `SiblingLayout`,
+  `ParentConstraint`, `Resource`. Stil kenarları Stylo'nun içinde kalır.
+- **İş birimi alt ağaçtır, düğüm değil:** 10 bin düğüm için 10 bin iş,
+  iş çalma yükünü patlatır.
+- **Döngü yapı gereği olmaz:** kenarlar yalnızca ağaçtan ve aşama
+  sırasından gelir; topolojik sıralama ve bir döngü testi kapının
+  kabulündedir.
 
 ### 3.10 Sinyaller ve bağlamalar
 
@@ -234,15 +288,43 @@ P(I, R) = ∅                              I = ∅ ise
 P(I, R) = (I ∖ R.absorb) ∪ R.promote     değilse
 ```
 
+`I` yalnızca bitlerdir; yön bitlerin içindedir (`*_SELF`, `*_SUBTREE`,
+`LAYOUT_ANCESTOR`), neden ise hesaba girmeyen bir ek veridir. `clamp` yoktur:
+bir sınırın kendi `LAYOUT_SELF`'i, yayılmanın değil sınır düğümün tohumunun
+işidir.
+
 Doğrulanacak özellikler (özellik tabanlı testlerle):
 
 - **Boş girdi:** `P(∅, R) = ∅`. Kirlenme olmadan yayılma olmaz. v1'deki
-  koşulsuz `clamp` bunu bozuyordu.
+  koşulsuz `clamp` ve v3'ün sonuca uygulanan `clamp`'i bunu bozuyordu.
+- **Tekrar uygulama:** `P(P(I, R), R) = P(I, R)`, çünkü
+  `((I ∖ A) ∪ B) ∖ A ∪ B = (I ∖ A) ∪ B`.
 - **Monotonluk:** `I₁ ⊆ I₂ ⇒ P(I₁, R) ⊆ P(I₂, R)`.
+- **Birleşim üzerine dağılma:** `P(I₁ ∪ I₂, R) = P(I₁, R) ∪ P(I₂, R)`.
+  Bir karedeki iki değişikliği ayrı ayrı yaymak, birlikte yaymakla aynı
+  bitleri verir; yayılma birleştirmeyle uyumludur. Journal birleştirmesinin
+  kendi doğruluğu (birleşmiş journal'ın son DOM durumu, kayıtların sırayla
+  uygulanmasıyla aynı) bir cebir özelliği değildir, fuzz ile doğrulanır.
 - **Yakınsama:** ata zaten bu bitleri taşıyorsa yürüyüş durur. Bir
-  değişikliğin yayılması en fazla en yakın sınıra kadar sürer, O(h).
-- **Tekrar:** aynı journal'ı iki kez uygulamak, bir kez uygulamakla aynı
-  bitleri bırakır.
+  değişikliğin yayılması en fazla en yakın emici sınıra olan mesafe `d`
+  kadar sürer, O(d).
+
+### 3.12 Kod yerleşimi
+
+- **`erk-dom` kirlenmeyi bilmez.** En alttaki katman olarak kalır, hiçbir
+  `erk-*` crate'ine bağımlı değildir.
+- **Yeni crate `erk-invalidation`:** bitler, nedenler, yayılma kuralları ve
+  cebir, yan tablolar, `MutationJournal` ve birleştirme. Yalnızca
+  `erk-dom`'a bağımlıdır (`NodeId`, `Mutation`) ve tek başına test edilir.
+  Muhafızı (`cargo tree`) kendisiyle aynı PR'da gelir.
+- **Tüketiciler:** `erk-style` (stil hasarı → bitler), layout ve display
+  list. M3'ten sonra bunları kare boyunca yöneten `erk` crate'i journal'ı
+  kare sınırında uygular.
+- **Yan tablo kuralı:** düğüme bağlı her veri `NodeId::index()` ile
+  indekslenen düz bir vektörde, nesil denetimiyle durur. Düğüm anahtarlı
+  `HashMap` yoktur: her değişiklikte hash, 10 bin düğümde önbelleği bozar.
+  Yalnızca seyrek ve düğümle ilgisiz veri (örneğin kaynak kimlikleri)
+  haritada durabilir.
 
 ## 4. Ölçüm planı
 
@@ -255,12 +337,13 @@ Taban M2'nin tam yeniden hesabı; her ölçüm onunla karşılaştırılır. Say
 | B2 | Bir karede 100 metin değişikliği | Layout geçişi sayısı (birleştirme) |
 | B3 | 1000 derinlik, en alttaki yaprağa sınıf, sınır 10 düzey yukarıda | Yayılma süresi; sınıra mesafeyle ölçeklenme |
 | B4 | `.card:has(input:checked)` aç/kapa | Yeniden stil süresi ve stillenen eleman sayısı |
-| B5 | `contain: size layout` içindeki değişiklik | Sınırın dışındaki layout işi (beklenen: yok) |
+| B5 | `contain: size layout` içindeki değişiklik (yalnızca `contain: layout` değil: o, boyutu içerikten ayırmaz) | Sınırın dışındaki layout işi (beklenen: yok) |
 | B6 | 5 bin düğümlü sayfada imleç yanıp sönmesi | Hasar alanı |
 | B7 | 120 Hz'de sürükleme | p99 kare süresi |
 | B8 | Erişilebilirlik kapalı ve açık, 10 bin düğüm | Erişilebilirlik ağacına harcanan süre |
 | B9 | B1, artımlı ve tam yeniden hesap | Oran |
 | B10 | Art arda 100 transaction | Uygulanan kare sayısı |
+| B11 | Döşeme boyutu 16, 32, 64; B6 ve B7 senaryolarında | Hasar alanı ve kare süresi; kazanan varsayılan olur |
 
 Ölçümler `measure` örneğinin yanına bir kıyas örneği olarak gelir.
 Adlandırılmış bir makinede koşar ve plana yazılır, M1.0'daki ölçümler gibi.
@@ -271,7 +354,7 @@ Adlandırılmış bir makinede koşar ve plana yazılır, M1.0'daki ölçümler 
 |---|---|---|
 | M5.0 | Ölçüm altyapısı: B1–B10 senaryoları, M2'nin tam yeniden hesabı taban | Taban sayıları plana yazılmış |
 | M5.1 | Mutation journal, birleştirme, transaction | 100 metin değişikliği bir uygulama; birleştirme kuralları testli |
-| M5.2 | Invalidation bitleri, neden tamponu, cebir testleri | Özellik testleri yeşil; bir mutasyon (koşulsuz terfi) yakalanıyor |
+| M5.2 | `erk-invalidation` crate'i: bitler, neden tamponu, cebir testleri, yan tablolar; crate'in bağımlılık muhafızı | Özellik testleri yeşil; bir mutasyon (koşulsuz terfi) yakalanıyor; muhafız kasıtlı bir bağımlılığı yakalıyor |
 | M5.3 | Kalıcı stil: Stylo snapshot'ları, yeniden stil ipuçları, hasar → bitler | Bir sınıf değişikliği yalnızca etkilenen elemanları stilliyor; `:has()` vakası çalışıyor |
 | M5.4 | Kalıcı layout: Taffy önbelleği, kirlenme yukarı, sınırlar, erken kesme | B1 ve B5 tabana göre ölçülmüş; sınır testi |
 | M5.5 | Kalıcı metin: şekillendirme önbelleği | Bir harf yalnızca kendi paragrafını şekillendiriyor |
@@ -341,3 +424,23 @@ modeline bağlar:
   (M9 ile sınır)?
 - `contain` css-support.md'ye hangi değerlerle girer (`size`, `layout`,
   `paint`) ve hangi testle?
+
+## 10. Nihai kararlar (özet)
+
+1. Tek değişiklik yolu: transaction → `MutationJournal` (birleştirme) →
+   kare sınırında uygulama. Sinyaller bağlamalarda, `Mutation` üretir.
+2. Tek invalidation sözlüğü, yön bitlerin içinde; nedenler journal'ın halka
+   tamponunda, `inspect` özelliğinin arkasında.
+3. Stil invalidation'ı Stylo'nun; layout yeniden kullanımı Taffy'nin
+   önbelleği, üstüne hesaplanmış stilden sınırlar ve erken kesme.
+4. Cebir `clamp`'siz: boş girdi, tekrar uygulama, monotonluk, birleşim
+   üzerine dağılma ve O(d) yakınsama özellik testleriyle.
+5. Kutu başına display list parçaları, düğüm → parça yan tablosu, arka
+   uçtan bağımsız hasar bölgesi; döşeme boyutu ölçümle.
+6. AccessKit ağacı etkinleşmeyle kurulur, sonra yalnızca kirliler.
+7. Genel iş grafiği yok; M9'da ölçüm kapısı, alt ağaç birimli ve yapı gereği
+   döngüsüz.
+8. `erk-invalidation` yalnızca `erk-dom`'a bağımlı; düğüme bağlı veri yan
+   tablolarda.
+9. Her ölçüm M2'nin tam yeniden hesabına karşı; her artımlı yol display
+   list eşitliğiyle tam yeniden hesaba karşı doğrulanır.

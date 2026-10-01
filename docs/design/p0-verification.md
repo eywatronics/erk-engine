@@ -54,6 +54,8 @@ yazıldığında doldurulur.
 | C örneği derlenir ve çalışır | CI: C örneği `erk-ffi`'ye bağlanıp bir sayfa açar | C-ABI'de uyumsuz bir imza | M3 | — |
 | FFI'dan panik sızmaz, eski id ve yanlış iş parçacığı hata kodu döner | `erk-ffi` testleri | `catch_unwind`'i kaldırmak; iş parçacığı denetimini kaldırmak | M3 | — |
 | `Mutation` dizileri motoru bozamaz | cargo-fuzz, eski `NodeId`'ler dahil | Nesil denetimini kaldırmak | M4 | — |
+| `erk-invalidation` yalnızca `erk-dom`'a bağımlı | CI `guards`: `cargo tree -p erk-invalidation --target all --all-features --locked` derinlik 1'de projeden yalnızca `erk-dom` | `erk-invalidation`'a `erk-style` eklemek | M5 | — |
+| Artımlı render tam yeniden hesapla aynı | Mutation fuzz'ı her diziyi artımlı ve tam yoldan geçirir, display list'ler eşit; kısmi kare ile tam kare piksel piksel aynı (altın test) | Bir parçanın hasarını üretmemek; erken kesmeyi çıktı değiştiğinde de uygulamak | M5 | — |
 | Çekirdekte JS motoru yok | CI `guards`: `cargo tree --target all --all-features --locked` ile çekirdek crate'lerin, `erk`'in ve `erk-ffi`'nin ağacında bilinen JS motorları (`boa_engine`, `rquickjs`, `quickjs`, `v8`, `deno_core`) yok; `erk-script`'in projeden tek bağımlılığı `erk` | Çekirdeğe bir JS motoru eklemek; `erk-script`'i `erk-dom`'a bağlamak; motoru bir özelliğin arkasına saklamak | M6 | — |
 
 İç bağımlılık yönü bugün `cargo tree` adımlarıyla denetleniyor; crate sayısı
