@@ -1,7 +1,8 @@
 # Erk Engine yol haritası
 
 Erk gömülü bir HTML/CSS masaüstü UI motorudur: çekirdekte JavaScript yok
-(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
+(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Hedef:
+modern, açık kaynaklı, Rust ile güçlendirilmiş yeni nesil bir Sciter. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
 tanımlar. Yön değişikliğinin gerekçesi [p1-embedded.md](../design/p1-embedded.md),
 render hattının ve DOM modelinin ayrıntısı
 [p0-architecture.md](../design/p0-architecture.md).
@@ -209,7 +210,8 @@ yeniden hesaplamanın kare süresi kaydedilmiş.
 ## M3 — Kütüphane
 
 - `erk`: idiomatik Rust API'si (`App`, düğüm tutamakları, olay abonelikleri)
-- `erk-ffi`: sözleşmedeki C-ABI; `erk.h` cbindgen ile üretilir. Adıyla
+- `erk-ffi`: sözleşmedeki C-ABI, paylaşımlı kütüphane olarak (`erk.dll`,
+  `liberk.so`, `liberk.dylib`); `erk.h` cbindgen ile üretilir. Adıyla
   listelenmiş `unsafe` istisnası (`#[unsafe(no_mangle)]`)
 - İş parçacığı modeli, callback ömrü ve hata kodları sözleşmedeki gibi
 - Kaynak sağlayıcı callback'i; demo kabuk `erk`'in ilk kullanıcısı olur
@@ -299,7 +301,8 @@ Sıra: önce Python (ilk bağlama kararı), sonra Go, sonra JavaScript.
 çalışıyor. Sayaç ve TodoMVC JavaScript ile yazılmış halde aynı host
 kabuğunda çalışıyor; silinmiş bir düğüme dokunan betik istisna alıyor,
 süreç çökmüyor. JS özelliği kapalı derlemenin bağımlılık ağacında JS motoru
-yok.
+yok. Python örneğinin penceresinin özel belleği M1.0'daki yöntemle ölçülüp
+yayımlanmış; yorumlayıcının kendi payı ayrı yazılmış.
 
 ---
 
@@ -355,6 +358,10 @@ kapsam dışı, p1-embedded §4); ikili boyutu, bellek ve açılış süresi ayn
 
 - CSS animasyonları ve geçişleri (zaman host'un `now_ns`'inden)
 - Kaydırma katmanı başına tile cache, kompozitör iş parçacığında kaydırma
+
+**Açık soru (M5 sonrası):** geçişler masaüstü arayüzünde temel bir beklenti
+(hover'da renk geçişi). M5'in artımlı render ölçümü kare bütçesinin yettiğini
+gösterirse renk ve opaklık geçişleri M9'dan öne alınır.
 
 **Kabul:** Adlandırılmış bir sayfa kümesinde, adlandırılmış bir donanımda p95
 kare süresi hedefleri (sayılar bu taşın planında) tutuyor.
