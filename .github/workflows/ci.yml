@@ -87,6 +87,13 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash .github/scripts/check-reference-expectations.sh "$BASE"
 
+      # erk-wpt fails if a WPT result moves in either direction; this keeps
+      # a regression from being written into the baseline without a reason.
+      - name: WPT results only go down with a written reason
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/scripts/check-wpt-expectations.sh "$BASE"
+
       # unsafe_code = "forbid" lives in [workspace.lints]; a crate that drops
       # `[lints] workspace = true` silently opts out of it. The named
       # exceptions must still deny unsafe code, and forbid unsafe operations
@@ -203,3 +210,39 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash .github/scripts/check-size-budget.sh target/release/erk "$BASE"
+
+  # The Web Platform Tests reftests of tests/wpt/dirs.txt, at the commit in
+  # tests/wpt/WPT_COMMIT, against the baseline in tests/wpt/expectations.txt.
+  # Any change fails: a regression must be fixed, an improvement recorded.
+  wpt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned WPT commit and directories
+        id: pin
+        run: |
+          echo "commit=$(tr -d '[:space:]' < tests/wpt/WPT_COMMIT)" >> "$GITHUB_OUTPUT"
+          {
+            echo 'dirs<<END_OF_DIRS'
+            sed -e '/^#/d' -e '/^[[:space:]]*$/d' -e 's/^support:[[:space:]]*//' tests/wpt/dirs.txt
+            echo 'END_OF_DIRS'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the pinned WPT directories
+        uses: actions/checkout@v4
+        with:
+          repository: web-platform-tests/wpt
+          ref: ${{ steps.pin.outputs.commit }}
+          path: target/wpt
+          sparse-checkout: ${{ steps.pin.outputs.dirs }}
+          persist-credentials: false
+
+      - name: Install Rust from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: WPT reftests match the baseline
+        run: cargo run --release --locked -p erk-wpt -- check --wpt target/wpt
