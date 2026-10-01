@@ -31,6 +31,9 @@ gidiyor. Ay tahmini bu gerçeği saklamaktan başka bir işe yaramaz.
 | **M7** | Geliştirici araçları | Yeni |
 | **M8** | Ürünleşme | Yeni |
 | **M9** | Kompozitör ve performans | Yeni |
+| **M10** | Surface: host'un GPU çizimi | Yeni |
+| **M11** | SVG ve medya | Yeni |
+| **M12** | Bileşenler ve ekosistem | Yeni |
 
 ### Yön değişikliği (2026-09-30)
 
@@ -123,7 +126,7 @@ kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla geli
 | M1.0 | Ölçüm ve M0 eksikleri: yayın ikilisinin boyutu, 1000 düğümlü bir sayfada boştaki bellek, ilk kare süresi (bütçe buradan konur); blok ve metin karışık ebeveynde düşen metin (anonim kutular). Span stillerinin düzleşmesi IFC'nin kendisi olduğu için M1.3'te | Bitti |
 | M1.1 | Tek satır metin: Parley ile şekillenen bir Taffy yaprağı | M0'da var (`a_paragraph_is_one_line_high`) |
 | M1.2 | Satır kırma: daralan kutuda metin alt satıra iner | M0'da var (`narrow_width_breaks_into_more_lines`) |
-| M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Yeni |
+| M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Başladı: stil aralıkları var |
 | M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Yeni |
 | M1.5 | Flexbox doğrulaması (Taffy) | Yeni |
 | M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Yeni |
@@ -243,14 +246,18 @@ girişi çalışıyor. Bir ekran okuyucu form etiketlerini okuyor.
 
 ---
 
-## M6 — Python
+## M6 — Python ve Go
 
 - `erk-python`: C-ABI üstünde cffi, maturin ile platform wheel'leri
 - Nesne yönelimli sarmalayıcı (`App`, `Element`, `on("click", ...)`)
-- Go ve diğer diller topluluğa açık; C başlığı ve örnekler yeterli
+- `erk-go`: C-ABI üstünde cgo sarmalayıcısı. Seçici tabanlı kolaylıklar
+  (`OnClick("send", ...)`) düşük seviye `NodeId` API'sinin üstünde durur,
+  onun yerini almaz
+- Diğer diller topluluğa açık; C başlığı ve örnekler yeterli
 
 **Kabul:** `pip install erk` Windows ve Linux'ta çalışıyor; README'deki Python
-örneği bir pencere açıp bir tıklamaya yanıt veriyor.
+örneği bir pencere açıp bir tıklamaya yanıt veriyor. Aynı örnek Go ile de
+çalışıyor.
 
 ---
 
@@ -288,9 +295,16 @@ gösteriyor. DevTools'un kendisi de Erk ile çiziliyor.
 - Varlık gömme: HTML, CSS ve görüntüler ikiliye gömülür, `memory://` üzerinden
   okunur
 - Paketleme (Windows, Linux, macOS) ve kod imzalama rehberi
-- C-ABI sürüm ve kararlılık politikası
+- C-ABI sürüm ve kararlılık politikası (ABI 1.0)
+- `erk new` şablonları işletim sistemi entegrasyonunu **host kodu** olarak
+  getirir: menü, sistem tepsisi, dosya diyalogları, bildirimler, genel kısayol
+  tuşları, otomatik güncelleme (Rust'ta `muda`, `tray-icon`, `rfd` gibi
+  crate'lerle). Bunların hiçbiri çekirdeğe girmez
 
 **Kabul:** `erk build` dış dosyasız tek parça bir `.exe` ve AppImage üretiyor.
+Gerçek bir uygulama kıyası: Nexus Mail'in bir ekranı hem Wails + React hem
+Go + Erk ile yazılmış; ikili boyutu, bellek ve açılış süresi aynı makinede
+ölçülüp yayımlanmış.
 
 ---
 
@@ -304,6 +318,55 @@ kare süresi hedefleri (sayılar bu taşın planında) tutuyor.
 
 ---
 
+## M10 — Surface: host'un GPU çizimi
+
+`<canvas>` ve WebGL JavaScript'e bağlı; Erk'teki karşılığı, host'un belgenin
+içindeki bir bölgeye kendi GPU çizimini yapabilmesi (grafikler, harita,
+3B görünüm).
+
+- Host bir düğümü surface olarak kaydeder (`erk_surface_create(node)`);
+  işaretleme için HTML özniteliği değil, API kullanılır
+- **Çizim sahipliği tek elde:** aynı pencere yüzeyine iki ayrı çizici
+  yazmaz. Erk kareyi oluştururken surface bölgesi için host'un çizim
+  callback'ini çağırır (paylaşılan wgpu cihazı, host'un dokusu) ya da
+  host'un verdiği dokuyu bölgeye yerleştirir. Seçim M2'nin GPU yolu ve M3'ün
+  API'si oturduktan sonra ölçülerek yapılır; sözleşmedeki taslak p1-contract
+  §10.2
+- Bölgenin konumu ve boyutu layout'tan gelir, kaydırma ve kırpma Erk'indir
+
+**Kabul:** Bir uygulama, Erk ile çizilen araç çubuğu ve kenar çubuğunun
+arasında wgpu ile kendi çizdiği bir grafiği gösteriyor; pencere
+boyutlanınca ve sayfa kayınca grafik doğru yerde kalıyor.
+
+---
+
+## M11 — SVG ve medya
+
+- SVG: resvg ile ayrıştırma, çizim vello'ya (resvg'nin çizim ağacı üzerinden)
+- `<video>`: işletim sisteminin çözücüleriyle, kareler bir surface dokusuna
+- Ses Erk'in değil host'un işi
+
+**Kabul:** Simge seti SVG olan bir ekran doğru çiziliyor (Chrome referans
+testi); bir video bir surface içinde oynuyor.
+
+---
+
+## M12 — Bileşenler ve ekosistem
+
+JavaScript olmadığı için React, Vue ya da Svelte bileşenleri çalışmaz. Yerine:
+
+- Yerel kontroller motorun içinde (M5'teki form kontrolleri; `<dialog>`,
+  `<details>` gibi davranışı olan HTML elemanları)
+- HTML ve CSS kalıpları ve Tailwind gibi yalnızca CSS üreten araçlar (CSS
+  değişkenleri ve seçicileri Stylo'nun işi)
+- Karmaşık bileşenler (tarih seçici, zengin metin düzenleyici) host tarafında,
+  Erk'in API'si üzerine sarmalayıcı kütüphaneler olarak
+
+**Kabul:** Belgelenmiş bir bileşen kalıpları kataloğu ve her biri için Chrome
+referans sayfası.
+
+---
+
 ## Bilerek kapsam dışı
 
 | Ne | Neden |
@@ -313,5 +376,6 @@ kare süresi hedefleri (sayılar bu taşın planında) tutuyor.
 | Kum havuzu, çoklu süreç, site izolasyonu | İçerik host'un kendisi; mesajlar serileştirilebilir kaldığı için ihtiyaç olursa sonradan eklenebilir |
 | Float, clear, tablo düzeni, multi-column, print/paged media | Masaüstü UI'ı flex ile kurulur; ayrıntı css-support.md'de |
 | WebExtensions, medya ve DRM, WebRTC, WebXR | Tarayıcı işleri |
-| Mobil platformlar | Hedef masaüstü |
+| Mobil platformlar | Hedef masaüstü; winit ve vello mobili destekliyor ama dokunma, yazılım klavyesi ve yaşam döngüsü ayrı bir iş, masaüstü oturduktan sonra yeniden değerlendirilir |
+| İşletim sistemi entegrasyonu çekirdekte (tepsi, diyalog, bildirim, kısayol, güncelleme) | Host'un işi; `erk new` şablonları hazır host kodu olarak getirir (M8) |
 | Kendi font ayrıştırıcı, shaper, görüntü çözücü | skrifa, HarfRust, png, jpeg çözücüleri var |

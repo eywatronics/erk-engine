@@ -106,6 +106,28 @@ değerlendirmesi:
 | JSON-RPC / WebSocket DevTools protokolü | Ertelendi: önce süreç içi ikinci pencere. Motor varsayılan olarak port dinlemez; uzak DevTools yalnızca açıkça etkinleştirilirse, yerel bir kanaldan |
 | DevTools'u Erk ile yazmak | Alındı: M7'nin kabul ölçütü, motoru kendi aracıyla sınar |
 
+Ürün yol haritası önerilerinin (M0–M21 listesi ve düzeltmeleri)
+değerlendirmesi:
+
+| Öneri | Karar |
+|---|---|
+| Çekirdek yalnızca UI; tepsi, diyalog, bildirim, kısayol, güncelleme host'ta | Alındı: ilke; `erk new` şablonları bunları host kodu olarak getirir (M8) |
+| Surface API (host'un GPU çizimi) | Alındı (M10), düzeltmeyle: bir yüzeyin tek çizicisi Erk; host bölgeye callback ya da dokuyla çizer (p1-contract §8.2). İşaretleme özniteliği değil API |
+| Başka `ErkApp`'in `NodeId`'si | Gerçek bir açık; ilk çözüm (neslin üst 8 biti uygulama etiketi) sonra değiştirildi: iç temsil 32 bit indeks + 32 bit nesil olarak kalır, dış id uygulamaya özel bir anahtarla karıştırılır (p1-contract §2). Etiket düzeni nesli 24 bite indirip uzun süre açık kalan uygulamada sızıntıya, 256 etiketin yeniden kullanımına ve okunabilir bitlere yol açıyordu. Karıştırma güvenlik sınırı değil, ad alanı ayrımı; yakalama olasılıksal |
+| ABI'yi M0.5'te dondurmamak | Alındı: ABI v0.1; 1.0'a (M8) kadar kırıcı değişiklik hakkı saklı |
+| Kirlenme bitlerini ayırmak, stil geçersizleştirmesinin CSS bağımlılıklarına bakması | Alındı (M5): stil, layout, boyama ve metin ayrı; `.parent:hover .child` gibi bağımlılıkları Stylo'nun yeniden stil ipuçları ve snapshot'ları taşır |
+| Test stratejisi | Alındı: [p1-testing.md](p1-testing.md). Ayrı bir taş (M0.6) yerine sürekli altyapı; ilk yeni parçası Chrome'la geometri karşılaştırması |
+| Chrome test kümesini büyütmek, geometri farkını tutmak | Alındı ve uygulandı: her referans sayfası için kutuların Chrome'la karşılaştırılması |
+| "Chrome ile piksel farkı sıfır" varsayımı | Düzeltildi: kutular ve arka planlar örtüşüyor, metin kenar yumuşatması ve hinting farklı; metinle dolu sayfaların içerik skoru bu yüzden ~%48. Kesin ölçü geometri karşılaştırması |
+| Go bağlaması, Nexus Mail kıyası | Alındı: Go M6'da; Wails + React ile Go + Erk kıyası M8'in kabulünde |
+| SVG, video | Alındı (M11): resvg → vello; video karesi surface dokusuna; ses host'ta |
+| Bileşenler, Tailwind | Alındı (M12): yerel kontroller motorda, kalıplar HTML/CSS ile, karmaşık bileşenler host kütüphanesi; Tailwind CSS değişkenleri ister (Stylo'da var, testli) |
+| Grid'i float ve tablodan önce | Zaten öyle: grid "Later", float ve tablo "Not planned" |
+| Animasyon veri modelini erken hazırlamak | Zaten var: Stylo `transition`, `animation`, `@keyframes`'i ayrıştırıyor; çalışma zamanı M9 |
+| Erişilebilirlik modelini erken düşünmek | Alındı: rol, ad, değer ve durum özniteliklerden türetilir (p1-contract §6.1); türetme kuralları M3'teki denetim sorgularıyla birlikte yazılır, işletim sistemi bağlantısı M5 |
+| M0–M21 diye yeniden numaralamak | Alınmadı: numaraları değiştirmek her belgeyi ve commit geçmişini bozar; yeni işler M10–M12 olarak eklendi |
+| "Özelliklerin %85'i JS'siz yapılabilir" | Alınmadı: ölçülebilir değil |
+
 Tarayıcı hedefi için daha önce gelen öneriler (M4'te JS/DOM-GC sınır tablosu,
 M6'da Fetch ve `cookie_store`) yeni hedefte konu dışı. M1 için olanların
 doğrulanmış hali geçerli:

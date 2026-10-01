@@ -234,3 +234,50 @@ fn whitespace_between_blocks_makes_no_anonymous_box() {
     let div = all(&doc, &local_name!("div"))[0];
     assert!(layouts.anonymous(div).is_empty());
 }
+
+/// The text of each glyph run of `id`'s paragraph, with whether it was
+/// shaped with the bold face and its colour.
+fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, [u8; 4])> {
+    let shaped = layouts.text(id).expect("a paragraph");
+    let mut runs = Vec::new();
+    for line in shaped.layout.lines() {
+        let ranges = crate::text::glyph_run_ranges(&line);
+        let glyph_runs = line.items().filter_map(|item| match item {
+            parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+            parley::PositionedLayoutItem::InlineBox(_) => None,
+        });
+        for (run, range) in glyph_runs.zip(ranges) {
+            let bold = crate::text::is_bold_face(run.run().font());
+            runs.push((shaped.text[range].to_owned(), bold, run.style().brush.0));
+        }
+    }
+    runs
+}
+
+#[test]
+fn an_inline_element_keeps_its_own_weight() {
+    let (doc, layouts) = lay_out("<p>a <b>kalın</b> c</p>");
+    let p = all(&doc, &local_name!("p"))[0];
+    assert_eq!(layouts.text(p).unwrap().text, "a kalın c");
+    let runs = runs(&layouts, p);
+    let bold: Vec<&str> = runs
+        .iter()
+        .filter(|(_, bold, _)| *bold)
+        .map(|(text, ..)| text.as_str())
+        .collect();
+    // The collapsed spaces belong to the regular text around the <b>.
+    assert_eq!(bold, ["kalın"]);
+}
+
+#[test]
+fn an_inline_element_keeps_its_own_colour() {
+    let (doc, layouts) =
+        lay_out(r#"<p style="color: black">x<span style="color: red">kırmızı</span>y</p>"#);
+    let p = all(&doc, &local_name!("p"))[0];
+    let red: Vec<String> = runs(&layouts, p)
+        .into_iter()
+        .filter(|(.., colour)| *colour == [255, 0, 0, 255])
+        .map(|(text, ..)| text)
+        .collect();
+    assert_eq!(red, ["kırmızı"]);
+}

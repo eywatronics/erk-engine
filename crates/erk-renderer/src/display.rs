@@ -217,10 +217,12 @@ fn glyph_runs(
 ) -> Vec<DisplayItem> {
     let mut runs = Vec::new();
     for line in layout.lines() {
+        let mut ranges = crate::text::glyph_run_ranges(&line).into_iter();
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
             };
+            let range = ranges.next().unwrap_or_default();
             let glyphs = run
                 .positioned_glyphs()
                 .map(|glyph| PositionedGlyph {
@@ -229,7 +231,6 @@ fn glyph_runs(
                     y: origin.1 + glyph.y,
                 })
                 .collect();
-            let range = run.run().text_range();
             runs.push(DisplayItem::Glyphs(GlyphRun {
                 font: run.run().font().clone(),
                 size: run.run().font_size(),

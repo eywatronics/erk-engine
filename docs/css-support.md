@@ -27,6 +27,7 @@ does not lay out or paint is not supported.
 |---|---|---|
 | Type, class and id selectors | Supported | `erk-style/tests/computed.rs`: `class_and_id_selectors_match` |
 | `<style>` blocks, `style` attribute, inheritance | Supported | `author_stylesheet_applies`, `style_attribute_applies`, `inherited_properties_flow_down` |
+| Custom properties (`--name`, `var()`), which utility CSS such as Tailwind relies on | Supported | `css_custom_properties_resolve` |
 | User agent stylesheet (headings, block elements) | Supported | `user_agent_stylesheet_makes_headings_blocks_with_larger_text` |
 | `:hover`, `:active`, `:focus` | M2 | Element state from the input pipeline |
 | `:focus-visible`, form pseudo-classes (`:checked`, `:disabled`) | M5 | With form controls |
@@ -41,7 +42,8 @@ does not lay out or paint is not supported.
 | `calc()` lengths | Supported | `calc_widths_resolve_against_the_container` |
 | `ex`, `ch` units | Supported | `ex_and_ch_come_from_the_embedded_font` |
 | `display: none`, `visibility: hidden` | Supported | `display_none_generates_no_box`, `visibility_hidden_paints_neither_background_nor_text` |
-| Inline formatting context: spans across lines, mixed styles, inline images | M1 | Today a paragraph is laid out as one run of text in one style |
+| Inline elements keep their own colour, weight, size and line height within a paragraph | Supported | `an_inline_element_keeps_its_own_weight`, `an_inline_element_keeps_its_own_colour` |
+| Inline boxes: borders, padding and backgrounds on inline elements, inline images, `inline-block` | M1 | |
 | Flexbox | M1 | Laid out by Taffy today, not yet verified |
 | `position: absolute`, `relative`, `fixed` | M1 | |
 | `overflow: auto`, `scroll`, scroll containers | M2 | |

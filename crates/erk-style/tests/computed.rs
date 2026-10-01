@@ -124,3 +124,13 @@ fn elements_inside_display_none_are_not_styled() {
     assert!(styles.computed(find(&doc, "div")).is_some());
     assert!(styles.computed(find(&doc, "p")).is_none());
 }
+
+#[test]
+fn css_custom_properties_resolve() {
+    // Utility-first CSS such as Tailwind leans on custom properties.
+    let (doc, styles) = style(
+        "<style>:root { --vurgu: rgb(0, 51, 255) } p { color: var(--vurgu) }</style><p>x</p>",
+    );
+    let [r, g, b] = rgb(&computed(&doc, &styles, "p"));
+    assert_eq!([r, g, b].map(|c| (c * 255.0).round() as u8), [0, 51, 255]);
+}

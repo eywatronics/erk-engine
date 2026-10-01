@@ -23,10 +23,11 @@ forbid() {
 # 1. The renderer's public surface is exactly this. Every module is private,
 #    so an item public elsewhere is reachable only through lib.rs. A change
 #    here is a design change: update this list in the same pull request.
-expected='pub use messages::{Frame, FromRenderer, ToRenderer};
+expected='pub use messages::{ElementBox, Frame, FromRenderer, ToRenderer};
 pub use thread::spawn;
 pub fn to_png(&self) -> Option<Vec<u8>> {
-pub fn render_html(html: &str, width: u16, height: u16) -> Frame {'
+pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
+pub fn element_boxes(html: &str, width: u16, height: u16) -> Vec<ElementBox> {'
 actual=$(grep -E '^[[:space:]]*pub\b' "$src/lib.rs" | sed 's/^[[:space:]]*//')
 if [ "$actual" != "$expected" ]; then
   echo "erk-renderer's public surface is not the reviewed one; lib.rs has:"

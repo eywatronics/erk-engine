@@ -123,7 +123,7 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
   kurulumu, `build_inline_layout_into`) ve `layout/inline.rs`
   (`compute_inline_layout`) dosyaları okunur; Erk'in yan tablosuna ve
   `CalcTable`'ına uyarlama planı yürütme notlarına yazılır.
-- [ ] **Step 2: Stil aralıkları.** Bir bloğun inline içeriği tek bir Parley
+- [x] **Step 2: Stil aralıkları.** Bir bloğun inline içeriği tek bir Parley
   layout'u olur; her inline elemanın stili (renk, kalınlık, italik, boyut,
   font ailesi, `line-height`) kendi metin aralığına uygulanır. Test: `<p>a
   <b>b</b> c</p>`'de "b" kalın yüzle, "a" ve "c" normal.
@@ -185,6 +185,20 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1 kabulü
 
+**Chrome uyumluluk kapısı.** M1'in sorusu "Chrome'la aynı PNG'yi üretebiliyor
+muyuz" değil, "Chrome referansına karşı kaç HTML/CSS davranışını belirleyici
+olarak aynı üretiyoruz". css-support.md'de "Supported" olan her özellik için
+bir referans sayfası; her sayfada Chrome PNG'si ve Chrome geometrisi. CI:
+
+- geometri uyuşmazlığı (1 CSS pikselinden fazla) → kırmızı;
+- piksel skoru beklentisinden farklı → kırmızı (iki yönlü mandal; metin kenar
+  yumuşatması yüzünden skor %100 değil, beklenti sayfaya özgü);
+- bozuk girdide panik → kırmızı (sağlamlık testi ve fuzz, M1.3).
+
+M1'de yeni mimari özellik eklenmez; iş statik UI kapsamı ve bu kapının
+genişlemesidir.
+
+
 - [ ] Ayarlar ekranı maketi (`examples/settings.html`) Chrome referans
   testinde skorlu.
 - [ ] `css/CSS2/normal-flow`, `css/css-flexbox`, `css/css-position`,
@@ -239,9 +253,21 @@ Okuma:
   Ölçüm, pencere başlığı görünene kadar ve sürecin hâlâ açık olduğu
   denetlenerek tekrarlandı.
 
-**Boyut bütçesi:** Linux ikilisinin boyutu bu makinede ölçülemiyor. CI'daki
-`size` job'ı ilk çalışmada ölçer; bütçe o sayının %10 üstüne aynı PR'da
-indirilir. O zamana kadar dosyada açıkça "geçici" işaretli bir tavan var.
+**Boyut bütçesi:** Linux ikilisinin boyutu bu makinede ölçülemiyordu;
+dosyaya "geçici" işaretli 20 MB'lık bir tavan kondu. PR #7'deki ilk `size`
+çalışması Linux ikilisini **22.023.288 bayt** ölçtü ve tavanı aştı: tahmin
+yanlıştı. Linux ikilisi Windows'takinden (14,9 MB) büyük; ELF'te kalan
+sembol tabloları ve winit'in X11/Wayland kodu olası nedenler, ayrıştırılmadı.
+Bütçe ölçümün %10 üstüne, **24.225.617 bayta** kondu.
+
+Bu yükseltme, muhafızın kendi hatasını da buldu. Betik gerekçeyi dosyadaki
+ilk `# raised:` eşleşmesinden okuyordu; bu, açıklama başlığındaki örnek
+satırdı. Yeni ve taban dosyada aynı örnek okununca her yükseltme "eski
+gerekçe" sayılıp reddediliyordu, yani muhafız hiçbir yükseltmeye izin
+vermiyordu. Gerekçe artık yalnızca bütçe satırından okunuyor. Denenen
+durumlar: gerekçeli yükseltme (0), gerekçesiz (1), boş gerekçe (1), ikilinin
+altına düşürme (1), gerekçesiz düşürme (0), taban gerekçesini yeniden
+kullanan yükseltme (1).
 
 **Anonim kutular:** karışık bir ebeveyndeki her inline dizi, arena
 kapasitesinin üstündeki bir indekste anonim bir paragraf kutusu olur; DOM'a
@@ -262,5 +288,30 @@ yakalandı. 154, beş sayfanın beşini de bayt bayt aynı çizdi; yalnızca
   olmayan bir test dosyası → üçü de 1 ile çıktı; geri alınınca 0.
 - `erk-renderer`'a `winit` bağımlılığı → adım 1 ile çıktı; geri alınınca 0.
 - Boyut bütçesi: tavanın üstündeki, altındaki, bütçesiz dosya ve eksik
-  ikili sahte bir dosyayla denendi (1, 0, 1, 1). Bütçe yükseltmenin
-  gerekçe istediği CI'daki ilk gerçek ölçümden sonra denenir.
+  ikili sahte bir dosyayla denendi (1, 0, 1, 1); yükseltme ve düşürme
+  kuralları yukarıda.
+
+### M1.3 yürütme notları (2026-09-30, sürüyor)
+
+**Step 2 tamam, stil aralıkları.** Paragraf artık tek bir metin ve ondan
+farklı stildeki aralıklar. Her metin düğümü içinde durduğu elemanın stilini
+alır; boyut, kalınlık, renk ya da satır yüksekliği bloktan farklı olan her
+aralık Parley'ye `push(özellik, aralık)` ile verilir. Boşluk parçalar
+boyunca çöker ve çöken boşluk önceki parçaya aittir (`a <b>b</b>`'deki boşluk
+kalın değil).
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Stil aralıkları Blitz'in `construct.rs`'inden uyarlanacak | Önce Erk'in kendi yapısıyla yazıldı: aralıklar metin düğümlerinden doğrudan çıkıyor, Blitz'in inline ağacı henüz gerekmedi. Blitz'e inline kutular (Step 3) için dönülecek; Step 1 o işin başında |
+| — | Parley glyph run'ları stile göre bölüyor, ama renk değişimi şekillendirme run'ını bölmüyor ve dışarı açılan metin aralığı bütün run'ınki. Her glyph run'ın kendi aralığı, run'ın kümeleri sırayla tüketilerek çıkarılıyor (`glyph_run_ranges`). Display list dökümü de her glyph run için bütün run'ın metnini yazıyordu; o da düzeldi |
+| — | İtalik yok: gömülü fontlarda italik yüz yok, sentetik eğim testlerde belirleyiciliği bozmasın diye bilerek uygulanmadı; sistem fontlarıyla (M1.7) gelir |
+
+Mutasyonlar: aralıklar hiç uygulanmayınca iki test de kırmızı; çöken boşluk
+sonraki parçaya verilince kalınlık testi kırmızı.
+
+Referans sayfaları: `mixed-content` %97,95'ten %98,33'e çıktı (kalın kelime
+artık kalın). Yeni `inline-styles` %48,60: renkler, kalınlıklar, boyutlar ve
+satır sonları Chrome'la örtüşüyor; skor, metinle dolu sayfalarda glif
+kenarlarındaki kenar yumuşatma farkı yüzünden `paragraphs` gibi düşük.
+
+1000 elemanlı sayfanın süresi değişmedi (sıcak medyan 68,5 ms).

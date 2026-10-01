@@ -61,3 +61,17 @@ impl Frame {
         &self.display_list
     }
 }
+
+/// The border box of one element, in CSS pixels relative to the viewport.
+/// A forerunner of the inspection queries of M3 (p1-contract §8.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElementBox {
+    /// Position among the body and its descendant elements, in document
+    /// order, the body being 0. Elements without a box still count.
+    pub index: usize,
+    pub tag: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
