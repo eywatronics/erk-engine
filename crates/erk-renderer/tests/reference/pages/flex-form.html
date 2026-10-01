@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Ayarlar ekranı</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .pencere { display: flex; height: 600px; }
+  .kenar { display: flex; flex-direction: column; gap: 4px; width: 180px; padding: 16px 12px; background: #f1f5f9; }
+  .menu { padding: 6px 10px; }
+  .secili { background: #dbeafe; color: #1d4ed8; }
+  .icerik { display: flex; flex-direction: column; flex: 1; padding: 20px 28px; gap: 14px; }
+  .baslik { display: flex; justify-content: space-between; align-items: center; }
+  .baslik h1 { margin: 0; font-size: 22px; }
+  .durum { padding: 4px 10px; background: #dcfce7; color: #166534; }
+  .satir { display: flex; align-items: center; gap: 12px; }
+  .etiket { width: 140px; text-align: right; }
+  .alan { flex: 1; height: 30px; background: #e2e8f0; }
+  .kisa { flex: 0 0 90px; height: 30px; background: #e2e8f0; }
+  .anahtar { width: 44px; height: 24px; background: #22c55e; }
+  .etiketler { display: flex; flex-wrap: wrap; gap: 8px; width: 360px; }
+  .etiketler span { padding: 3px 10px; background: #fef3c7; }
+  .alt { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; }
+  .dugme { padding: 8px 18px; background: #e2e8f0; }
+  .birincil { background: #1d4ed8; color: #ffffff; order: 2; }
+</style>
+</head>
+<body>
+  <div class="pencere">
+    <div class="kenar">
+      <div class="menu secili">Genel</div>
+      <div class="menu">Hesap</div>
+      <div class="menu">Bildirimler</div>
+      <div class="menu">Gizlilik</div>
+    </div>
+    <div class="icerik">
+      <div class="baslik"><h1>Genel ayarlar</h1><span class="durum">Kaydedildi</span></div>
+      <div class="satir"><div class="etiket">Görünen ad</div><div class="alan"></div></div>
+      <div class="satir"><div class="etiket">Dil</div><div class="kisa"></div><div>Türkçe</div></div>
+      <div class="satir"><div class="etiket">Koyu tema</div><div class="anahtar"></div></div>
+      <div class="satir"><div class="etiket">İlgi alanları</div>
+        <div class="etiketler"><span>tasarım</span><span>yazılım</span><span>müzik</span><span>fotoğraf</span><span>seyahat</span><span>bilim</span></div>
+      </div>
+      <div class="alt"><span class="dugme birincil">Kaydet</span><span class="dugme">Vazgeç</span></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -3,9 +3,11 @@
 # exactly these at the commit in WPT_COMMIT.
 css/CSS2/normal-flow
 css/css-position
+css/css-flexbox
 support: css/reference
 support: css/CSS2/reference
 support: css/CSS2/support
 support: css/CSS2/positioning
 support: css/CSS2/tables/reference
 support: fonts
+support: common
