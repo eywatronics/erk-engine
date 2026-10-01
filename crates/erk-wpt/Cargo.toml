@@ -1,0 +1,16 @@
+[package]
+name = "erk-wpt"
+description = "Runs the Web Platform Tests reftests through Erk's renderer and checks the results against a recorded baseline."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+erk-renderer = { path = "../erk-renderer" }
+
+[lints]
+workspace = true

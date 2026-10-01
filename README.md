@@ -149,6 +149,12 @@ Measured, not claimed. Windows 11, Intel i7-10750H, CPU rendering
 | Idle window, private memory | 12.6 MB (small page), 13.0 MB (1000 elements) |
 | 1000-element page, full render | first call ~77 ms, then a median of ~53 ms |
 
+The [Web Platform Tests](https://web-platform-tests.org/) reftests run in
+CI against a recorded baseline: 42.8 % of `css/CSS2/normal-flow` (319 of
+746) and 16.3 % of `css/css-position` (41 of 251) pass today; every failing
+test uses something Erk does not support yet (external stylesheets, images,
+borders) or never will (tables, floats, script).
+
 The Linux release binary is held under a size budget in CI. Similarity to
 Chrome 154 on the reference pages: every element box matches within 1 CSS
 pixel on all nine pages, and pixel scores range from 48 % on text-heavy

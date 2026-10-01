@@ -5,6 +5,7 @@ members = [
     "crates/erk-renderer", # layout, display list, paint; the renderer thread
     "crates/erk-dom",      # arena DOM and HTML parsing
     "crates/erk-style",    # Stylo adapter (the one crate that may declare unsafe fns)
+    "crates/erk-wpt",      # Web Platform Tests reftest runner (a tool, not part of the engine)
 ]
 
 [workspace.package]

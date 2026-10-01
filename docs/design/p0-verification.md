@@ -45,7 +45,7 @@ yazıldığında doldurulur.
 | Çekirdekte dosya, ağ, süreç, ortam ve saat yok | CI `guards` (`check-core-io.sh`): `erk-dom`, `erk-style`, `erk-renderer` `src`'sinde `std::fs`, `std::net`, `std::process`, `std::env`, `File::`, `TcpStream`, `Command::new`, `Instant::now`, `SystemTime` ve benzerleri yok; kaynak, ortam ve zaman host'tan gelir (p1-embedded §2.4) | `std::fs::read_to_string`; `use std::{fs}` + `fs::read`; `Instant::now()` | M0.5 öncesi | 2026-09-30, yakaladı |
 | `erk-renderer` pencere katmanını bilmez | CI `guards`: `cargo tree -p erk-renderer --target all --all-features` çıktısında `winit` ve `softbuffer` yok (p1-contract §11) | `erk-renderer`'a `winit` eklemek | M1.0 | 2026-09-30, yakaladı |
 | Lisans izin listesi | `cargo deny check licenses` (MPL-2.0 ve OFL-1.1 dahil) | GPL lisanslı bir geliştirme bağımlılığı | M1 | — |
-| WPT gerilemesi yok (CSS dizinleri) | wptrunner "erk" ürünü + beklenti dosyaları; taban çizgisinin altı PR'ı kırar | Geçen bir reftest'i bozan değişiklik | M1 | — |
+| WPT sonuçları değişmez, düşüş gerekçe ister (CSS dizinleri) | CI `wpt` job'ı: `erk-wpt check`, sabit WPT commit'inde `tests/wpt/dirs.txt` dizinlerinin reftest'lerini çizip `tests/wpt/expectations.txt` ile karşılaştırır, iki yönde de kırılır. CI `guards` (`check-wpt-expectations.sh`): PASS'ten düşen satırda `# lowered:` gerekçesi; WPT commit'i aynıyken geçen bir test silinemez | Gerekçesiz PASS → FAIL; gerekçeyle (geçer); boş gerekçe; WPT commit'i aynıyken PASS satırını silmek. Koşturucu: fuzzy'yi yok saymak, iyileşmeyi raporlamamak, CDATA'yı bırakmak, `mismatch`'i tanımamak | M1.4 | 2026-10-01, yakaladı |
 | `render_html` hiçbir girdide paniklemez ya da çökmez | `tests/robustness.rs`: sabit tohumlu 300 bozuk belge, `tests/robustness/` korpusu, gerçek renderer iş parçacığında 5000 düzey iç içelik; ayrıştırıcı derinliği Chrome gibi sınırlar (`erk-dom`, `nesting_stops_where_chrome_stops`), renderer iş parçacığının yığını 16 MiB. cargo-fuzz job'ı ayrı PR'da | Derinlik sınırını kaldırmak; renderer yığınını varsayılana döndürmek (ikisi de yığın taşması); bir kontrol karakterinde panik | M1.3 | 2026-10-01, yakaladı |
 | İkili boyutu bütçede, bütçe gerekçesiz yükselmez | CI `size` job'ı (`check-size-budget.sh`): Linux yayın ikilisi `.github/size-budget.txt`'teki tavanın altında; tavanı yükseltmek, taban commit'e göre yeni bir `# raised:` gerekçesi ister | Tavanın üstünde bir ikili (ilk gerçek Linux ölçümü geçici tavanı aştı); bütçesiz dosya; eksik ikili; gerekçesiz, boş gerekçeli ve eski gerekçeli yükseltme | M1.0 | 2026-09-30, yakaladı |
 | CSS matrisindeki her "Supported" satırın testi var | CI `guards` (`check-css-support.sh`): her Supported satır bir test fonksiyonu ya da test dosyası adlandırır ve o test var | Var olmayan bir test adı; test adı olmayan satır; var olmayan test dosyası | M1.0 | 2026-09-30, yakaladı |
@@ -118,11 +118,16 @@ ne kadar uzak olduğumuzu ölçer.
 
 ### 3.3 WPT (M1'den itibaren)
 
-- wptrunner'a "erk" ürünü: her reftest için `erk --screenshot` iki kez
-  (test ve referans) çalışır, PNG'ler karşılaştırılır.
-- Beklenti dosyaları (`.ini`, Servo'nun metadata yaklaşımı) bugünkü sonucu
-  kaydeder. Kapı "her test geçmeli" değil, "beklentinin altına düşme"dir.
-- Taban çizgisi JSON'u DioxusLabs `browser-wpt-results` biçiminde yayımlanır.
+- Erk'in kendi reftest koşturucusu (`crates/erk-wpt`): test ve referanslar
+  süreç içinde `render_html` ile 800 × 600 çizilir, WPT'nin kurallarıyla
+  karşılaştırılır (en az bir `match` tutmalı, her `mismatch` farklı olmalı,
+  `<meta name=fuzzy>`). wptrunner yerine bu: Erk betik çalıştırmadığı için
+  yalnızca reftest'ler sayılıyor, ve süreç içi koşu belirleyici ve hızlı
+  (997 test yaklaşık 20 sn).
+- Taban çizgisi `tests/wpt/expectations.txt`: satır başına `test DURUM`,
+  Chrome beklentileri gibi düz metin, çünkü düşüşün gerekçesi satırına
+  yazılmak zorunda ve JSON yorum taşımıyor. Kapı "her test geçmeli" değil,
+  "sonuç sessizce değişmez"dir.
 - Başlangıç dizinleri (M1'in kapsamına göre): `css/CSS2/normal-flow`,
   `css/css-flexbox`, `css/css-position`, `css/css-text`. Float ve tablo
   dizinleri kapsam dışı (css-support.md "Not planned").

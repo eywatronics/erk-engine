@@ -1,0 +1,11 @@
+# The WPT directories erk-wpt runs. Lines starting with `support:` are only
+# read: the references and support files the tests point to. CI checks out
+# exactly these at the commit in WPT_COMMIT.
+css/CSS2/normal-flow
+css/css-position
+support: css/reference
+support: css/CSS2/reference
+support: css/CSS2/support
+support: css/CSS2/positioning
+support: css/CSS2/tables/reference
+support: fonts

@@ -144,10 +144,10 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 - [x] `position: relative | absolute | fixed`, `top/right/bottom/left`,
   `z-index` ile boyama sırası (yığın bağlamları, CSS 2 Ek E'nin gerisi).
 - [x] Float `none` gibi dizilir: `float: left` bir kutu metni düşürmez (test).
-- [ ] **WPT altyapısı:** wptrunner'a `erk --screenshot` üzerinden koşan "erk"
+- [x] **WPT altyapısı:** wptrunner'a `erk --screenshot` üzerinden koşan "erk"
   ürünü; `css/CSS2/normal-flow` ve `css/css-position` taban çizgileri JSON,
   gerileme yasağı CI'da.
-- [ ] **Akış layout'u kararı** (roadmap): normal-flow ve css-text taban
+- [x] **Akış layout'u kararı** (roadmap): normal-flow ve css-text taban
   çizgisindeki kalan testler sınıflanır, karar yazılır.
 - [x] Referans sayfası: `positioning.html`.
 
@@ -424,3 +424,36 @@ static inset'lerini koruyor; float yüzüyor; ilk kapsayıcı blok içerik
 boyunda; konumlandırılmış metin bloğu paragraf oluyor; konumlandırılmışlar
 akışın içinde boyanıyor; `z-index` yok sayılıyor; negatif `z-index` akışın
 üstünde. Sağlamlık üretecine uç konumlandırma değerleri eklendi.
+
+**M1.4, WPT (2026-10-01).** WPT `5cd8e3f` (2026-09-30), seyrek klon:
+`tests/wpt/dirs.txt`'teki iki test dizini ve referans/destek dizinleri. İlk
+taban çizgisi:
+
+| Dizin | Reftest | Geçen | Oran | Boş karede geçen |
+|---|---|---|---|---|
+| `css/CSS2/normal-flow` | 746 | 319 | %42,8 | 6 |
+| `css/css-position` | 251 | 41 | %16,3 | 6 |
+
+Çökme yok; iki koşu birebir aynı; 997 test bu makinede yaklaşık 20 sn.
+"Boş karede geçen", testin karesi tek renkken geçenler: iki taraf da hiçbir
+şey çizmediği için eşit çıkmış olabilirler, sayı bu yüzden ayrıca
+yazılıyor.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| wptrunner'a `erk --screenshot` üzerinden koşan "erk" ürünü | Erk'in kendi koşturucusu, `crates/erk-wpt` (kullanıcı kararı). Erk betik çalıştırmadığı için WPT'den yalnızca reftest'ler sayılıyor; wptrunner bunun için Python, bir tarayıcı sürücü katmanı ve test başına bir süreç isterdi. Koşturucu `render_html`'i süreç içinde çağırıyor, WPT'nin çoklu referans ve fuzzy kurallarını (docs/writing-tests/reftests.md) uyguluyor |
+| Taban çizgileri JSON | Düz metin, `test DURUM` satırları: düşüşün gerekçesi Chrome beklentilerindeki gibi satırına yazılıyor, JSON yorum taşımıyor. Muhafızı `check-wpt-expectations.sh` |
+| — | `.xht` testleri XML olarak yazılmış, Erk'in XML ayrıştırıcısı yok. Koşturucu XML ayrıştırmanın iki farkını önceden uyguluyor: CDATA işaretlerini atıyor (yoksa `<style>`'ın ilk kuralı kayboluyordu) ve boş olmayan kendiliğinden kapanan etiketleri (`<div/>`) kapatıyor |
+| — | Testlerin bir kısmı başka dizinlerdeki referanslara bakıyor (`css/CSS2/tables/reference`, `css/CSS2/positioning`); eksik bir referans "düştü" değil yapılandırma hatası sayılıyor ve koşu duruyor. `dirs.txt`'te bu dizinler `support:` önekiyle: çekiliyor ama koşulmuyor |
+| — | Kaynak yüklenmiyor: dış stil sayfası, görüntü ya da web fontu isteyen test düşüyor ve taban çizgisi bunu kaydediyor. Kaynak API'si M1.6'da |
+| `css/css-text` taban çizgisi | **Yapılmadı:** indirme izni iki dizin içindi ve `css-text` çok büyük; M1 kabulünün parçası olarak ayrı PR'da |
+
+**Akış layout'u kararı:** roadmap'e yazıldı. Düşen 427 normal-flow testinin
+her biri desteklenmeyen ya da planlanmayan bir özelliği kullanıyor;
+hiçbirine dokunmadan düşen test yok. Karar geçici olarak Taffy'de kalmak;
+sınıflama M1.6'dan sonra tekrarlanır.
+
+Mutasyonlar: koşturucuda fuzzy'yi yok saymak, iyileşmeyi raporlamamak,
+CDATA'yı bırakmak, `mismatch`'i tanımamak (4/4); muhafızda gerekçesiz
+düşüş, boş gerekçe, WPT commit'i aynıyken PASS satırını silmek yakalandı,
+gerekçeli düşüş geçti.
