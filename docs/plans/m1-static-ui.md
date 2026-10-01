@@ -127,7 +127,7 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
   layout'u olur; her inline elemanın stili (renk, kalınlık, italik, boyut,
   font ailesi, `line-height`) kendi metin aralığına uygulanır. Test: `<p>a
   <b>b</b> c</p>`'de "b" kalın yüzle, "a" ve "c" normal.
-- [ ] **Step 3: Inline kutular.** Satır içi görseller ve `inline-block`
+- [x] **Step 3: Inline kutular.** Satır içi görseller ve `inline-block`
   Parley'nin `InlineBox`'larıyla. Kenarlıklı ve dolgulu `<span>`'lar satırlar
   arasında kırılır.
 - [x] **Step 4:** `text-align` (start, end, center, justify), temel
@@ -343,3 +343,32 @@ parçacığına 16 MiB verildi (yalnızca adres alanı).
 Mutasyonlar: derinlik sınırı ya da büyük yığın kaldırılınca test süreci yığın
 taşmasıyla çöküyor; bir kontrol karakterinde enjekte edilen panik, belgesiyle
 birlikte raporlanıyor.
+
+**Step 3, satır içi kutular (2026-10-01).** Satır içi bir elemanın yatay
+kenar boşluğu, kenarlığı ve dolgusu, iki ucunda o genişlikte birer Parley
+satır içi kutusu oluyor; arka planı her satırda, elemanın metni ve kutuları
+üzerinden ayrı bir dikdörtgen olarak boyanıyor. `inline-block`,
+`inline-flex` ve `inline-grid` paragrafın Taffy çocuğu: önce kendi
+boyutunda yerleşiyor, sonra o boyutta bir satır içi kutu olarak satıra
+giriyor. Yerleşim Blitz'in `layout/inline.rs`'indeki yaklaşımı izliyor ama
+Erk'in ağacına ve `CalcTable`'ına göre yeniden yazıldı. Yeni `inline-boxes`
+referans sayfası %75,10; kutuların 8/8'i Chrome'la 1 px içinde, arka planlar
+piksel piksel aynı, kalan fark gliflerin kenar yumuşatması.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Satır içi kutular Parley'nin `InlineBox`'larıyla | Kutular Parley'ye **yüksekliksiz** veriliyor. Parley bir satıra tek satır yüksekliği verip boşluğu en uzun içeriğin çevresine bölüyor; CSS her satır içi kutuya taban çizgisinin çevresinde kendi yerini veriyor (CSS 2 §10.8). Parley'nin yolu 30 px'lik bir kutunun üstünü önceki satırın içine taşırıyordu. Atom içeren satırların kutusu Erk'te hesaplanıyor: dayanak (strut), metnin kendi yüksekliği ve her atomun taban çizgisinin üstü ve altı; sonraki satırlar aşağı kayıyor |
+| Satır içi görseller bu adımda | **Yapılmadı:** Erk henüz hiçbir görsel yüklemiyor. Satır içi görsel `<img>` ve kaynak callback'iyle M1.6'da gelir; atom yolu hazır |
+| `vertical-align` bu adımda | **Yapılmadı:** satır kutusu artık Erk'te hesaplandığı için atomlarda doğrudan eklenebilir; metin aralıklarında glif run'larının dikey kaydırılmasını da istiyor. Ayrı PR |
+| — | Arka plan kenarları metne göre kesirli x'e düşüyordu ve her kenar bir sütun karışık piksel oluyordu; Chrome piksele hizalıyor. Hizalanınca skor %74,65'ten %75,10'a çıktı ve fark görüntüsünde arka plan kenarı kalmadı |
+| — | Boyama artık son layout'un kırdığı satırları kullanıyor; eskiden her paragraf boyama için yuvarlanmış genişlikte bir kez daha şekillendiriliyordu. Bütün referans skorları aynı kaldı; 1000 elemanlı sayfanın sıcak medyanı bu makinede aynı oturumda 64 ms'den 53 ms'ye indi |
+| — | Bilinen sınırlar: yüzdelik dolgu ve kenar boşluğu satır içi elemanlarda sıfır sayılıyor (satır kırma sırasında kapsayıcı genişliği yok); dolgulu bir elemanın uçları kelime içinde de satır kırma fırsatı (Parley her kutudan sonra kırabiliyor); blok kapsayıcı bir `inline-block` CSS'in istediği son satırın değil ilk satırın taban çizgisini kullanıyor (Taffy blokları yalnızca ilk taban çizgisini iletiyor) |
+
+Mutasyonlar (11/11 yakalandı): uç kutularının genişliği sıfır; arka plan
+dolguyu yok sayıyor; çöken boşluk hep elemanın dışında; satır kutusu
+düzeltmesi kapalı; atomun taban çizgisi yok sayılıyor; anonim kutunun
+konumu eklenmiyor; kutusuz elemanların içinden geçilmiyor; satır içi arka
+planlar metinden sonra; satır sonundaki boşluk arka plan alıyor; satır
+kayması boyanmıyor; arka planlar piksele hizalanmıyor. Sağlamlık üretecine
+`inline-block`, `inline-flex` ve dev dolgulu, negatif kenar boşluklu satır
+içi arka planlar eklendi.

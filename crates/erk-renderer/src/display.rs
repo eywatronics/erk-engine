@@ -5,9 +5,12 @@
 //! images, clips and the spatial tree come with the features that need them.
 //!
 //! Paint order follows CSS 2 Appendix E for a single stacking context: every
-//! block background first, in tree order, then all text. Painting a
-//! paragraph's text right after its own background would let a later
-//! sibling's background cover text that overflows into it.
+//! block background first, in tree order, then all inline content: each
+//! paragraph's inline backgrounds, then its text. Painting a paragraph's text
+//! right after its own background would let a later sibling's background
+//! cover text that overflows into it. An atomic inline's own background is
+//! painted with the block backgrounds, before the text of its line; Appendix
+//! E paints it in line order, which differs only where they overlap.
 
 use std::fmt::Write as _;
 
@@ -17,7 +20,8 @@ use erk_style::{ComputedValues, Styles};
 use parley::{FontData, PositionedLayoutItem};
 
 use crate::color::{Rgba, srgb_bytes};
-use crate::layout::Layouts;
+use crate::layout::{Layouts, ShapedText};
+use crate::text::InlineLayout;
 
 pub(crate) struct DisplayList {
     /// The canvas colour behind everything (CSS 2 §14.2).
@@ -116,6 +120,12 @@ impl DisplayList {
         text: &mut Vec<DisplayItem>,
     ) {
         let Some(layout) = walk.layouts.get(id) else {
+            // An element without a box (an inline element) can contain one
+            // that has a box (an atomic inline), positioned relative to the
+            // block around them.
+            for child in walk.doc.children(id) {
+                self.add_box(walk, child, parent_origin, text);
+            }
             return;
         };
         let x = parent_origin.0 + layout.location.x;
@@ -148,11 +158,7 @@ impl DisplayList {
         {
             let content_x = x + layout.border.left + layout.padding.left;
             let content_y = y + layout.border.top + layout.padding.top;
-            text.extend(glyph_runs(
-                &shaped.text,
-                &shaped.layout,
-                (content_x, content_y),
-            ));
+            text.extend(inline_content(shaped, (content_x, content_y)));
         }
 
         // Anonymous boxes inherit their block's visibility and have no
@@ -163,11 +169,7 @@ impl DisplayList {
                     x + anonymous.layout.location.x,
                     y + anonymous.layout.location.y,
                 );
-                text.extend(glyph_runs(
-                    &anonymous.text.text,
-                    &anonymous.text.layout,
-                    origin,
-                ));
+                text.extend(inline_content(&anonymous.text, origin));
             }
         }
 
@@ -207,16 +209,40 @@ impl DisplayList {
     }
 }
 
+/// A paragraph whose content box starts at `origin`: the backgrounds of its
+/// inline elements, then its glyph runs. A background's edges follow the
+/// text and fall between pixels; they are snapped to whole pixels, as
+/// Chrome snaps them (found by the Chrome reference test: unsnapped, every
+/// edge is a column of blended pixels).
+fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
+    let mut items: Vec<DisplayItem> = shaped
+        .decorations
+        .iter()
+        .map(|rect| {
+            let (left, top) = ((origin.0 + rect.x).round(), (origin.1 + rect.y).round());
+            let right = (origin.0 + rect.x + rect.width).round();
+            let bottom = (origin.1 + rect.y + rect.height).round();
+            DisplayItem::Rect {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+                color: rect.color,
+            }
+        })
+        .collect();
+    items.extend(glyph_runs(&shaped.text, &shaped.layout, origin));
+    items
+}
+
 /// The glyph runs of a shaped paragraph whose content box starts at
 /// `origin`. Parley's positioned glyphs already include each line's offset
-/// and baseline.
-fn glyph_runs(
-    text: &str,
-    layout: &parley::Layout<crate::text::TextBrush>,
-    origin: (f32, f32),
-) -> Vec<DisplayItem> {
+/// and baseline; the line's shift moves them down past taller inline boxes
+/// above.
+fn glyph_runs(text: &str, shaped: &InlineLayout, origin: (f32, f32)) -> Vec<DisplayItem> {
     let mut runs = Vec::new();
-    for line in layout.lines() {
+    for (index, line) in shaped.layout.lines().enumerate() {
+        let shift = shaped.shifts.get(index).copied().unwrap_or(0.0);
         let mut ranges = crate::text::glyph_run_ranges(&line).into_iter();
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(run) = item else {
@@ -228,7 +254,7 @@ fn glyph_runs(
                 .map(|glyph| PositionedGlyph {
                     id: glyph.id,
                     x: origin.0 + glyph.x,
-                    y: origin.1 + glyph.y,
+                    y: origin.1 + shift + glyph.y,
                 })
                 .collect();
             runs.push(DisplayItem::Glyphs(GlyphRun {
