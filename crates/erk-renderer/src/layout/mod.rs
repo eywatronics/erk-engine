@@ -115,6 +115,7 @@ pub(crate) fn layout(
     round_layout(&mut tree, root);
 
     let LayoutTree { mut nodes, .. } = tree;
+    snap_locations(&mut nodes, usize::from(root));
     // An atomic inline in an anonymous box is laid out relative to that
     // box, which the DOM does not have: make it relative to the block.
     for index in slots..nodes.len() {
@@ -155,6 +156,28 @@ pub(crate) fn layout(
             .collect(),
         text,
         anonymous,
+    }
+}
+
+/// Taffy rounds each box's position relative to its parent's, so a
+/// parent's fraction of a pixel is lost and a box can land a pixel away from
+/// where Chrome draws it. Chrome snaps absolute positions: each box's
+/// rounded offset here is its rounded absolute position minus its parent's
+/// (found by the Chrome reference test: a `<sup>` line's fraction moved a
+/// `vertical-align: middle` box further down the page). Sizes, borders and
+/// padding are already rounded that way by Taffy.
+fn snap_locations(nodes: &mut [LayoutNode], root: usize) {
+    let round = |value: f32| (value + 0.5).floor();
+    let mut stack = vec![(root, 0.0_f32, 0.0_f32)];
+    while let Some((index, parent_x, parent_y)) = stack.pop() {
+        let unrounded = nodes[index].unrounded.location;
+        let (x, y) = (parent_x + unrounded.x, parent_y + unrounded.y);
+        let location = &mut nodes[index].layout.location;
+        location.x = round(x) - round(parent_x);
+        location.y = round(y) - round(parent_y);
+        for child in &nodes[index].children {
+            stack.push((usize::from(*child), x, y));
+        }
     }
 }
 
@@ -236,7 +259,7 @@ fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
                     };
                     if is_atomic_inline(&computed) {
                         entries.push(Entry::Inline(
-                            vec![InlineToken::Atom(child.index() as usize)],
+                            vec![InlineToken::Atom(child.index() as usize, computed.clone())],
                             vec![(child, computed)],
                         ));
                     } else if is_inline_level(&computed) {
@@ -417,7 +440,10 @@ fn inline_tokens(
             Some(NodeData::Element(_)) => {
                 if let Some(child_style) = styles.computed(child) {
                     if is_atomic_inline(&child_style) {
-                        tokens.push(InlineToken::Atom(child.index() as usize));
+                        tokens.push(InlineToken::Atom(
+                            child.index() as usize,
+                            child_style.clone(),
+                        ));
                         atoms.push((child, child_style));
                     } else {
                         inline_tokens(doc, styles, child, &child_style, tokens, atoms);
@@ -554,7 +580,7 @@ impl<'t> LayoutTree<'t> {
                     .and_then(|line| shaped.baseline(line))
                     .map(|baseline| inset.y + baseline),
             };
-            self.place_atoms(&paragraph, &shaped, &atoms, inset, space);
+            self.place_atoms(&shaped, inset, space);
             self.nodes[index].shaped = Some(shaped);
         }
         self.nodes[index].paragraph = Some(paragraph);
@@ -593,22 +619,10 @@ impl<'t> LayoutTree<'t> {
 
     /// Give each atomic inline its final position: on its line's baseline,
     /// where the line put it.
-    fn place_atoms(
-        &mut self,
-        paragraph: &Paragraph,
-        shaped: &InlineLayout,
-        sizes: &[AtomBox],
-        inset: Point<f32>,
-        space: AvailableSpace,
-    ) {
+    fn place_atoms(&mut self, shaped: &InlineLayout, inset: Point<f32>, space: AvailableSpace) {
         let calcs = self.calcs;
         let resolve = |ptr, basis| calcs.resolve(ptr, basis);
-        let sizes: Vec<(usize, AtomBox)> = paragraph.atoms().zip(sizes.iter().copied()).collect();
-        for (order, (atom, x, baseline)) in shaped.atom_positions(paragraph).into_iter().enumerate()
-        {
-            let Some(&(_, size)) = sizes.iter().find(|(index, _)| *index == atom) else {
-                continue;
-            };
+        for (order, &(atom, x, top)) in shaped.atom_positions().iter().enumerate() {
             let id = taffy::NodeId::from(atom);
             // The same input as when measuring: a cache hit.
             let output = self.compute_child_layout(id, atom_input(space));
@@ -618,7 +632,7 @@ impl<'t> LayoutTree<'t> {
             let layout = Layout {
                 location: Point {
                     x: inset.x + x + margin.left,
-                    y: inset.y + baseline - size.above + margin.top,
+                    y: inset.y + top + margin.top,
                 },
                 size: output.size,
                 scrollable_overflow_rect: output.scrollable_overflow_rect,

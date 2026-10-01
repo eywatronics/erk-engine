@@ -28,9 +28,15 @@ const NOTO_SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regula
 const NOTO_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSans-Bold.ttf");
 const FAMILY: &str = "Noto Sans";
 
-/// Text colour, as straight (non-premultiplied) sRGB bytes.
+/// What Parley carries with each piece of text: its colour, as straight
+/// (non-premultiplied) sRGB bytes, and how far `vertical-align` raises it
+/// above the line's baseline. Text whose raise differs gets glyph runs of
+/// its own.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct TextBrush(pub(crate) [u8; 4]);
+pub(crate) struct TextBrush {
+    pub(crate) color: [u8; 4],
+    pub(crate) raise: f32,
+}
 
 /// The text properties of one styled range.
 #[derive(Clone, Debug, PartialEq)]
@@ -54,8 +60,146 @@ impl TextStyle {
             font_size,
             line_height,
             weight,
-            color: TextBrush(srgb_bytes(style.clone_color())),
+            color: TextBrush {
+                color: srgb_bytes(style.clone_color()),
+                raise: 0.0,
+            },
         }
+    }
+
+    /// The used line height in pixels.
+    fn line_height_px(&self) -> f32 {
+        match self.line_height {
+            LineHeight::Absolute(px) => px,
+            LineHeight::FontSizeRelative(factor) => factor * self.font_size,
+            LineHeight::MetricsRelative(factor) => {
+                let (ascent, descent) = font_extents(self.font_size, self.weight);
+                factor * (ascent + descent)
+            }
+        }
+    }
+
+    /// The space this style's inline box takes above and below its baseline:
+    /// the font's ascent and descent and the half-leading of its line height,
+    /// split as Chrome splits it (CSS 2 §10.8.1).
+    fn extents(&self) -> (f32, f32) {
+        let (ascent, descent) = font_extents(self.font_size, self.weight);
+        let leading = self.line_height_px() - (ascent + descent);
+        let above = (leading * 0.5).floor();
+        let below = leading.round() - above;
+        (ascent + above, descent + below)
+    }
+}
+
+/// What `vertical-align` measures against: the parent inline box's font and
+/// how far its own baseline is raised.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ParentBox {
+    raise: f32,
+    font_size: f32,
+    ascent: f32,
+    descent: f32,
+    x_height: f32,
+}
+
+impl ParentBox {
+    fn of(style: &TextStyle, raise: f32) -> Self {
+        let (ascent, descent) = font_extents(style.font_size, style.weight);
+        Self {
+            raise,
+            font_size: style.font_size,
+            ascent,
+            descent,
+            x_height: x_height(style.font_size, style.weight),
+        }
+    }
+}
+
+/// Where `vertical-align` puts a box (CSS 2 §10.8.1; in Stylo, the
+/// `alignment-baseline` and `baseline-shift` longhands of CSS Inline 3).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum VerticalAlign {
+    /// Relative to the parent's baseline: an anchor, then raised by `shift`
+    /// (`sub`, `super`, a length or a percentage of the line height).
+    Parent { anchor: Anchor, shift: f32 },
+    /// Relative to the line box: `top`, `center`, `bottom`.
+    Line(LineAnchor),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Anchor {
+    Baseline,
+    Middle,
+    TextTop,
+    TextBottom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum LineAnchor {
+    Top,
+    Center,
+    Bottom,
+}
+
+impl VerticalAlign {
+    /// `style`'s `vertical-align`, with a percentage resolved against its own
+    /// line height and `sub`/`super` against the parent's font size, by
+    /// Blink's offsets (a fifth plus one pixel down, a third plus one up).
+    /// Offsets are cut to Blink's 1/64 px layout unit: unrounded, a `<sup>`
+    /// line came out 0.017 px taller than Chrome's, enough to round every
+    /// later box the other way (found by the Chrome reference test).
+    fn of(style: &ComputedValues, line_height: f32, parent: &ParentBox) -> Self {
+        use erk_style::style::values::computed::length::Length;
+        use erk_style::style::values::generics::box_::{BaselineShift, BaselineShiftKeyword};
+        use erk_style::style::values::specified::box_::AlignmentBaseline;
+
+        let shift = match style.clone_baseline_shift() {
+            BaselineShift::Keyword(BaselineShiftKeyword::Top) => {
+                return Self::Line(LineAnchor::Top);
+            }
+            BaselineShift::Keyword(BaselineShiftKeyword::Center) => {
+                return Self::Line(LineAnchor::Center);
+            }
+            BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => {
+                return Self::Line(LineAnchor::Bottom);
+            }
+            BaselineShift::Keyword(BaselineShiftKeyword::Sub) => {
+                -layout_unit(parent.font_size / 5.0 + 1.0)
+            }
+            BaselineShift::Keyword(BaselineShiftKeyword::Super) => {
+                layout_unit(parent.font_size / 3.0 + 1.0)
+            }
+            BaselineShift::Length(length) => {
+                layout_unit(length.resolve(Length::new(line_height)).px())
+            }
+        };
+        let anchor = match style.clone_alignment_baseline() {
+            AlignmentBaseline::Middle => Anchor::Middle,
+            AlignmentBaseline::TextTop => Anchor::TextTop,
+            AlignmentBaseline::TextBottom => Anchor::TextBottom,
+            _ => Anchor::Baseline,
+        };
+        Self::Parent { anchor, shift }
+    }
+
+    /// How far a box that takes `above` and `below` around its own baseline
+    /// is raised above the line's baseline. `None` for the line-relative
+    /// values, which are placed once the line box is known.
+    fn raise(self, parent: &ParentBox, above: f32, below: f32) -> Option<f32> {
+        let Self::Parent { anchor, shift } = self else {
+            return None;
+        };
+        let anchored = match anchor {
+            Anchor::Baseline => 0.0,
+            // The box's middle on the parent's baseline plus half its
+            // x-height.
+            Anchor::Middle => layout_unit(parent.x_height / 2.0 + (below - above) / 2.0),
+            // The box's top with the top of the parent's content area.
+            Anchor::TextTop => parent.ascent - above,
+            // The box's bottom with the bottom of the parent's content area.
+            Anchor::TextBottom => below - parent.descent,
+        };
+        Some(parent.raise + anchored + shift)
     }
 }
 
@@ -69,8 +213,9 @@ pub(crate) enum InlineToken<S> {
     /// The innermost open inline element ends.
     Close,
     /// An atomic inline (`inline-block`, `inline-flex`): laid out as a box
-    /// of its own and placed in the line like a glyph. The arena index.
-    Atom(usize),
+    /// of its own and placed in the line like a glyph. The arena index and
+    /// its style.
+    Atom(usize, S),
 }
 
 /// An inline box in a paragraph's text, in text order.
@@ -86,8 +231,9 @@ pub(crate) enum InlineItemKind {
     /// Horizontal space an inline element takes at its start or end: its
     /// margin, border and padding on that side.
     Spacer(f32),
-    /// An atomic inline, by arena index.
-    Atom(usize),
+    /// An atomic inline, by arena index, with its `vertical-align` and the
+    /// inline box it is aligned in.
+    Atom(usize, VerticalAlign, ParentBox),
 }
 
 /// The size an atomic inline takes in its line, measured by layout.
@@ -95,8 +241,7 @@ pub(crate) enum InlineItemKind {
 pub(crate) struct AtomBox {
     /// Margin box width.
     pub(crate) width: f32,
-    /// From the top of the margin box to the box's baseline, which sits on
-    /// the line's baseline.
+    /// From the top of the margin box to the box's own baseline.
     pub(crate) above: f32,
     /// From the baseline to the bottom of the margin box.
     pub(crate) below: f32,
@@ -118,7 +263,19 @@ struct Decoration {
     /// font's ascent and descent, then padding and border.
     above: f32,
     below: f32,
+    /// How far `vertical-align` raises the element.
+    raise: f32,
     color: Rgba,
+}
+
+/// Text raised or lowered by `vertical-align`: its inline box takes
+/// `above` and `below` around a baseline `raise` above the line's.
+#[derive(Clone, Debug)]
+struct Raised {
+    text: Range<usize>,
+    raise: f32,
+    above: f32,
+    below: f32,
 }
 
 /// A painted background of an inline element on one line, relative to the
@@ -145,6 +302,7 @@ pub(crate) struct Paragraph {
     /// Inline boxes in text order; a box's position here is its Parley id.
     pub(crate) items: Vec<InlineItem>,
     decorations: Vec<Decoration>,
+    raised: Vec<Raised>,
 }
 
 /// An inline element being read, until its `Close`.
@@ -155,6 +313,11 @@ struct OpenElement {
     end_spacer: f32,
     end_margin: f32,
     decoration: Option<(f32, f32, Rgba)>,
+    /// Its text style and how far it is raised: the parent box of what it
+    /// contains.
+    style: TextStyle,
+    raise: f32,
+    extents: (f32, f32),
 }
 
 impl Paragraph {
@@ -174,8 +337,15 @@ impl Paragraph {
             align: alignment(block),
             items: Vec::new(),
             decorations: Vec::new(),
+            raised: Vec::new(),
         };
         let mut open: Vec<OpenElement> = Vec::new();
+        // The box an element or atom is aligned in: the innermost open
+        // element, or the block's own (root) inline box.
+        let parent_of = |open: &[OpenElement], base: &TextStyle| match open.last() {
+            Some(element) => ParentBox::of(&element.style, element.raise),
+            None => ParentBox::of(base, 0.0),
+        };
         // Whether content (text or an atom) has been seen, whether the last
         // character was a space, and whether a space is due before the next
         // content.
@@ -187,7 +357,8 @@ impl Paragraph {
         for token in tokens {
             match token {
                 InlineToken::Text(raw, style) => {
-                    let style = TextStyle::of(style.as_ref());
+                    let mut style = TextStyle::of(style.as_ref());
+                    style.color.raise = open.last().map_or(0.0, |element| element.raise);
                     let mut start = None;
                     for c in raw.chars() {
                         if is_document_whitespace(c) {
@@ -210,6 +381,14 @@ impl Paragraph {
                 InlineToken::Open(style) => {
                     paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
                     let style = style.as_ref();
+                    let text_style = TextStyle::of(style);
+                    let parent = parent_of(&open, &paragraph.base);
+                    let extents = text_style.extents();
+                    // A line-relative value on an inline element is laid out
+                    // as `baseline` (not supported yet).
+                    let raise = VerticalAlign::of(style, text_style.line_height_px(), &parent)
+                        .raise(&parent, extents.0, extents.1)
+                        .unwrap_or(parent.raise);
                     let sides = InlineSides::of(style);
                     let open_box = (sides.start > 0.0).then(|| {
                         paragraph.push_item(InlineItemKind::Spacer(sides.start));
@@ -222,6 +401,9 @@ impl Paragraph {
                         end_spacer: sides.end,
                         end_margin: sides.margin_end,
                         decoration: decoration_of(style),
+                        style: text_style,
+                        raise,
+                        extents,
                     });
                 }
                 InlineToken::Close => {
@@ -229,9 +411,12 @@ impl Paragraph {
                         closes.push((element, pending_space));
                     }
                 }
-                InlineToken::Atom(index) => {
+                InlineToken::Atom(index, style) => {
                     paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
-                    paragraph.push_item(InlineItemKind::Atom(*index));
+                    let parent = parent_of(&open, &paragraph.base);
+                    let line_height = TextStyle::of(style.as_ref()).line_height_px();
+                    let align = VerticalAlign::of(style.as_ref(), line_height, &parent);
+                    paragraph.push_item(InlineItemKind::Atom(*index, align, parent));
                     has_content = true;
                     last_was_space = false;
                 }
@@ -275,14 +460,24 @@ impl Paragraph {
             self.push_item(InlineItemKind::Spacer(element.end_spacer));
             (self.items.len() - 1, element.end_margin)
         });
+        let text = element.text_start..self.text.len();
+        if element.raise != 0.0 && !text.is_empty() {
+            self.raised.push(Raised {
+                text: text.clone(),
+                raise: element.raise,
+                above: element.extents.0,
+                below: element.extents.1,
+            });
+        }
         if let Some((above, below, color)) = element.decoration {
             self.decorations.push(Decoration {
-                text: element.text_start..self.text.len(),
+                text,
                 boxes: element.first_box..self.items.len(),
                 open: element.open,
                 close,
                 above,
                 below,
+                raise: element.raise,
                 color,
             });
         }
@@ -303,25 +498,15 @@ impl Paragraph {
     /// The arena indices of the atomic inlines, in order.
     pub(crate) fn atoms(&self) -> impl Iterator<Item = usize> + '_ {
         self.items.iter().filter_map(|item| match item.kind {
-            InlineItemKind::Atom(index) => Some(index),
+            InlineItemKind::Atom(index, ..) => Some(index),
             InlineItemKind::Spacer(_) => None,
         })
     }
 
     /// The strut: the space above and below the baseline that the block's
-    /// own font and line height give every line (CSS 2 §10.8.1), with the
-    /// half-leading split as Chrome splits it.
+    /// own font and line height give every line (CSS 2 §10.8.1).
     fn strut(&self) -> (f32, f32) {
-        let (ascent, descent) = font_extents(self.base.font_size, self.base.weight);
-        let line_height = match self.base.line_height {
-            LineHeight::Absolute(px) => px,
-            LineHeight::FontSizeRelative(factor) => factor * self.base.font_size,
-            LineHeight::MetricsRelative(factor) => factor * (ascent + descent),
-        };
-        let leading = line_height - (ascent + descent);
-        let above = (leading * 0.5).floor();
-        let below = leading.round() - above;
-        (ascent + above, descent + below)
+        self.base.extents()
     }
 }
 
@@ -406,13 +591,16 @@ fn decoration_of(style: &ComputedValues) -> Option<(f32, f32, Rgba)> {
 }
 
 /// A shaped, line-broken paragraph, with the line boxes adjusted for
-/// atomic inlines.
+/// atomic inlines and raised text.
 pub(crate) struct InlineLayout {
     pub(crate) layout: Layout<TextBrush>,
     /// How far each line moved down from where Parley put it: atomic
-    /// inlines can make a line box taller than its text.
+    /// inlines and raised text can make a line box taller than its text.
     pub(crate) shifts: Vec<f32>,
     pub(crate) height: f32,
+    /// Where each atomic inline sits: `(arena index, x, top of its margin
+    /// box)`, relative to the content box.
+    atoms: Vec<(usize, f32, f32)>,
     /// The width the lines were broken at.
     max_advance: Option<f32>,
 }
@@ -480,7 +668,7 @@ impl InlineLayout {
                 {
                     rects.push(DecorationRect {
                         x: x0,
-                        y: baseline - decoration.above,
+                        y: baseline - decoration.raise - decoration.above,
                         width: x1 - x0,
                         height: decoration.above + decoration.below,
                         color: decoration.color,
@@ -491,24 +679,10 @@ impl InlineLayout {
         rects
     }
 
-    /// Where each atomic inline sits: `(arena index, x, baseline)`, relative
-    /// to the content box.
-    pub(crate) fn atom_positions(&self, paragraph: &Paragraph) -> Vec<(usize, f32, f32)> {
-        let mut positions = Vec::new();
-        for (index, line) in self.layout.lines().enumerate() {
-            let baseline = line.metrics().baseline + self.shifts.get(index).copied().unwrap_or(0.0);
-            for item in line.items() {
-                if let PositionedLayoutItem::InlineBox(inline_box) = item
-                    && let Some(InlineItemKind::Atom(atom)) = paragraph
-                        .items
-                        .get(inline_box.id as usize)
-                        .map(|item| item.kind)
-                {
-                    positions.push((atom, inline_box.x, baseline));
-                }
-            }
-        }
-        positions
+    /// Where each atomic inline sits: `(arena index, x, top of its margin
+    /// box)`, relative to the content box.
+    pub(crate) fn atom_positions(&self) -> &[(usize, f32, f32)] {
+        &self.atoms
     }
 }
 
@@ -651,6 +825,21 @@ fn normal_line_height(font_size: f32, weight: f32) -> f32 {
     metrics.ascent.round() + (-metrics.descent).round() + metrics.leading.round()
 }
 
+/// `value` cut toward zero to Blink's layout unit, 1/64 px.
+fn layout_unit(value: f32) -> f32 {
+    (value * 64.0).trunc() / 64.0
+}
+
+/// The font's x-height, for `vertical-align: middle`.
+pub(crate) fn x_height(font_size: f32, weight: f32) -> f32 {
+    use skrifa::instance::{LocationRef, Size as FontSize};
+    use skrifa::{FontRef, MetadataProvider};
+
+    let font = FontRef::new(face_for(weight)).expect("embedded font parses");
+    let metrics = font.metrics(FontSize::new(font_size), LocationRef::default());
+    metrics.x_height.unwrap_or(font_size / 2.0)
+}
+
 /// The font's ascent and descent, each rounded to whole pixels as Chrome
 /// rounds them: the height of an inline box's content area.
 fn font_extents(font_size: f32, weight: f32) -> (f32, f32) {
@@ -759,9 +948,9 @@ impl TextEngine {
     /// Inline boxes reach Parley with no height: Parley gives a line one
     /// line height and splits its leading around the tallest content, where
     /// CSS gives each inline box its own place around the baseline. Lines
-    /// holding atoms are therefore sized here, from the strut, the text's
-    /// own extent and each atom's extent above and below the baseline (CSS 2
-    /// §10.8), and the lines after them move down.
+    /// holding atoms or raised text are therefore sized here, from the
+    /// strut, the text's own extent and each box's extent above and below
+    /// the baseline (CSS 2 §10.8); the lines after them move down.
     pub(crate) fn shape(
         &mut self,
         paragraph: &Paragraph,
@@ -769,39 +958,89 @@ impl TextEngine {
         atoms: &[AtomBox],
     ) -> InlineLayout {
         let mut layout = self.shape_text(paragraph, max_advance, atoms);
+        layout.align(paragraph.align, AlignmentOptions::default());
         let mut shifts = vec![0.0; layout.len()];
         let mut height = layout.height();
-        if atoms.iter().any(|atom| *atom != AtomBox::default()) {
-            let atom_of = |id: u64| {
-                let mut seen = 0;
-                for (index, item) in paragraph.items.iter().enumerate() {
-                    if let InlineItemKind::Atom(_) = item.kind {
-                        if index as u64 == id {
-                            return atoms.get(seen).copied();
-                        }
-                        seen += 1;
-                    }
-                }
-                None
-            };
+        let mut placed = Vec::new();
+        let has_atoms = paragraph.atoms().next().is_some();
+        if has_atoms || !paragraph.raised.is_empty() {
+            // Parley ids are positions in `items`; atoms are measured in order.
+            let mut sizes = atoms.iter();
+            let atom_of: Vec<Option<(usize, AtomBox, VerticalAlign, ParentBox)>> = paragraph
+                .items
+                .iter()
+                .map(|item| match item.kind {
+                    InlineItemKind::Atom(index, align, parent) => Some((
+                        index,
+                        sizes.next().copied().unwrap_or_default(),
+                        align,
+                        parent,
+                    )),
+                    InlineItemKind::Spacer(_) => None,
+                })
+                .collect();
             let (strut_above, strut_below) = paragraph.strut();
             let mut y = 0.0_f32;
             for (index, line) in layout.lines().enumerate() {
                 let metrics = line.metrics();
                 let baseline = metrics.baseline;
-                let mut above = (baseline - metrics.block_min_coord).max(strut_above);
-                let mut below = (metrics.block_max_coord - baseline).max(strut_below);
-                let mut has_atom = false;
-                for item in line.items() {
-                    if let PositionedLayoutItem::InlineBox(inline_box) = item
-                        && let Some(atom) = atom_of(inline_box.id)
-                    {
-                        has_atom = true;
-                        above = above.max(atom.above);
-                        below = below.max(atom.below);
+                let mut above = baseline - metrics.block_min_coord;
+                let mut below = metrics.block_max_coord - baseline;
+                let mut special = false;
+                let text = line.text_range();
+                for raised in &paragraph.raised {
+                    if raised.text.start < text.end && text.start < raised.text.end {
+                        special = true;
+                        above = above.max(raised.raise + raised.above);
+                        below = below.max(raised.below - raised.raise);
                     }
                 }
-                if !has_atom {
+                // Atoms on this line: (index, x, size, raise or the line anchor).
+                let mut on_line = Vec::new();
+                for item in line.items() {
+                    if let PositionedLayoutItem::InlineBox(inline_box) = item
+                        && let Some(Some((atom, size, align, parent))) =
+                            atom_of.get(inline_box.id as usize)
+                    {
+                        special = true;
+                        let raise = align.raise(parent, size.above, size.below);
+                        if let Some(raise) = raise {
+                            above = above.max(size.above + raise);
+                            below = below.max(size.below - raise);
+                        }
+                        on_line.push((*atom, inline_box.x, *size, raise, *align));
+                    }
+                }
+                if special {
+                    above = above.max(strut_above);
+                    below = below.max(strut_below);
+                }
+                // Boxes aligned to the line box take part only in its height:
+                // a taller one grows the line on the side away from its edge.
+                for &(_, _, size, raise, align) in &on_line {
+                    let total = size.above + size.below;
+                    if raise.is_none() && total > above + below {
+                        let grow = total - (above + below);
+                        match align {
+                            VerticalAlign::Line(LineAnchor::Bottom) => above += grow,
+                            _ => below += grow,
+                        }
+                    }
+                }
+                let line_height = above + below;
+                for (atom, x, size, raise, align) in on_line {
+                    let total = size.above + size.below;
+                    let top = match (raise, align) {
+                        (Some(raise), _) => y + above - raise - size.above,
+                        (None, VerticalAlign::Line(LineAnchor::Bottom)) => y + line_height - total,
+                        (None, VerticalAlign::Line(LineAnchor::Center)) => {
+                            y + (line_height - total) / 2.0
+                        }
+                        (None, _) => y,
+                    };
+                    placed.push((atom, x, top));
+                }
+                if !special {
                     above = baseline - metrics.block_min_coord;
                     below = metrics.block_max_coord - baseline;
                 }
@@ -811,11 +1050,11 @@ impl TextEngine {
             }
             height = y;
         }
-        layout.align(paragraph.align, AlignmentOptions::default());
         InlineLayout {
             layout,
             shifts,
             height,
+            atoms: placed,
             max_advance,
         }
     }
@@ -848,7 +1087,7 @@ impl TextEngine {
         for (id, item) in paragraph.items.iter().enumerate() {
             let width = match item.kind {
                 InlineItemKind::Spacer(width) => width,
-                InlineItemKind::Atom(_) => atoms.next().map_or(0.0, |atom| atom.width),
+                InlineItemKind::Atom(..) => atoms.next().map_or(0.0, |atom| atom.width),
             };
             builder.push_inline_box(parley::InlineBox {
                 id: id as u64,
@@ -904,6 +1143,7 @@ mod tests {
             align: Alignment::Start,
             items: Vec::new(),
             decorations: Vec::new(),
+            raised: Vec::new(),
         }
     }
 

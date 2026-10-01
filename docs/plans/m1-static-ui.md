@@ -372,3 +372,32 @@ planlar metinden sonra; satır sonundaki boşluk arka plan alıyor; satır
 kayması boyanmıyor; arka planlar piksele hizalanmıyor. Sağlamlık üretecine
 `inline-block`, `inline-flex` ve dev dolgulu, negatif kenar boşluklu satır
 içi arka planlar eklendi.
+
+**`vertical-align` (2026-10-01).** Stylo 0.20'de `vertical-align` bir
+kısaltma: CSS Inline 3'ün `alignment-baseline` (baseline, middle, text-top,
+text-bottom) ve `baseline-shift` (sub, super, top, center, bottom, uzunluk,
+yüzde) uzun hâllerine açılıyor; Erk ikisini birlikte okuyor. Satır içi bir
+elemanın yükselmesi Parley fırçasına (`TextBrush`) giriyor: farklı
+yükseklikteki metin kendi glif run'larını alıyor, boyama onları kaydırıyor,
+satır kutusu yükseltilmiş metne yer açıyor. Atomlar aynı hesaptan geçiyor;
+`top`, `center` ve `bottom` satır kutusu kurulduktan sonra yerleşiyor ve
+daha uzunlarsa satırı kendi kenarlarından uzak yöne büyütüyor. Yeni
+`vertical-align` referans sayfası %68,11; kutuların 10/10'u Chrome'la 1 px
+içinde, arka planlar ve kutular piksel piksel aynı, kalan fark gliflerin
+kenar yumuşatması.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Temel `vertical-align` | Atomlarda değerlerin hepsi, satır içi elemanlarda satır kutusuna göre olanlar (`top`, `center`, `bottom`) dışında hepsi. Onlar satır içi elemanda `baseline` gibi diziliyor; satır kutusu kurulduktan sonra metin run'larını taşımak ayrı bir iş |
+| — | `sub` ve `super` Blink'in ofsetleri: ebeveyn yazı tipinin beşte biri artı bir piksel aşağı, üçte biri artı bir piksel yukarı. Chrome bunları 1/64 px'lik layout biriminde hesaplıyor (6,333 → 405/64). Kesirsiz hâliyle `<sup>`'lu satır Chrome'unkinden 0,017 px uzun çıkıyordu ve sayfanın aşağısındaki her kutu ters yöne yuvarlanıyordu. Ofsetler artık o birime kırpılıyor |
+| — | Taffy her kutunun konumunu ebeveynine göre ayrı yuvarlıyor; ebeveynin piksel kesri kayboluyor. Chrome mutlak konumu piksele oturtuyor. Erk artık her kutunun yuvarlanmış mutlak konumundan ebeveyninkini çıkarıyor; önceki sayfaların bütün konumları tam sayı olduğu için skorları değişmedi, `vertical-align` sayfası %67,81'den %68,11'e çıktı ve fark görüntüsünde kutu kenarı kalmadı |
+| — | Satır içi görseller hâlâ M1.6'da (`<img>` ile); M1.3'ün kalan tek işi oydu, bu yüzden M1.3 bitti sayıldı. cargo-fuzz job'ı M1 bitmeden ayrı bir PR'da |
+
+Mutasyonlar (10/10 yakalandı): yükselme boyanmıyor; yükseltilmiş metin
+satırı büyütmüyor (ilk denemede kaçtı: test yalnızca "bir satırdan uzun"
+diyordu ve `sub` satırı zaten büyütüyordu; yerine kesin yükseklik testi
+geldi); yükseltilmiş arka plan taban çizgisinde kalıyor; `middle` x
+yüksekliğini yok sayıyor; `text-top` alçalmayı kullanıyor; `bottom` üste
+yerleşiyor; uzun bir satır hizalı kutu satırı büyütmüyor; layout birimi
+yok; `super` beşte bir kullanıyor; konumlar ebeveyne göre yuvarlanıyor.
+Sağlamlık üretecine uç `vertical-align` değerleri eklendi.

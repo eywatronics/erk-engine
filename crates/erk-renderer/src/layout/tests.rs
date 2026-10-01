@@ -252,7 +252,7 @@ fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, [u8; 4])> {
         });
         for (run, range) in glyph_runs.zip(ranges) {
             let bold = crate::text::is_bold_face(run.run().font());
-            runs.push((shaped.text[range].to_owned(), bold, run.style().brush.0));
+            runs.push((shaped.text[range].to_owned(), bold, run.style().brush.color));
         }
     }
     runs
@@ -539,4 +539,140 @@ fn a_background_stops_before_the_space_a_line_breaks_at() {
         (rect.x + rect.width - (start + width)).abs() < 0.01,
         "{rect:?}"
     );
+}
+
+/// The `vertical-align` raise of each glyph run in `id`'s paragraph, with
+/// its text.
+fn raises(layouts: &Layouts, id: NodeId) -> Vec<(String, f32)> {
+    let shaped = layouts.text(id).expect("a paragraph");
+    let mut runs = Vec::new();
+    for line in shaped.layout.layout.lines() {
+        let ranges = crate::text::glyph_run_ranges(&line);
+        let glyph_runs = line.items().filter_map(|item| match item {
+            parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+            parley::PositionedLayoutItem::InlineBox(_) => None,
+        });
+        for (run, range) in glyph_runs.zip(ranges) {
+            runs.push((shaped.text[range].to_owned(), run.style().brush.raise));
+        }
+    }
+    runs
+}
+
+#[test]
+fn sup_and_sub_move_their_text_off_the_baseline() {
+    let (doc, layouts) = lay_out("<p>x<sup>2</sup> y<sub>i</sub></p>");
+    let p = all(&doc, &local_name!("p"))[0];
+    let runs = raises(&layouts, p);
+    let raise_of = |text: &str| {
+        runs.iter()
+            .find(|(run, _)| run.contains(text))
+            .unwrap_or_else(|| panic!("no run with {text:?} in {runs:?}"))
+            .1
+    };
+    // Blink's offsets, from the parent's 16px font: a third plus one up, a
+    // fifth plus one down, each cut to Blink's 1/64 px layout unit (6.333
+    // to 405/64, 4.2 to 268/64).
+    assert_eq!(raise_of("2"), 405.0 / 64.0);
+    assert_eq!(raise_of("i"), -268.0 / 64.0);
+    assert_eq!(raise_of("x"), 0.0);
+    // Raised text needs room: the line is taller than one line of text.
+    assert!(boxes(&doc, &layouts, &local_name!("p"))[0].size.height > one_line());
+}
+
+#[test]
+fn a_raised_background_moves_with_its_text() {
+    let (doc, layouts) =
+        lay_out(r#"<p>x<span style="vertical-align: 6px; background: red">y</span></p>"#);
+    let p = all(&doc, &local_name!("p"))[0];
+    let shaped = layouts.text(p).unwrap();
+    let rect = shaped.decorations[0];
+    let baseline = shaped.layout.baseline(0).unwrap();
+    assert_eq!(rect.y, baseline - 6.0 - 17.0);
+}
+
+/// The first span's box and its paragraph's first baseline.
+fn aligned_box(body: &str) -> (Layout, f32) {
+    let (doc, layouts) = lay_out(body);
+    let p = all(&doc, &local_name!("p"))[0];
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    (span, layouts.text(p).unwrap().layout.baseline(0).unwrap())
+}
+
+#[test]
+fn vertical_align_places_an_inline_block_against_the_parent() {
+    let block = |align: &str, height: u32| {
+        format!(
+            r#"<p>x<span style="display: inline-block; width: 10px; height: {height}px; vertical-align: {align}"></span></p>"#
+        )
+    };
+    // A length raises the bottom (its baseline) off the line's baseline.
+    let (span, baseline) = aligned_box(&block("5px", 10));
+    assert_eq!(span.location.y + 10.0, baseline - 5.0);
+    // `middle`: the box's middle half the parent's x-height above the
+    // baseline.
+    let (span, baseline) = aligned_box(&block("middle", 20));
+    let x_height = crate::text::x_height(16.0, 400.0);
+    assert!((span.location.y + 10.0 - (baseline - x_height / 2.0)).abs() < 1.0);
+    // `text-top`: the top with the top of the parent's content area, the
+    // font's 17px ascent above the baseline.
+    let (span, baseline) = aligned_box(&block("text-top", 30));
+    assert_eq!(span.location.y, baseline - 17.0);
+    // `text-bottom`: the bottom with the bottom of the content area, 5px
+    // below the baseline.
+    let (span, baseline) = aligned_box(&block("text-bottom", 30));
+    assert_eq!(span.location.y + 30.0, baseline + 5.0);
+}
+
+#[test]
+fn vertical_align_top_and_bottom_follow_the_line_box() {
+    let block = |align: &str| {
+        format!(
+            r#"<p style="line-height: 40px">x<span style="display: inline-block; width: 10px; height: 10px; vertical-align: {align}"></span></p>"#
+        )
+    };
+    let (top, _) = aligned_box(&block("top"));
+    assert_eq!(top.location.y, 0.0);
+    let (bottom, _) = aligned_box(&block("bottom"));
+    assert_eq!(bottom.location.y + 10.0, 40.0);
+}
+
+#[test]
+fn a_line_aligned_box_taller_than_the_line_grows_it() {
+    let (doc, layouts) = lay_out(
+        r#"<p>x<span style="display: inline-block; width: 10px; height: 50px; vertical-align: top"></span></p>"#,
+    );
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    assert_eq!(span.location.y, 0.0);
+    assert_eq!(
+        boxes(&doc, &layouts, &local_name!("p"))[0].size.height,
+        50.0
+    );
+}
+
+#[test]
+fn positions_snap_to_absolute_pixels() {
+    // The second div starts at 10.4px and its child 0.4px below that, at
+    // 10.8px: Chrome draws the child at pixel 11. Rounding each offset on
+    // its own would put it at 10 + 0.
+    let (doc, layouts) = lay_out(
+        r#"<div style="height: 10.4px"></div><div style="padding-top: 0.4px"><div style="height: 5px"></div></div>"#,
+    );
+    let divs = divs(&doc, &layouts);
+    assert_eq!(divs[1].location.y, 10.0);
+    assert_eq!(divs[2].location.y, 1.0);
+}
+
+#[test]
+fn raised_and_lowered_text_make_room_on_their_own_side() {
+    let height = |body: &str| {
+        let (doc, layouts) = lay_out(body);
+        let p = all(&doc, &local_name!("p"))[0];
+        layouts.text(p).unwrap().layout.height
+    };
+    // `<sup>` (13.33px, 14px ascent, 4px descent) raised 405/64: the line
+    // reaches 14 + 405/64 above the baseline, the strut's 5 below.
+    assert_eq!(height("<p>x<sup>2</sup></p>"), 14.0 + 405.0 / 64.0 + 5.0);
+    // `<sub>` lowered 268/64: the strut's 17 above, 4 + 268/64 below.
+    assert_eq!(height("<p>x<sub>2</sub></p>"), 17.0 + 4.0 + 268.0 / 64.0);
 }
