@@ -65,7 +65,7 @@ v3'ün ve uygulama tuzakları notunun değerlendirmesi:
 | Beş epoch (kare + dört aşama) | **Alınmadı:** kare sayacı yeter (§2'deki karar). Taffy'nin önbelleği girdi anahtarlı; bitler ve erken kesme aşama epoch'larının yanıtladığı soruyu zaten yanıtlıyor. Ölçüm aksini gösterirse M5'in yürütme notlarına girer |
 | Döşeme boyutu parametre, uyarlanır döşeme sonra | **Alındı:** M5'te sabit varsayılan ve ayar; 16, 32, 64 ölçülüp kazanan varsayılan olur. Uyarlanır döşeme M9'da (kompozitör), önerinin dediği M6'da değil: M6 bağlamaların taşı |
 | Tuzak 1: `HashMap<NodeId, …>` yerine yan tablolar | **Alındı, kural olarak** (§3.12). Düğüme bağlı her veri `NodeId::index()` ile indekslenen düz bir vektörde, nesil denetimiyle; layout ve stil durumunun bugün durduğu gibi. Taslaktaki journal haritası da yan tabloya çevrildi (§3.2) |
-| Tuzak 2: Work Graph'ta döngü ve kilitlenme | **M9'a yazıldı.** Kenarlar yalnızca ağaç yapısından ve aşama sırasından gelirse graf yapı gereği döngüsüzdür; topolojik sıralama ve döngü testi o kapının kabulüne girer. Yüzdelik çocuklu içsel boyut gibi CSS döngüleri grafla değil, CSS'in döngüsel yüzde kurallarıyla Taffy'de çözülür |
+| Tuzak 2: Work Graph'ta döngü ve kilitlenme | **M9'a yazıldı.** Planlanan bağımlılık türleriyle graf yönlü ve döngüsüz (DAG) kurulmalıdır. Bu bir varsayım değil, kabul testidir: topolojik sıralama ve döngü tespiti kapının kabulüne girer; `Resource`, kardeş ve alt ağaçlar arası kenarlar eklendikçe test de genişler. Yüzdelik çocuklu içsel boyut gibi CSS döngüleri grafla değil, CSS'in döngüsel yüzde kurallarıyla Taffy'de çözülür |
 | Tuzak 3: EIC `erk-dom`'a giremez, `erk-dom` kirlenme bitlerini bilmez | **Alındı** (§3.12). Yeni `erk-invalidation` crate'i yalnızca `erk-dom`'a bağımlı; muhafızı kendisiyle aynı PR'da |
 
 ## 3. Mimari
@@ -266,9 +266,12 @@ değerlendirilir. O değerlendirmenin girdileri bugünden yazılı:
   `ParentConstraint`, `Resource`. Stil kenarları Stylo'nun içinde kalır.
 - **İş birimi alt ağaçtır, düğüm değil:** 10 bin düğüm için 10 bin iş,
   iş çalma yükünü patlatır.
-- **Döngü yapı gereği olmaz:** kenarlar yalnızca ağaçtan ve aşama
-  sırasından gelir; topolojik sıralama ve bir döngü testi kapının
-  kabulündedir.
+- **Graf DAG olarak kurulmalı, bu da test edilmeli:** planlanan bağımlılık
+  türleriyle graf yönlü ve döngüsüz kurulur. "Yapı gereği döngü olmaz"
+  denmez: `Resource`, kardeş ya da alt ağaçlar arası kenarlar eklendikçe bu
+  iddia her seferinde yeniden doğru olmak zorunda kalır. Topolojik sıralama
+  ve döngü tespiti kapının kabul testidir; tespit edilen bir döngü,
+  kilitlenme değil hata olur.
 
 ### 3.10 Sinyaller ve bağlamalar
 
@@ -342,7 +345,7 @@ Taban M2'nin tam yeniden hesabı; her ölçüm onunla karşılaştırılır. Say
 | B7 | 120 Hz'de sürükleme | p99 kare süresi |
 | B8 | Erişilebilirlik kapalı ve açık, 10 bin düğüm | Erişilebilirlik ağacına harcanan süre |
 | B9 | B1, artımlı ve tam yeniden hesap | Oran |
-| B10 | Art arda 100 transaction | Uygulanan kare sayısı |
+| B10 | Art arda 100 transaction | Her aşamadaki sayı ayrı ayrı: journal kayıtları, birleştirme sonrası değişiklikler, DOM'a uygulamalar, layout geçişleri, display list yeniden kurulumları, sunulan kareler. Tek başına "bir kare", birleştirmenin işini gösterip göstermediğini söylemez |
 | B11 | Döşeme boyutu 16, 32, 64; B6 ve B7 senaryolarında | Hasar alanı ve kare süresi; kazanan varsayılan olur |
 
 Ölçümler `measure` örneğinin yanına bir kıyas örneği olarak gelir.
@@ -352,7 +355,7 @@ Adlandırılmış bir makinede koşar ve plana yazılır, M1.0'daki ölçümler 
 
 | Adım | İçerik | Kabul |
 |---|---|---|
-| M5.0 | Ölçüm altyapısı: B1–B10 senaryoları, M2'nin tam yeniden hesabı taban | Taban sayıları plana yazılmış |
+| M5.0 | Ölçüm altyapısı: B1–B11 senaryoları, M2'nin tam yeniden hesabı taban | Taban sayıları plana yazılmış |
 | M5.1 | Mutation journal, birleştirme, transaction | 100 metin değişikliği bir uygulama; birleştirme kuralları testli |
 | M5.2 | `erk-invalidation` crate'i: bitler, neden tamponu, cebir testleri, yan tablolar; crate'in bağımlılık muhafızı | Özellik testleri yeşil; bir mutasyon (koşulsuz terfi) yakalanıyor; muhafız kasıtlı bir bağımlılığı yakalıyor |
 | M5.3 | Kalıcı stil: Stylo snapshot'ları, yeniden stil ipuçları, hasar → bitler | Bir sınıf değişikliği yalnızca etkilenen elemanları stilliyor; `:has()` vakası çalışıyor |
@@ -438,8 +441,8 @@ modeline bağlar:
 5. Kutu başına display list parçaları, düğüm → parça yan tablosu, arka
    uçtan bağımsız hasar bölgesi; döşeme boyutu ölçümle.
 6. AccessKit ağacı etkinleşmeyle kurulur, sonra yalnızca kirliler.
-7. Genel iş grafiği yok; M9'da ölçüm kapısı, alt ağaç birimli ve yapı gereği
-   döngüsüz.
+7. Genel iş grafiği yok; M9'da ölçüm kapısı, alt ağaç birimli; DAG olarak
+   kurulur ve döngü tespiti kabul testidir.
 8. `erk-invalidation` yalnızca `erk-dom`'a bağımlı; düğüme bağlı veri yan
    tablolarda.
 9. Her ölçüm M2'nin tam yeniden hesabına karşı; her artımlı yol display
