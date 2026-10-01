@@ -45,7 +45,10 @@ does not lay out or paint is not supported.
 | `ex`, `ch` units | Supported | `ex_and_ch_come_from_the_embedded_font` |
 | `display: none`, `visibility: hidden` | Supported | `display_none_generates_no_box`, `visibility_hidden_paints_neither_background_nor_text` |
 | Inline elements keep their own colour, weight, size and line height within a paragraph | Supported | `an_inline_element_keeps_its_own_weight`, `an_inline_element_keeps_its_own_colour` |
-| Inline boxes: borders, padding and backgrounds on inline elements, inline images, `inline-block` | M1 | |
+| Inline elements' horizontal padding, border and margin take room in the line; their background is painted per line, around the font's ascent and descent plus vertical padding | Supported | `inline_padding_border_and_margin_take_room_in_the_line`, `inline_padding_extends_the_background_but_not_the_line`, `a_wrapped_inline_background_gets_one_rectangle_per_line`, `an_inline_background_lies_between_its_block_and_its_text`. Percentages resolve to zero; a padded element's ends are line-break opportunities |
+| `inline-block`, `inline-flex`, `inline-grid` (atomic inlines) on the line's baseline | Supported | `an_inline_block_is_laid_out_and_sits_on_the_baseline`, `an_inline_block_with_text_aligns_its_text_with_the_line`, `text_after_a_tall_line_moves_down`. A block-container inline-block uses its first line's baseline where CSS uses the last |
+| `vertical-align` | M1 | |
+| Inline images | M1 | With `<img>` (below) |
 | Flexbox | M1 | Laid out by Taffy today, not yet verified |
 | `position: absolute`, `relative`, `fixed` | M1 | |
 | `overflow: auto`, `scroll`, scroll containers | M2 | |

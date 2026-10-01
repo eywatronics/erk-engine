@@ -7,13 +7,18 @@
 //! src/layout/mod.rs (MIT OR Apache-2.0).
 //!
 //! A block whose children are only text and inline elements becomes a
-//! paragraph leaf: Parley shapes its text as one layout, each inline
-//! element's text in its own style, and Taffy sees only the resulting width
-//! and height. Inline boxes (borders, padding, images inside a line) come
-//! later in M1.3. In a block that mixes block children with text, each run
-//! of inline content becomes an anonymous paragraph box (CSS 2 §9.2.1.1).
-//! Anonymous boxes live only in this side table, at indices past the arena's
-//! slots: the DOM, and the NodeIds a host sees, never contain them.
+//! paragraph: Parley shapes its text as one layout, each inline element's
+//! text in its own style. An inline element's horizontal margin, border and
+//! padding become inline boxes of that width at its two ends, and its
+//! background is painted per line it spans. An atomic inline
+//! (`inline-block`, `inline-flex`) is a Taffy child of the paragraph: it is
+//! laid out first, then placed in the line as an inline box of its size,
+//! its baseline on the line's (the approach of blitz-dom 0.3.0-beta.2,
+//! src/layout/inline.rs, MIT OR Apache-2.0). In a block that mixes block
+//! children with text, each run of inline content becomes an anonymous
+//! paragraph box (CSS 2 §9.2.1.1). Anonymous boxes live only in this side
+//! table, at indices past the arena's slots: the DOM, and the NodeIds a host
+//! sees, never contain them.
 
 mod calc;
 
@@ -22,18 +27,19 @@ mod tests;
 
 use erk_dom::{Document, NodeData, NodeId};
 use erk_style::style::Atom;
-use erk_style::style::values::specified::box_::DisplayOutside;
+use erk_style::style::values::specified::box_::{DisplayInside, DisplayOutside};
 use erk_style::{ComputedValues, Styles};
 use taffy::{
-    AvailableSpace, BlockContext, Cache, CacheTree, Display, Layout, LayoutBlockContainer,
-    LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput, LayoutPartialTree,
-    RoundTree, Size, Style, TraversePartialTree, TraverseTree, compute_block_layout,
+    AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Display, Layout,
+    LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
+    LayoutPartialTree, Line, Overflow, Point, RequestedAxis, ResolveOrZero, RoundTree, RunMode,
+    Size, SizingMode, Style, TraversePartialTree, TraverseTree, compute_block_layout,
     compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
     compute_root_layout, round_layout,
 };
 
 use self::calc::CalcTable;
-use crate::text::{Paragraph, TextBrush, TextEngine};
+use crate::text::{AtomBox, DecorationRect, InlineLayout, InlineToken, Paragraph, TextEngine};
 
 /// The result of laying out one document.
 pub(crate) struct Layouts {
@@ -51,21 +57,25 @@ pub(crate) struct AnonymousText {
     pub(crate) text: ShapedText,
 }
 
-/// A paragraph's text and its shaped, line-broken layout.
+/// A paragraph's text, its shaped and line-broken layout, and the
+/// backgrounds of its inline elements, all relative to the paragraph's
+/// content box.
 pub(crate) struct ShapedText {
     pub(crate) text: String,
-    pub(crate) layout: parley::Layout<TextBrush>,
+    pub(crate) layout: InlineLayout,
+    pub(crate) decorations: Vec<DecorationRect>,
 }
 
 impl Layouts {
     /// The final (pixel-rounded) layout of a box, relative to its parent box.
-    /// `None` for nodes that generate no box.
+    /// `None` for nodes that generate no box. An atomic inline's parent box
+    /// is the block it sits in, whichever inline elements are between.
     pub(crate) fn get(&self, id: NodeId) -> Option<&Layout> {
         self.nodes.get(id.index() as usize)?.as_ref()
     }
 
-    /// The shaped, line-broken text of a paragraph leaf, positioned relative
-    /// to the leaf's content box.
+    /// The shaped, line-broken text of a paragraph, positioned relative to
+    /// its content box.
     pub(crate) fn text(&self, id: NodeId) -> Option<&ShapedText> {
         self.text.get(id.index() as usize)?.as_ref()
     }
@@ -87,7 +97,12 @@ pub(crate) fn layout(
     height: f32,
 ) -> Layouts {
     let slots = doc.capacity_hint();
-    let mut tree = LayoutTree::build(doc, styles, text);
+    let (nodes, calcs) = build(doc, styles);
+    let mut tree = LayoutTree {
+        nodes,
+        calcs: &calcs,
+        text,
+    };
     let root = taffy_id(doc.root());
     compute_root_layout(
         &mut tree,
@@ -99,25 +114,29 @@ pub(crate) fn layout(
     );
     round_layout(&mut tree, root);
 
-    // Shape each paragraph once more at its final width, for painting.
-    let LayoutTree { nodes, text, .. } = tree;
-    let text_layouts = nodes
-        .iter()
+    let LayoutTree { mut nodes, .. } = tree;
+    // An atomic inline in an anonymous box is laid out relative to that
+    // box, which the DOM does not have: make it relative to the block.
+    for index in slots..nodes.len() {
+        let origin = nodes[index].layout.location;
+        for child in nodes[index].children.clone() {
+            let location = &mut nodes[usize::from(child)].layout.location;
+            location.x += origin.x;
+            location.y += origin.y;
+        }
+    }
+    let mut text: Vec<Option<ShapedText>> = nodes
+        .iter_mut()
         .map(|node| {
             let paragraph = node.paragraph.as_ref().filter(|_| node.in_tree)?;
-            let layout = &node.layout;
-            let content_width = layout.size.width
-                - layout.padding.left
-                - layout.padding.right
-                - layout.border.left
-                - layout.border.right;
+            let layout = node.shaped.take()?;
             Some(ShapedText {
                 text: paragraph.text.clone(),
-                layout: text.shape(paragraph, Some(content_width)),
+                decorations: layout.decorations(paragraph),
+                layout,
             })
         })
         .collect();
-    let mut text: Vec<Option<ShapedText>> = text_layouts;
     let mut anonymous: Vec<Vec<AnonymousText>> = (0..slots).map(|_| Vec::new()).collect();
     for (index, node) in nodes.iter().enumerate().skip(slots) {
         if let (Some(parent), Some(shaped)) = (node.anonymous_parent, text[index].take()) {
@@ -143,10 +162,13 @@ pub(crate) fn layout(
 struct LayoutNode {
     /// Whether this arena slot generates a box in the layout tree.
     in_tree: bool,
+    /// For a paragraph, its atomic inlines.
     children: Vec<taffy::NodeId>,
     style: Style<Atom>,
-    /// Set for paragraph leaves: blocks laid out as one run of text.
+    /// Set for paragraphs: blocks laid out as one run of inline content.
     paragraph: Option<Paragraph>,
+    /// A paragraph's lines as its final layout broke them.
+    shaped: Option<InlineLayout>,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     cache: Cache,
@@ -156,103 +178,287 @@ struct LayoutNode {
 
 struct LayoutTree<'t> {
     nodes: Vec<LayoutNode>,
-    calcs: CalcTable,
+    calcs: &'t CalcTable,
     text: &'t mut TextEngine,
 }
 
-impl<'t> LayoutTree<'t> {
-    fn build(doc: &Document, styles: &Styles, text: &'t mut TextEngine) -> Self {
-        let mut nodes: Vec<LayoutNode> = (0..doc.capacity_hint())
-            .map(|_| LayoutNode::default())
-            .collect();
-        let mut calcs = CalcTable::default();
+type StyleArc = erk_style::style::servo_arc::Arc<ComputedValues>;
 
-        // The document node is the initial containing block's box.
-        let root = &mut nodes[doc.root().index() as usize];
-        root.in_tree = true;
-        root.style = Style {
-            display: Display::Block,
-            ..Style::DEFAULT
-        };
+type Token = InlineToken<StyleArc>;
 
-        let mut stack = vec![doc.root()];
-        while let Some(parent) = stack.pop() {
-            // The children in tree order: block-level elements, and the text
-            // of everything inline (text nodes and inline elements).
-            let mut entries = Vec::new();
-            let mut has_blocks = false;
-            for child in doc.children(parent) {
-                match doc.node(child).map(|node| &node.data) {
-                    Some(NodeData::Text(text)) => {
-                        if let Some(style) = styles.computed(parent) {
-                            entries.push(Entry::Inline(vec![(text.clone(), style)]));
-                        }
-                    }
-                    Some(NodeData::Element(_)) => {
-                        // Elements inside display:none are not styled, so a
-                        // missing style means no box.
-                        let Some(computed) = styles.computed(child) else {
-                            continue;
-                        };
-                        if is_inline_level(&computed) {
-                            let mut pieces = Vec::new();
-                            inline_pieces(doc, styles, child, &computed, &mut pieces);
-                            entries.push(Entry::Inline(pieces));
-                        } else {
-                            has_blocks = true;
-                            entries.push(Entry::Block(child, computed));
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let parent_style = styles.computed(parent);
+/// The atomic inlines met while reading inline content.
+type Atoms = Vec<(NodeId, StyleArc)>;
 
-            // A paragraph leaf: only inline content, laid out as one run.
-            if !has_blocks && parent != doc.root() {
-                let pieces: Vec<Piece> = entries
-                    .into_iter()
-                    .flat_map(|entry| match entry {
-                        Entry::Inline(pieces) => pieces,
-                        Entry::Block(..) => Vec::new(),
-                    })
-                    .collect();
-                if let Some(computed) = parent_style {
-                    let paragraph = Paragraph::new(&pieces, &computed);
-                    if !paragraph.text.is_empty() {
-                        nodes[parent.index() as usize].paragraph = Some(paragraph);
+/// A child of a block, as layout sees it.
+enum Entry {
+    Block(NodeId, StyleArc),
+    /// A text node, or an inline element with everything inside it.
+    Inline(Vec<Token>, Atoms),
+}
+
+/// Build the layout tree: which slots generate boxes, their Taffy styles,
+/// and the paragraphs.
+fn build(doc: &Document, styles: &Styles) -> (Vec<LayoutNode>, CalcTable) {
+    let mut nodes: Vec<LayoutNode> = (0..doc.capacity_hint())
+        .map(|_| LayoutNode::default())
+        .collect();
+    let mut calcs = CalcTable::default();
+
+    // The document node is the initial containing block's box.
+    let root = &mut nodes[doc.root().index() as usize];
+    root.in_tree = true;
+    root.style = Style {
+        display: Display::Block,
+        ..Style::DEFAULT
+    };
+
+    let mut stack = vec![doc.root()];
+    while let Some(parent) = stack.pop() {
+        // The children in tree order: block-level elements, and everything
+        // inline (text nodes, inline elements, atomic inlines).
+        let mut entries = Vec::new();
+        let mut has_blocks = false;
+        for child in doc.children(parent) {
+            match doc.node(child).map(|node| &node.data) {
+                Some(NodeData::Text(text)) => {
+                    if let Some(style) = styles.computed(parent) {
+                        entries.push(Entry::Inline(
+                            vec![InlineToken::Text(text.clone(), style)],
+                            Vec::new(),
+                        ));
                     }
                 }
-                continue;
+                Some(NodeData::Element(_)) => {
+                    // Elements inside display:none are not styled, so a
+                    // missing style means no box.
+                    let Some(computed) = styles.computed(child) else {
+                        continue;
+                    };
+                    if is_atomic_inline(&computed) {
+                        entries.push(Entry::Inline(
+                            vec![InlineToken::Atom(child.index() as usize)],
+                            vec![(child, computed)],
+                        ));
+                    } else if is_inline_level(&computed) {
+                        let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
+                        inline_tokens(doc, styles, child, &computed, &mut tokens, &mut atoms);
+                        entries.push(Entry::Inline(tokens, atoms));
+                    } else {
+                        has_blocks = true;
+                        entries.push(Entry::Block(child, computed));
+                    }
+                }
+                _ => {}
             }
+        }
+        let parent_style = styles.computed(parent);
 
-            let mut children = Vec::new();
-            let mut run: Vec<Piece> = Vec::new();
+        // A paragraph: only inline content, laid out as one run.
+        if !has_blocks && parent != doc.root() {
+            let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
-                match entry {
-                    Entry::Inline(pieces) => run.extend(pieces),
-                    Entry::Block(child, computed) => {
-                        let style = stylo_taffy::to_taffy_style(&computed);
-                        if style.display == Display::None {
-                            continue;
-                        }
-                        push_anonymous(&mut nodes, &mut children, parent, &parent_style, &mut run);
-                        calcs.record(&computed);
-                        let node = &mut nodes[child.index() as usize];
-                        node.in_tree = true;
-                        node.style = style;
-                        children.push(taffy_id(child));
-                        stack.push(child);
-                    }
+                if let Entry::Inline(more_tokens, more_atoms) = entry {
+                    tokens.extend(more_tokens);
+                    atoms.extend(more_atoms);
                 }
             }
-            push_anonymous(&mut nodes, &mut children, parent, &parent_style, &mut run);
-            nodes[parent.index() as usize].children = children;
+            if let Some(computed) = parent_style {
+                let paragraph = Paragraph::new(&tokens, &computed);
+                if !paragraph.is_empty() {
+                    let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms);
+                    let node = &mut nodes[parent.index() as usize];
+                    node.paragraph = Some(paragraph);
+                    node.children = children;
+                }
+            }
+            continue;
         }
 
-        Self { nodes, calcs, text }
+        let mut children = Vec::new();
+        let mut run = Run::default();
+        for entry in entries {
+            match entry {
+                Entry::Inline(tokens, atoms) => {
+                    run.tokens.extend(tokens);
+                    run.atoms.extend(atoms);
+                }
+                Entry::Block(child, computed) => {
+                    let style = stylo_taffy::to_taffy_style(&computed);
+                    if style.display == Display::None {
+                        continue;
+                    }
+                    run.close(
+                        &mut nodes,
+                        &mut calcs,
+                        &mut stack,
+                        &mut children,
+                        parent,
+                        &parent_style,
+                    );
+                    calcs.record(&computed);
+                    let node = &mut nodes[child.index() as usize];
+                    node.in_tree = true;
+                    node.style = style;
+                    children.push(taffy_id(child));
+                    stack.push(child);
+                }
+            }
+        }
+        run.close(
+            &mut nodes,
+            &mut calcs,
+            &mut stack,
+            &mut children,
+            parent,
+            &parent_style,
+        );
+        nodes[parent.index() as usize].children = children;
     }
 
+    (nodes, calcs)
+}
+
+/// Inline content between the block children of a block.
+#[derive(Default)]
+struct Run {
+    tokens: Vec<Token>,
+    atoms: Atoms,
+}
+
+impl Run {
+    /// Close the run: unless it is only whitespace, it becomes an anonymous
+    /// paragraph box after the children so far, styled like its block.
+    fn close(
+        &mut self,
+        nodes: &mut Vec<LayoutNode>,
+        calcs: &mut CalcTable,
+        stack: &mut Vec<NodeId>,
+        children: &mut Vec<taffy::NodeId>,
+        parent: NodeId,
+        parent_style: &Option<StyleArc>,
+    ) {
+        let Self { tokens, atoms } = std::mem::take(self);
+        let Some(style) = parent_style else {
+            return;
+        };
+        let paragraph = Paragraph::new(&tokens, style);
+        if paragraph.is_empty() {
+            return;
+        }
+        let atoms = add_atoms(nodes, calcs, stack, atoms);
+        nodes.push(LayoutNode {
+            in_tree: true,
+            children: atoms,
+            style: Style {
+                display: Display::Block,
+                ..Style::DEFAULT
+            },
+            paragraph: Some(paragraph),
+            anonymous_parent: Some(parent.index() as usize),
+            ..LayoutNode::default()
+        });
+        children.push(taffy::NodeId::from(nodes.len() - 1));
+    }
+}
+
+/// Give each atomic inline a box of its own, laid out like a block of its
+/// display, and return them as the paragraph's children.
+fn add_atoms(
+    nodes: &mut [LayoutNode],
+    calcs: &mut CalcTable,
+    stack: &mut Vec<NodeId>,
+    atoms: Atoms,
+) -> Vec<taffy::NodeId> {
+    atoms
+        .into_iter()
+        .map(|(id, computed)| {
+            calcs.record(&computed);
+            let node = &mut nodes[id.index() as usize];
+            node.in_tree = true;
+            node.style = stylo_taffy::to_taffy_style(&computed);
+            stack.push(id);
+            taffy_id(id)
+        })
+        .collect()
+}
+
+fn is_inline_level(style: &ComputedValues) -> bool {
+    style.get_box().clone_display().outside() == DisplayOutside::Inline
+}
+
+/// An inline-level box laid out as a whole: `inline-block`, `inline-flex`,
+/// `inline-grid`.
+fn is_atomic_inline(style: &ComputedValues) -> bool {
+    let display = style.get_box().clone_display();
+    display.outside() == DisplayOutside::Inline
+        && matches!(
+            display.inside(),
+            DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid
+        )
+}
+
+/// The content of inline element `id`, in tree order: its start, the text
+/// of each text node with the style of its element, nested inline elements,
+/// atomic inlines, and its end.
+fn inline_tokens(
+    doc: &Document,
+    styles: &Styles,
+    id: NodeId,
+    style: &StyleArc,
+    tokens: &mut Vec<Token>,
+    atoms: &mut Atoms,
+) {
+    tokens.push(InlineToken::Open(style.clone()));
+    for child in doc.children(id) {
+        match doc.node(child).map(|node| &node.data) {
+            Some(NodeData::Text(content)) => {
+                tokens.push(InlineToken::Text(content.clone(), style.clone()));
+            }
+            Some(NodeData::Element(_)) => {
+                if let Some(child_style) = styles.computed(child) {
+                    if is_atomic_inline(&child_style) {
+                        tokens.push(InlineToken::Atom(child.index() as usize));
+                        atoms.push((child, child_style));
+                    } else {
+                        inline_tokens(doc, styles, child, &child_style, tokens, atoms);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    tokens.push(InlineToken::Close);
+}
+
+fn taffy_id(id: NodeId) -> taffy::NodeId {
+    taffy::NodeId::from(id.index() as usize)
+}
+
+/// How an atomic inline is laid out inside a paragraph whose content box
+/// offers `space`: as an independent formatting context, at its own size.
+fn atom_input(space: AvailableSpace) -> LayoutInput {
+    LayoutInput {
+        run_mode: RunMode::PerformLayout,
+        sizing_mode: SizingMode::InherentSize,
+        axis: RequestedAxis::Both,
+        known_dimensions: Size::NONE,
+        known_dimensions_are_definite: Size {
+            width: true,
+            height: true,
+        },
+        parent_size: Size {
+            width: space.into_option(),
+            height: None,
+        },
+        available_space: Size {
+            width: space,
+            height: AvailableSpace::MaxContent,
+        },
+        vertical_margins_are_collapsible: Line::FALSE,
+    }
+}
+
+impl<'t> LayoutTree<'t> {
     fn node(&self, id: taffy::NodeId) -> &LayoutNode {
         &self.nodes[usize::from(id)]
     }
@@ -267,18 +473,10 @@ impl<'t> LayoutTree<'t> {
         inputs: LayoutInput,
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
-        let node = &self.nodes[usize::from(id)];
-        if let Some(paragraph) = &node.paragraph {
-            let text = &mut *self.text;
-            let calcs = &self.calcs;
-            return compute_leaf_layout(
-                inputs,
-                &node.style,
-                |ptr, basis| calcs.resolve(ptr, basis),
-                |known, available| text.measure(paragraph, known, available),
-            );
+        if self.node(id).paragraph.is_some() {
+            return self.compute_paragraph_layout(id, inputs);
         }
-        match node.style.display {
+        match self.node(id).style.display {
             Display::Block => compute_block_layout(self, id, inputs, block_ctx),
             // A flow root establishes a new block formatting context: floats
             // and margins do not cross it.
@@ -288,79 +486,150 @@ impl<'t> LayoutTree<'t> {
             Display::None => LayoutOutput::HIDDEN,
         }
     }
-}
 
-type StyleArc = erk_style::style::servo_arc::Arc<ComputedValues>;
-
-/// A piece of inline text with the style of the element it belongs to.
-type Piece = (String, StyleArc);
-
-/// A child of a block, as layout sees it.
-enum Entry {
-    Block(NodeId, StyleArc),
-    /// The text of a text node, or everything inside an inline element.
-    Inline(Vec<Piece>),
-}
-
-/// Close the current run of inline content: unless it is only whitespace,
-/// it becomes an anonymous paragraph box after the children so far, styled
-/// like its block.
-fn push_anonymous(
-    nodes: &mut Vec<LayoutNode>,
-    children: &mut Vec<taffy::NodeId>,
-    parent: NodeId,
-    parent_style: &Option<StyleArc>,
-    run: &mut Vec<Piece>,
-) {
-    let pieces = std::mem::take(run);
-    let Some(style) = parent_style else {
-        return;
-    };
-    let paragraph = Paragraph::new(&pieces, style);
-    if paragraph.text.is_empty() {
-        return;
+    /// A paragraph is sized like a leaf whose content is its lines. Its
+    /// atomic inlines are laid out first, at the width the lines are broken
+    /// at, so their sizes can go into the lines; in the final layout they
+    /// are then placed where the lines put them.
+    fn compute_paragraph_layout(&mut self, id: taffy::NodeId, inputs: LayoutInput) -> LayoutOutput {
+        let index = usize::from(id);
+        let Some(paragraph) = self.nodes[index].paragraph.take() else {
+            return LayoutOutput::HIDDEN;
+        };
+        let style = self.nodes[index].style.clone();
+        let calcs = self.calcs;
+        let mut measured: Option<InlineLayout> = None;
+        let mut output = compute_leaf_layout(
+            inputs,
+            &style,
+            |ptr, basis| calcs.resolve(ptr, basis),
+            |known, available| {
+                let max_advance = known.width.or(match available.width {
+                    AvailableSpace::Definite(width) => Some(width),
+                    // Break at every opportunity: the result is as wide as
+                    // the longest unbreakable run.
+                    AvailableSpace::MinContent => Some(0.0),
+                    AvailableSpace::MaxContent => None,
+                });
+                let space = known
+                    .width
+                    .map_or(available.width, AvailableSpace::Definite);
+                let atoms = self.measure_atoms(&paragraph, space);
+                let shaped = self.text.shape(&paragraph, max_advance, &atoms);
+                let size = Size {
+                    width: known.width.unwrap_or_else(|| shaped.width()),
+                    height: known.height.unwrap_or(shaped.height),
+                };
+                measured = Some(shaped);
+                size
+            },
+        );
+        if inputs.run_mode == RunMode::PerformLayout {
+            let resolve = |ptr, basis| calcs.resolve(ptr, basis);
+            let padding = style
+                .padding
+                .resolve_or_zero(inputs.parent_size.width, resolve);
+            let border = style
+                .border
+                .resolve_or_zero(inputs.parent_size.width, resolve);
+            let content_width =
+                output.size.width - padding.left - padding.right - border.left - border.right;
+            let space = AvailableSpace::Definite(content_width);
+            let atoms = self.measure_atoms(&paragraph, space);
+            // A box sized from its own content (shrink-to-fit) is narrower
+            // than the width it was measured at: break and align the lines
+            // again at the final width.
+            let shaped = match measured {
+                Some(shaped) if shaped.broken_at(Some(content_width)) => shaped,
+                _ => self.text.shape(&paragraph, Some(content_width), &atoms),
+            };
+            let inset = Point {
+                x: padding.left + border.left,
+                y: padding.top + border.top,
+            };
+            let last_line = shaped.line_count().checked_sub(1);
+            output.baselines = Baselines {
+                first: shaped.baseline(0).map(|baseline| inset.y + baseline),
+                last: last_line
+                    .and_then(|line| shaped.baseline(line))
+                    .map(|baseline| inset.y + baseline),
+            };
+            self.place_atoms(&paragraph, &shaped, &atoms, inset, space);
+            self.nodes[index].shaped = Some(shaped);
+        }
+        self.nodes[index].paragraph = Some(paragraph);
+        output
     }
-    nodes.push(LayoutNode {
-        in_tree: true,
-        style: Style {
-            display: Display::Block,
-            ..Style::DEFAULT
-        },
-        paragraph: Some(paragraph),
-        anonymous_parent: Some(parent.index() as usize),
-        ..LayoutNode::default()
-    });
-    children.push(taffy::NodeId::from(nodes.len() - 1));
-}
 
-fn is_inline_level(style: &ComputedValues) -> bool {
-    style.get_box().clone_display().outside() == DisplayOutside::Inline
-}
+    /// Lay out each atomic inline of `paragraph` in `space` and return the
+    /// room it takes in a line.
+    fn measure_atoms(&mut self, paragraph: &Paragraph, space: AvailableSpace) -> Vec<AtomBox> {
+        let calcs = self.calcs;
+        let mut sizes = Vec::new();
+        for atom in paragraph.atoms() {
+            let output = self.compute_child_layout(taffy::NodeId::from(atom), atom_input(space));
+            let style = &self.nodes[atom].style;
+            let margin = style
+                .margin
+                .resolve_or_zero(space.into_option(), |ptr, basis| calcs.resolve(ptr, basis));
+            let outer_height = margin.top + output.size.height + margin.bottom;
+            // An inline-block's baseline is its last line's; one without
+            // lines, or that clips its content, sits on its bottom margin
+            // edge (CSS 2 §10.8.1).
+            let visible =
+                style.overflow.x == Overflow::Visible && style.overflow.y == Overflow::Visible;
+            let baseline = visible
+                .then(|| output.baselines.last.or(output.baselines.first))
+                .flatten();
+            let above = baseline.map_or(outer_height, |baseline| margin.top + baseline);
+            sizes.push(AtomBox {
+                width: (margin.left + output.size.width + margin.right).max(0.0),
+                above,
+                below: outer_height - above,
+            });
+        }
+        sizes
+    }
 
-/// The text inside inline element `id`, descending into nested inline
-/// elements, in tree order: each text node with the style of its element.
-fn inline_pieces(
-    doc: &Document,
-    styles: &Styles,
-    id: NodeId,
-    style: &StyleArc,
-    out: &mut Vec<Piece>,
-) {
-    for child in doc.children(id) {
-        match doc.node(child).map(|node| &node.data) {
-            Some(NodeData::Text(content)) => out.push((content.clone(), style.clone())),
-            Some(NodeData::Element(_)) => {
-                if let Some(child_style) = styles.computed(child) {
-                    inline_pieces(doc, styles, child, &child_style, out);
-                }
-            }
-            _ => {}
+    /// Give each atomic inline its final position: on its line's baseline,
+    /// where the line put it.
+    fn place_atoms(
+        &mut self,
+        paragraph: &Paragraph,
+        shaped: &InlineLayout,
+        sizes: &[AtomBox],
+        inset: Point<f32>,
+        space: AvailableSpace,
+    ) {
+        let calcs = self.calcs;
+        let resolve = |ptr, basis| calcs.resolve(ptr, basis);
+        let sizes: Vec<(usize, AtomBox)> = paragraph.atoms().zip(sizes.iter().copied()).collect();
+        for (order, (atom, x, baseline)) in shaped.atom_positions(paragraph).into_iter().enumerate()
+        {
+            let Some(&(_, size)) = sizes.iter().find(|(index, _)| *index == atom) else {
+                continue;
+            };
+            let id = taffy::NodeId::from(atom);
+            // The same input as when measuring: a cache hit.
+            let output = self.compute_child_layout(id, atom_input(space));
+            let style = &self.nodes[atom].style;
+            let basis = space.into_option();
+            let margin = style.margin.resolve_or_zero(basis, resolve);
+            let layout = Layout {
+                location: Point {
+                    x: inset.x + x + margin.left,
+                    y: inset.y + baseline - size.above + margin.top,
+                },
+                size: output.size,
+                scrollable_overflow_rect: output.scrollable_overflow_rect,
+                border: style.border.resolve_or_zero(basis, resolve),
+                padding: style.padding.resolve_or_zero(basis, resolve),
+                margin,
+                ..Layout::with_order(order as u32)
+            };
+            self.set_unrounded_layout(id, &layout);
         }
     }
-}
-
-fn taffy_id(id: NodeId) -> taffy::NodeId {
-    taffy::NodeId::from(id.index() as usize)
 }
 
 impl TraversePartialTree for LayoutTree<'_> {
