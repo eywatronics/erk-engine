@@ -488,3 +488,12 @@ konuyor. Sağlamlık üretecine uç flex değerleri eklendi.
 | İş parçacığı modeli, panik yakalama, fuzzy hesabı | Artı olarak not edildi; değişiklik yok |
 
 Taban çizgisi değişmedi: 2009 sonucun hepsi aynı.
+
+**İnceleme raporu: `docs/reviews/flexbox_commit_review.md` (2026-10-01, #18).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| `resolve_cdata` `"<style"` arıyor; `< style` gibi boşluklu bir yazım gözden kaçabilir | **Geçersiz:** HTML'de de XML'de de `<`'den sonra boşluk gelirse etiket değil metindir; `< style` aramamak doğru. Raporun dokunduğu yerde gerçek bir uç durum vardı ve düzeltildi: `"<style"` araması `<styles>`'ın başını da yakalıyordu; artık adın ardından boşluk, `>` ya da `/` gelmeli (`find_token`) |
+| `tag_end`'de öznitelik değerlerinin bitişiğindeki beklenmedik semboller kenar durum doğurabilir | **Kısmen geçerli:** rapor örnek vermiyor; bulunan somut durum tırnaksız bir değerin içindeki kesme işaretiydi (`title=it's`), tırnak açılışı sanılıyordu. Artık tırnak yalnızca `=`'den hemen sonra (boşluklar arada olabilir) bir değer açıyor |
+
+İki düzeltme de testli ve mutasyonla denendi (2/2); WPT sonuçları değişmedi.
