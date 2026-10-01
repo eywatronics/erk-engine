@@ -106,13 +106,28 @@ fn elements(markup: &str, name: &str) -> Vec<String> {
             from = start;
             continue;
         }
-        let Some(end) = markup[start..].find('>') else {
+        let Some(end) = tag_end(&markup[start..]) else {
             break;
         };
         found.push(markup[start..start + end].to_owned());
         from = start + end;
     }
     found
+}
+
+/// Where the tag that `rest` is inside ends: the first `>` outside a quoted
+/// attribute value, so `title="a > b"` does not end it early.
+fn tag_end(rest: &str) -> Option<usize> {
+    let mut quote = None;
+    for (index, c) in rest.char_indices() {
+        match (quote, c) {
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(open), _) if c == open => quote = None,
+            (None, '>') => return Some(index),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The value of attribute `name` in a start tag's attribute text: quoted
@@ -170,23 +185,37 @@ fn attribute<'a>(attributes: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// What XML parsing would do to an XHTML test that an HTML parser does not:
-/// drop `<![CDATA[` and `]]>` markers (an HTML parser keeps them inside
-/// `<style>` as text, and the first rule is lost to them), and close
-/// self-closing elements that are not void (`<div/>` is an empty div in
-/// XML, an open one in HTML). Erk has no XML parser; this lets XHTML tests
-/// test layout rather than parsing.
+/// read CDATA sections (see `resolve_cdata`; inside `<style>` an HTML parser
+/// would keep the markers as text and lose the first rule to them), and
+/// close self-closing elements that are not void (`<div/>` is an empty div
+/// in XML, an open one in HTML). Erk has no XML parser; this lets XHTML
+/// tests test layout rather than parsing.
 pub fn xhtml_as_html(markup: &str) -> String {
     const VOID: &[&str] = &[
         "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
         "track", "wbr",
     ];
-    let markup = markup.replace("<![CDATA[", "").replace("]]>", "");
+    let markup = resolve_cdata(markup);
     let mut out = String::with_capacity(markup.len());
     let mut rest = markup.as_str();
     while let Some(open) = rest.find('<') {
         out.push_str(&rest[..open]);
         rest = &rest[open..];
-        let Some(close) = rest.find('>') else {
+        // A comment is copied whole: an apostrophe in it is not a quote.
+        if rest.starts_with("<!--") {
+            let end = rest.find("-->").map_or(rest.len(), |end| end + 3);
+            out.push_str(&rest[..end]);
+            rest = &rest[end..];
+            continue;
+        }
+        // Only an element tag can self-close; a declaration, a processing
+        // instruction or a stray `<` in text is copied as it is.
+        if !rest[1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/') {
+            out.push('<');
+            rest = &rest[1..];
+            continue;
+        }
+        let Some(close) = tag_end(rest) else {
             break;
         };
         let tag = &rest[..=close];
@@ -208,6 +237,60 @@ pub fn xhtml_as_html(markup: &str) -> String {
         rest = &rest[close + 1..];
     }
     out.push_str(rest);
+    out
+}
+
+/// CDATA sections as XML reads them. Inside `<style>` or `<script>`, whose
+/// content an HTML parser keeps as raw text, only the markers go. Anywhere
+/// else the section is text, so its content is escaped: dropping the
+/// markers there would turn `<![CDATA[<b>]]>` into an element. A CDATA
+/// marker written inside a CSS string is not told apart (not seen in the
+/// suites Erk runs).
+fn resolve_cdata(markup: &str) -> String {
+    let lower = markup.to_ascii_lowercase();
+    let mut out = String::with_capacity(markup.len());
+    let mut raw_text: Option<&str> = None;
+    let mut index = 0;
+    while index < markup.len() {
+        // The next thing that changes what a CDATA section means.
+        let next = ["<![cdata[", "<style", "</style", "<script", "</script"]
+            .iter()
+            .filter_map(|token| lower[index..].find(token).map(|at| (index + at, *token)))
+            .min_by_key(|(at, _)| *at);
+        let Some((at, token)) = next else {
+            break;
+        };
+        out.push_str(&markup[index..at]);
+        match token {
+            "<![cdata[" => {
+                let content_start = at + token.len();
+                let end = lower[content_start..]
+                    .find("]]>")
+                    .map_or(markup.len(), |end| content_start + end);
+                let content = &markup[content_start..end];
+                if raw_text.is_some() {
+                    out.push_str(content);
+                } else {
+                    out.push_str(
+                        &content
+                            .replace('&', "&amp;")
+                            .replace('<', "&lt;")
+                            .replace('>', "&gt;"),
+                    );
+                }
+                index = (end + 3).min(markup.len());
+                continue;
+            }
+            "<style" => raw_text = Some("style"),
+            "<script" => raw_text = Some("script"),
+            _ => raw_text = None,
+        }
+        out.push_str(&markup[at..at + token.len()]);
+        index = at + token.len();
+    }
+    if index < markup.len() {
+        out.push_str(&markup[index..]);
+    }
     out
 }
 
@@ -257,6 +340,39 @@ mod tests {
                     total_pixels: (200, 300)
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn a_quoted_greater_than_does_not_end_a_tag() {
+        let markup = r#"<link title="a > b" rel="match" href="ref.html"><meta name="fuzzy" content="x>y:0-1;0-2">"#;
+        assert_eq!(
+            references(markup),
+            vec![Reference {
+                relation: Relation::Match,
+                href: "ref.html".to_owned()
+            }]
+        );
+        assert_eq!(fuzzy(markup).len(), 1);
+        assert_eq!(
+            xhtml_as_html(r#"<div title="a > b"/>"#),
+            r#"<div title="a > b"></div>"#
+        );
+    }
+
+    #[test]
+    fn an_apostrophe_in_a_comment_is_not_a_quote() {
+        assert_eq!(
+            xhtml_as_html("<!-- don't --><div/><p>it's</p><span/>"),
+            "<!-- don't --><div></div><p>it's</p><span></span>"
+        );
+    }
+
+    #[test]
+    fn cdata_outside_style_and_script_is_text() {
+        assert_eq!(
+            xhtml_as_html("<p><![CDATA[<b> & </b>]]></p><script><![CDATA[a<b]]></script>"),
+            "<p>&lt;b&gt; &amp; &lt;/b&gt;</p><script>a<b</script>"
         );
     }
 

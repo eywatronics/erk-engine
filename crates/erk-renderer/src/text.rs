@@ -216,6 +216,10 @@ pub(crate) enum InlineToken<S> {
     /// of its own and placed in the line like a glyph. The arena index and
     /// its style.
     Atom(usize, S),
+    /// An absolutely positioned element that left the flow here: a point
+    /// that takes no room, marking its static position (CSS 2 §10.3.7).
+    /// The arena index.
+    Anchor(usize),
 }
 
 /// An inline box in a paragraph's text, in text order.
@@ -234,6 +238,9 @@ pub(crate) enum InlineItemKind {
     /// An atomic inline, by arena index, with its `vertical-align` and the
     /// inline box it is aligned in.
     Atom(usize, VerticalAlign, ParentBox),
+    /// Where an absolutely positioned element would have been, by arena
+    /// index; no width.
+    Anchor(usize),
 }
 
 /// The size an atomic inline takes in its line, measured by layout.
@@ -406,6 +413,10 @@ impl Paragraph {
                         extents,
                     });
                 }
+                InlineToken::Anchor(index) => {
+                    // Not content: it neither emits nor swallows a space.
+                    paragraph.push_item(InlineItemKind::Anchor(*index));
+                }
                 InlineToken::Close => {
                     if let Some(element) = open.pop() {
                         closes.push((element, pending_space));
@@ -495,11 +506,23 @@ impl Paragraph {
         self.text.is_empty() && self.items.is_empty()
     }
 
+    /// The arena indices of the absolutely positioned elements anchored in
+    /// the paragraph, in order.
+    pub(crate) fn anchors(&self) -> Vec<usize> {
+        self.items
+            .iter()
+            .filter_map(|item| match item.kind {
+                InlineItemKind::Anchor(index) => Some(index),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The arena indices of the atomic inlines, in order.
     pub(crate) fn atoms(&self) -> impl Iterator<Item = usize> + '_ {
         self.items.iter().filter_map(|item| match item.kind {
             InlineItemKind::Atom(index, ..) => Some(index),
-            InlineItemKind::Spacer(_) => None,
+            InlineItemKind::Spacer(_) | InlineItemKind::Anchor(_) => None,
         })
     }
 
@@ -601,6 +624,9 @@ pub(crate) struct InlineLayout {
     /// Where each atomic inline sits: `(arena index, x, top of its margin
     /// box)`, relative to the content box.
     atoms: Vec<(usize, f32, f32)>,
+    /// Where each anchor sits: `(arena index, x, top of its line, bottom of
+    /// its line)`, relative to the content box.
+    anchors: Vec<(usize, f32, f32, f32)>,
     /// The width the lines were broken at.
     max_advance: Option<f32>,
 }
@@ -683,6 +709,13 @@ impl InlineLayout {
     /// box)`, relative to the content box.
     pub(crate) fn atom_positions(&self) -> &[(usize, f32, f32)] {
         &self.atoms
+    }
+
+    /// Where each absolutely positioned element of the paragraph would have
+    /// been: `(arena index, x, top of its line, bottom of its line)`,
+    /// relative to the content box.
+    pub(crate) fn anchor_positions(&self) -> &[(usize, f32, f32, f32)] {
+        &self.anchors
     }
 }
 
@@ -976,7 +1009,7 @@ impl TextEngine {
                         align,
                         parent,
                     )),
-                    InlineItemKind::Spacer(_) => None,
+                    InlineItemKind::Spacer(_) | InlineItemKind::Anchor(_) => None,
                 })
                 .collect();
             let (strut_above, strut_below) = paragraph.strut();
@@ -1050,11 +1083,32 @@ impl TextEngine {
             }
             height = y;
         }
+        let mut anchors = Vec::new();
+        for (index, line) in layout.lines().enumerate() {
+            let metrics = line.metrics();
+            let shift = shifts[index];
+            for item in line.items() {
+                if let PositionedLayoutItem::InlineBox(inline_box) = item
+                    && let Some(InlineItemKind::Anchor(element)) = paragraph
+                        .items
+                        .get(inline_box.id as usize)
+                        .map(|item| item.kind)
+                {
+                    anchors.push((
+                        element,
+                        inline_box.x,
+                        metrics.block_min_coord + shift,
+                        metrics.block_max_coord + shift,
+                    ));
+                }
+            }
+        }
         InlineLayout {
             layout,
             shifts,
             height,
             atoms: placed,
+            anchors,
             max_advance,
         }
     }
@@ -1087,6 +1141,7 @@ impl TextEngine {
         for (id, item) in paragraph.items.iter().enumerate() {
             let width = match item.kind {
                 InlineItemKind::Spacer(width) => width,
+                InlineItemKind::Anchor(_) => 0.0,
                 InlineItemKind::Atom(..) => atoms.next().map_or(0.0, |atom| atom.width),
             };
             builder.push_inline_box(parley::InlineBox {

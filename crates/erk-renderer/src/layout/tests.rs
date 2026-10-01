@@ -774,3 +774,120 @@ fn a_float_is_laid_out_as_if_not_floated() {
     assert_eq!(p.location.y, 50.0);
     assert!(layouts.text(all(&doc, &local_name!("p"))[0]).is_some());
 }
+
+#[test]
+fn text_alone_in_a_flex_container_is_a_flex_item() {
+    // justify-content centres the anonymous item holding the text: the text
+    // must not become the container's own paragraph.
+    let (doc, layouts) = lay_out(
+        r#"<div style="display: flex; justify-content: center; width: 400px">Merhaba</div>"#,
+    );
+    let div = all(&doc, &local_name!("div"))[0];
+    assert!(layouts.text(div).is_none());
+    let [item] = layouts.anonymous(div) else {
+        panic!("one anonymous item");
+    };
+    let width = item.text.layout.width();
+    assert!(
+        (item.layout.location.x - (400.0 - width) / 2.0).abs() <= 0.5,
+        "{:?}",
+        item.layout.location
+    );
+}
+
+#[test]
+fn order_rearranges_flex_items() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="display: flex"><div style="width: 10px; height: 5px; order: 2"></div><div style="width: 20px; height: 5px"></div><div style="width: 30px; height: 5px; order: -1"></div></div>"#,
+    );
+    let items = &divs(&doc, &layouts)[1..];
+    // Laid out as order -1 (30px), 0 (20px), 2 (10px).
+    assert_eq!(items[2].location.x, 0.0);
+    assert_eq!(items[1].location.x, 30.0);
+    assert_eq!(items[0].location.x, 50.0);
+}
+
+#[test]
+fn flex_grow_shrink_basis_and_gap_share_the_line() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="display: flex; width: 300px; gap: 10px"><div style="flex: 1"></div><div style="flex: 2"></div><div style="flex: 0 0 50px"></div></div>"#,
+    );
+    let items = &divs(&doc, &layouts)[1..];
+    // 300 - 2 gaps - 50 leaves 230 to share 1:2.
+    let first = 230.0 / 3.0;
+    assert!((items[0].size.width - first).abs() <= 1.0);
+    assert!((items[1].size.width - 2.0 * first).abs() <= 1.0);
+    assert_eq!(items[2].size.width, 50.0);
+    assert_eq!(items[2].location.x, 250.0);
+}
+
+#[test]
+fn wrapping_columns_and_alignment_follow_the_container() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="display: flex; flex-wrap: wrap; width: 100px; align-items: flex-end"><div style="width: 60px; height: 10px"></div><div style="width: 60px; height: 20px"></div></div><div style="display: flex; flex-direction: column; align-items: center; width: 100px"><div style="width: 40px; height: 10px"></div></div>"#,
+    );
+    let d = divs(&doc, &layouts);
+    // Wrapped onto a second line.
+    assert_eq!(d[2].location.y, 10.0);
+    // Column, centred across.
+    assert_eq!(d[4].location.x, 30.0);
+}
+
+#[test]
+fn an_absolute_block_with_auto_insets_sits_where_it_would_have_been() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="height: 30px"></div><div style="position: absolute; width: 10px; height: 10px; margin-left: 4px"></div><div style="height: 20px"></div>"#,
+    );
+    let d = divs(&doc, &layouts);
+    // After the first block, at the content edge plus its margin.
+    assert_eq!((d[1].location.x, d[1].location.y), (4.0, 30.0));
+    // It takes no room: the next block follows the first.
+    assert_eq!(d[2].location.y, 30.0);
+}
+
+#[test]
+fn an_absolute_inline_sits_at_its_place_in_the_line() {
+    let (doc, layouts) =
+        lay_out(r#"<p>ab<span style="position: absolute; width: 5px; height: 5px"></span>cd</p>"#);
+    let span = boxes(&doc, &layouts, &local_name!("span"))[0];
+    let ab = line_width("<p>ab</p>");
+    assert!(
+        (span.location.x - ab).abs() <= 1.0,
+        "{:?} vs {ab}",
+        span.location
+    );
+    assert_eq!(span.location.y, 0.0);
+    // The line is not broken around it.
+    let p = all(&doc, &local_name!("p"))[0];
+    assert_eq!(layouts.text(p).unwrap().text, "abcd");
+}
+
+#[test]
+fn an_absolute_block_inside_a_line_starts_below_it() {
+    let (doc, layouts) = lay_out(
+        r#"<div>metin <div style="position: absolute; width: 5px; height: 5px"></div> sonra</div>"#,
+    );
+    let inner = divs(&doc, &layouts)[1];
+    assert_eq!((inner.location.x, inner.location.y), (0.0, one_line()));
+}
+
+#[test]
+fn only_the_auto_axis_takes_the_static_position() {
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; height: 50px"><div style="height: 20px"></div><div style="position: absolute; left: 5px; width: 10px; height: 10px"></div></div>"#,
+    );
+    let d = divs(&doc, &layouts);
+    assert_eq!((d[2].location.x, d[2].location.y), (5.0, 20.0));
+}
+
+#[test]
+fn a_flex_container_places_its_absolute_children() {
+    // As the containing block, it centres the child like a sole flex item;
+    // otherwise the child starts at its content edge.
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: relative; display: flex; justify-content: center; width: 200px; height: 100px"><div style="position: absolute; width: 20px; height: 20px"></div></div><div style="display: flex; padding: 7px"><div style="position: absolute; width: 20px; height: 20px"></div></div>"#,
+    );
+    let d = divs(&doc, &layouts);
+    assert_eq!(d[1].location.x, 90.0);
+    assert_eq!((d[3].location.x, d[3].location.y), (7.0, 7.0));
+}

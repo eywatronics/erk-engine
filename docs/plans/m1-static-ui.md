@@ -153,10 +153,10 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1.5: Flexbox
 
-- [ ] Taffy'nin flexbox'ı doğrulanır: `flex-direction`, `wrap`, `gap`,
+- [x] Taffy'nin flexbox'ı doğrulanır: `flex-direction`, `wrap`, `gap`,
   `justify-content`, `align-items`, `flex-grow/shrink/basis`, `order`.
-- [ ] `css/css-flexbox` taban çizgisi.
-- [ ] Referans sayfası: `flex-form.html` (ayarlar ekranı düzeni).
+- [x] `css/css-flexbox` taban çizgisi.
+- [x] Referans sayfası: `flex-form.html` (ayarlar ekranı düzeni).
 
 ### M1.6: Renkler, kenarlıklar, görüntüler
 
@@ -457,3 +457,34 @@ Mutasyonlar: koşturucuda fuzzy'yi yok saymak, iyileşmeyi raporlamamak,
 CDATA'yı bırakmak, `mismatch`'i tanımamak (4/4); muhafızda gerekçesiz
 düşüş, boş gerekçe, WPT commit'i aynıyken PASS satırını silmek yakalandı,
 gerekçeli düşüş geçti.
+
+**M1.5, flexbox (2026-10-01).** `css/css-flexbox` WPT'ye eklendi (8,7 MB,
+1012 reftest). Hiçbir şey değiştirilmeden 480'i geçiyordu (%47,4); adım
+sonunda 538 (%53,2). Yeni `flex-form` referans sayfası (bir ayarlar ekranı:
+kenar menü, sağa yaslı durum etiketi, etiketli satırlar, sarılan etiket
+listesi, `order`'la yer değiştiren düğmeler) %97,21; kutuların 33/33'ü
+Chrome'la 1 px içinde.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Taffy'nin flexbox'ı doğrulanır | Büyüme, küçülme, temel, `gap`, sarma ve hizalama doğru çıktı (testli). Bulunanlar: (1) Taffy'de `order` yok, öğeleri çocuk sırasıyla diziyor; Erk flex ve grid kapsayıcıların çocuklarını `order`'a göre kararlı sıralıyor. Boyama hâlâ belge sırasında, CSS sıralanmış belge sırası istiyor (yalnızca örtüşmede fark eder). (2) Yalnızca metin içeren bir flex kapsayıcı paragraf yaprağı oluyor, `justify-content` metne hiç uygulanmıyordu; artık yalnızca blok kapsayıcılar paragraf oluyor, flex ve grid'de metin anonim bir öğe |
+| — | **Statik konum (M1.4'ün bilinen sınırı).** Düşen flexbox testlerinin 96'sı aynı kalıbı kullanıyordu: inset'leri `auto` olan absolute bir kırmızı kutu, testin geçmesi gereken yeşilin arkasında. Erk onu kapsayıcının içerik kenarına koyduğu için kırmızı görünüyordu. Artık blok düzeyinde sıfır boyutlu bir yer tutucu, satır içinde sıfır genişlikli bir çapa, absolute elemanın akışta duracağı yeri işaretliyor; layout'tan sonra kutu `auto` olan eksende oraya taşınıyor. Flex ya da grid ebeveyn kapsayıcı bloğun kendisiyse statik konumu Taffy hesaplıyor (tek flex öğesi gibi), değilse kutu ebeveynin içerik kenarında. Bu adım üç dizinde 68 testi geçirdi |
+| — | Statik konum bir testi düşürdü: `position-absolute-dynamic-static-position-inline` elemanı betikle `display: block`'a çeviriyor; Erk betik çalıştırmıyor, eleman satır içinde kalıyor. Eskiden statik konum yok sayıldığı için rastlantıyla geçiyordu; taban çizgisinde gerekçesiyle |
+| — | Kalan düşüşler: 529 düşen flexbox testinden 484'ü desteklenmeyen ya da planlanmayan bir özellik kullanıyor (float 127, görüntü 97, betik 49, dış stil sayfası 45, kenarlık 35, tablo 35, `writing-mode` 30, gradyan 15, `flex-wrap: balance` taslağı 16 ...). Kalan 45'in kümeleri: `gap` ile sarma ve yüzdeler, taban çizgisi hizalaması, `margin: auto`, yüzdelik yükseklikler, `order`'la boyama sırası, içsel boyutlar. Bunlar M1 kabulüne kadar açık |
+
+Mutasyonlar (7/7 yakalandı): flex kapsayıcıda metin paragraf oluyor;
+`order` yok sayılıyor; statik konumlar yok sayılıyor; blok düzeyi absolute
+satırının altında değil üstünde başlıyor; flex kapsayıcı blok olsa da içerik
+kenarı; iki eksen birden statik konumu alıyor; satır içi çapa satır başına
+konuyor. Sağlamlık üretecine uç flex değerleri eklendi.
+
+**İnceleme raporu: `docs/reviews/wpt_commit_review.md` (2026-10-01, #17).**
+İlk rapor; inceleme raporları kuralı (proje kuralları) bununla başladı.
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| `elements` etiketi ilk `>`'de bitiyor; tırnaklı bir değerdeki `>` (`title="a > b"`) etiketi erken kapatır | **Geçerli, düzeltildi.** Etiketin sonu tırnak dışındaki ilk `>` (`tag_end`); kendiliğinden kapanan etiketleri açan XHTML döngüsü de aynı yardımcıyı kullanıyor. Yan bulgu: o döngü her `<`'yi etiket sayıyordu; yorumdaki bir kesme işareti (`don't`) tırnak sanılınca on XHTML testi düştü. Yorumlar artık bütün olarak geçiyor, tırnak denetimi yalnızca gerçek etiketlerde |
+| CDATA işaretleri dosyanın her yerinden siliniyor; stil dışındaki CDATA'yı bozabilir | **Geçerli, düzeltildi.** `<style>`/`<script>` içinde yalnızca işaretler siliniyor, başka yerde bölüm metin olarak kaçışlanıyor (`<![CDATA[<b>]]>` bir eleman olmuyor). CSS dizgesinin içindeki bir CDATA işareti ayırt edilmiyor; belgelendi |
+| İş parçacığı modeli, panik yakalama, fuzzy hesabı | Artı olarak not edildi; değişiklik yok |
+
+Taban çizgisi değişmedi: 2009 sonucun hepsi aynı.
