@@ -138,7 +138,7 @@ kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla geli
 | M1.1 | Tek satır metin: Parley ile şekillenen bir Taffy yaprağı | M0'da var (`a_paragraph_is_one_line_high`) |
 | M1.2 | Satır kırma: daralan kutuda metin alt satıra iner | M0'da var (`narrow_width_breaks_into_more_lines`) |
 | M1.3 | Tam IFC: inline kutular, `<span>`/`<b>`/`<i>` gibi farklı stillerin aynı satırda çizilmesi, satırlar arasında span kırılması, `text-align` (justify dahil), temel `vertical-align`, satır içi görseller. Blitz 0.3.0-beta.2 `layout/inline.rs` ve `construct.rs`'ten uyarlanır; calc değerleri Erk'in `CalcTable`'ından geçer; anonim blok kutularının yeri ilk iş olarak kararlaştırılır | Bitti: stil aralıkları, `text-align`, sağlamlık, satır içi kutular, `inline-block`, `vertical-align`. Satır içi görseller `<img>` ile M1.6'da; cargo-fuzz job'ı M1 bitmeden ayrı PR'da |
-| M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Başladı: konumlandırma, `z-index`, float var; WPT altyapısı ve akış layout'u kararı kaldı |
+| M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Bitti: konumlandırma, `z-index`, float, WPT altyapısı (normal-flow %42,8, css-position %16,3), akış layout'u kararı (geçici: Taffy) |
 | M1.5 | Flexbox doğrulaması (Taffy) | Yeni |
 | M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Yeni |
 | M1.7 | Sistem fontları ve fallback (fontique; gömülü font yalnızca testlerde), HiDPI cihaz ölçeği, `lang`'a göre `text-transform` (`icu_casemap`: Türkçede `i → İ`, `ı → I`) | Yeni |
@@ -166,6 +166,18 @@ testler "Taffy block kaynaklı", "IFC kaynaklı" ve "diğer" diye sınıflanır.
 bu sınıflandırmayla verilir ve bu dokümana yazılır: Taffy'de kalmak ya da akış
 layout'unu Erk'e almak (Taffy yalnızca flex ve grid'de). Karar bir süreye
 değil bu sonuca bağlıdır.
+
+**Karar (2026-10-01, geçici): Taffy'de kalınır.** `css/CSS2/normal-flow`'un ilk
+taban çizgisinde (WPT `5cd8e3f`) 746 reftest'ten 319'u geçiyor. Düşen 427
+testin her biri Erk'in bugün desteklemediği ya da hiç planlamadığı bir şeyi
+kullanıyor: dış stil sayfası ya da betik (75), görüntü ya da `url()` (230),
+tablo (33), betik (41), float (8), kenarlık boyama (13), liste (14), üretilmiş
+içerik (8) ve birkaç başka. Bunların hiçbirine dokunmayan ve yine de düşen
+test **yok**: düşüşü Taffy'nin block layout'una bağlayan bir kanıt yok.
+Sınıflama "bu özelliği kullanıyor" der, "bu yüzden düşüyor" demez; bu yüzden
+karar geçicidir. M1.6'dan (görüntüler, kenarlıklar, kaynak API'si) sonra
+sınıflama tekrarlanır, en büyük küme o zaman ölçülebilir hale gelir.
+`css/css-text` taban çizgisi ayrı bir PR'da gelir (M1 kabulünün parçası).
 
 **Kabul:** Bir ayarlar ekranı maketi (form satırları, flex düzeni, kenarlıklar,
 Türkçe metin) Chrome referans testinde skorlu. `css/CSS2/normal-flow`,
