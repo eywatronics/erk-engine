@@ -65,7 +65,10 @@ window: winit + softbuffer (vello_hybrid on the GPU from M2)
 - **Host application**: owns all logic and all I/O. It gives Erk a resource
   callback (for CSS `url()` and images), the current time, and configuration.
 - **erk / erk-ffi**: one API, as idiomatic Rust and as a C ABI. `NodeId` is an
-  opaque 64-bit value; a stale id is an error code, never a crash. All calls
+  opaque 64-bit value; a stale id is an error code, never a crash. The value
+  is scrambled per application for namespace separation and stale-id
+  isolation only: it is not a security token, and gives no authentication or
+  protection against forged ids. All calls
   come from the UI thread; callbacks run on it, never during layout or paint.
   The contract is written in M0.5, before M1.
 - **Engine core**: the arena DOM, Stylo, layout and paint. It does no file,
