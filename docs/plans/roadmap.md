@@ -26,7 +26,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 |---|---|---|
 | **M0** | İlk piksel | Bitti |
 | **M0.5** | Mimari sözleşme | Bitti |
-| **M1** | Statik UI | Bitti |
+| **M1** | Statik UI | Kabulde: fuzz job'ının çökme yakaladığı kasıtlı bir çökmeyle doğrulanacak |
 | **M2** | Etkileşim temeli | Yeni |
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
 | **M4** | Etkileşimli DOM | Yeni |

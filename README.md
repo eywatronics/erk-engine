@@ -172,7 +172,7 @@ and may only rise unless a written reason says otherwise.
 |---|---|---|
 | M0 | First pixel | Done |
 | M0.5 | The embedding contract | Done |
-| M1 | Static UI: inline layout, flexbox, positioning, borders, images, system fonts | Done |
+| M1 | Static UI: inline layout, flexbox, positioning, borders, images, system fonts | Acceptance: one check left (the fuzz job catching a deliberate crash) |
 | M2 | Input, hit testing, scrolling, GPU rendering; the counter demo | Planned |
 | M3 | Rust API and C ABI | Planned |
 | M4 | Mutable DOM and events; TodoMVC | Planned |

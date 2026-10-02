@@ -203,10 +203,15 @@ genişlemesidir.
   testinde skorlu.
 - [x] `css/CSS2/normal-flow`, `css/css-flexbox`, `css/css-position`,
   `css/css-text` taban çizgileri yayımlı, gerileme yasağı CI'da.
-- [x] Fuzz job'ı yeşil; ikili boyutu bütçenin altında; bellek ve ilk kare
-  ölçümü M1 sonunda tekrarlanıp M1.0'la karşılaştırılmış.
+- [x] İkili boyutu bütçenin altında; bellek ve ilk kare ölçümü M1 sonunda
+  tekrarlanıp M1.0'la karşılaştırılmış.
+- [x] Fuzz job'ı yapılandırılmış ve CI'da yeşil.
+- [ ] **Fuzz job'ının bir çökmeyi yakaladığı doğrulanmış:** kasıtlı bir
+  paniğin job'ı kırdığı ve girdinin artifact olarak saklandığı ayrı bir CI
+  koşusunda görülmüş. Yapılandırılmış olması bunu göstermez; muhafız
+  ilkesinin kasıtlı ihlal kuralı.
 - [x] Akış layout'u kararı gerekçesiyle belgelenmiş.
-- [x] `roadmap.md`'de M1 "Bitti".
+- [ ] `roadmap.md`'de M1 "Bitti": fuzz doğrulaması kalana kadar "Kabulde".
 
 ---
 
@@ -654,7 +659,7 @@ Windows yayın ikilisi 810 KB büyüdü (%5,3, DirectWrite kodu).
 | Akış layout'u sınıflaması M1.6'dan sonra tekrarlanır | Tekrarlanırken üçüncü bir hata çıktı: genişliği ve yüksekliği verilen bir `<img>` yüksekliğini yok sayıyordu (40 × 1 istenen 4 × 2'lik görüntü 40 × 20). Taffy 0.14'ün yaprak layout'u en-boy oranı olan bir kutuyu en az genişlik / oran yüksekliğinde tutuyor; Erk boyutu `replaced_size` ile zaten çözdüğü için oranı Taffy'ye ikinci kez vermiyor. **WPT'de 87 test geçti** (normal-flow 422 → 508, flexbox 568 → 569), gerileme yok; hepsi bu düzeltmeden (strut düzeltmesi tek başına hiçbir WPT sonucunu değiştirmedi) |
 | **Akış layout'u kararı** | **Kesin: Taffy'de kalınır.** normal-flow'da düşen 238 testin 205'i Erk'in desteklemediği ya da planlamadığı bir şeyi kullanıyor: dış stil sayfası (54), tablo (51), betik (50), Erk'in çizmediği bir yerine konan eleman (30), float (8), yazı yönü (5) ve birkaç başka. Kalan 33'ün 11'i inline içinde blok (Erk'in kendi inline layout'u), 7'si yüzdelik ya da miras boyut, 6'sı yerine konan eleman boyutu, 4'ü inline-block boyama sırası, 5'i diğer. Hiçbiri Taffy'nin block layout'unu bütünüyle değiştirmeyi gerektirmiyor |
 | `css/css-text` taban çizgisi | Kullanıcı izniyle (3017 dosya, 4,2 MB) `tests/wpt/dirs.txt`'e eklendi; ek destek dizini gerekmedi. 1489 reftest'ten 608'i geçiyor (%40,8; 15'i boş karede). Geçenler: i18n 158/158, text-transform 91/108, shaping 26/28. En büyük açık white-space (45/422: `pre` ve benzeri yok); 718 test Ahem fontunu `@font-face` ile istiyor |
-| Fuzz job'ı | `fuzz/`: kendi workspace'i olan `erk-fuzz` crate'i, `render_html` hedefi; girdi UTF-8'e kayıpla çevrilip renderer iş parçacığının 16 MiB yığınlı bir iş parçacığında çiziliyor. CI `fuzz` job'ı sabit `nightly-2026-09-25` ve `cargo-fuzz 0.13.2` ile beş dakika koşuyor; tohum: sağlamlık korpusu ve referans sayfaları; çöken girdi artifact olarak saklanıyor. Kilit dosyası ana kilitten kopyalandı (renderer'ın bağımlılıkları aynı sürümde); `cargo fetch --locked` güncelliğini denetliyor. Yeni crate'ler: `libfuzzer-sys` 0.4.13 (izinle) ve onun zorunlu bağımlılığı `arbitrary`. libFuzzer'ın lisansı NCSA izin listesine gerekçesiyle girdi; lisans kapısı `fuzz/`'u da denetliyor. Yerelde nightly yok: hedef kararlı araç zinciriyle derlendi (libFuzzer MSVC ile derlendi), ilk gerçek koşu bu PR'ın CI'ında |
+| Fuzz job'ı | `fuzz/`: kendi workspace'i olan `erk-fuzz` crate'i, `render_html` hedefi; girdi UTF-8'e kayıpla çevrilip renderer iş parçacığının 16 MiB yığınlı bir iş parçacığında çiziliyor. CI `fuzz` job'ı sabit `nightly-2026-09-25` ve `cargo-fuzz 0.13.2` ile beş dakika koşuyor; tohum: sağlamlık korpusu ve referans sayfaları; çöken girdi artifact olarak saklanıyor. Kilit dosyası ana kilitten kopyalandı (renderer'ın bağımlılıkları aynı sürümde); `cargo fetch --locked` güncelliğini denetliyor. Yeni crate'ler: `libfuzzer-sys` 0.4.13 (izinle) ve onun zorunlu bağımlılığı `arbitrary`. libFuzzer'ın lisansı NCSA izin listesine gerekçesiyle girdi; lisans kapısı `fuzz/`'u da denetliyor. Yerelde nightly yok: hedef kararlı araç zinciriyle derlendi (libFuzzer MSVC ile derlendi), ilk gerçek koşu bu PR'ın CI'ında. **Doğrulanmadı:** job'ın bir çökmeyi yakaladığı, kırıldığı ve girdiyi artifact olarak sakladığı henüz kasıtlı bir çökmeyle denenmedi; M1 kabulünün açık maddesi |
 | Bellek ve ilk kare M1.0'la karşılaştırılır | Aşağıdaki tablo; yöntem M1.0'ınki |
 
 | Ölçüm | M1.0 | M1 sonu |
@@ -674,7 +679,11 @@ koleksiyonu. 1000 elemanlı bir sayfanın tam yeniden çizimi hâlâ ~71 ms:
 M5'in artımlı işinin gerekçesi aynen duruyor.
 
 Mutasyonlar (3/3 yakalandı): `%25` önce çözülüyor; strut alt sınırı
-kaldırılıyor; oran Taffy'ye yine veriliyor. Kural takviminin M1 satırları
+kaldırılıyor; oran Taffy'ye yine veriliyor. **Açık doğrulama:** fuzz job'ı
+kasıtlı bir ihlalle denenmedi. Yapılacak: `render_html`'i kolay bulunan bir
+girdide panikleten geçici bir dal ve taslak PR; `fuzz` job'ının kırıldığı ve
+`fuzz-artifacts`'ta çöken girdinin bulunduğu görülür, sonra PR kapatılıp dal
+silinir. O zamana kadar M1 "Kabulde". Kural takviminin M1 satırları
 (fuzz, boyut bütçesi, css-support'taki her "Supported" satırın testi) proje
 kurallarında yürürlükteki kurallara taşındı; son ikisi M1.0'dan beri CI'da
 zorlanıyordu.
