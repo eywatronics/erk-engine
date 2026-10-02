@@ -146,20 +146,22 @@ Measured, not claimed. Windows 11, Intel i7-10750H, CPU rendering
 
 | What | Result |
 |---|---|
-| Release binary, default profile (Windows) | 14.9 MB; 9.5 MB with `opt-level = "s"` |
-| Idle window, private memory | 12.6 MB (small page), 13.0 MB (1000 elements) |
-| 1000-element page, full render | first call ~77 ms, then a median of ~53 ms |
+| Release binary, default profile (Windows) | 16.2 MB (14.9 MB at M1.0, 9.5 MB with `opt-level = "s"` then) |
+| Idle window, private memory | 12.8 MB (small page), 14.2 MB (1000 elements) |
+| 1000-element page, full render | first call ~120 ms, then a median of ~71 ms |
 
 The [Web Platform Tests](https://web-platform-tests.org/) reftests run in
-CI against a recorded baseline: 56.1 % of `css/css-flexbox` (568 of 1012),
-56.6 % of `css/CSS2/normal-flow` (422 of 746) and 19.1 % of
-`css/css-position` (48 of 251) pass today. Most failing tests use something
-Erk does not support yet (external stylesheets, block-in-inline,
-`white-space: pre`) or never will (tables, floats, script).
+CI against a recorded baseline: 68.1 % of `css/CSS2/normal-flow` (508 of
+746), 56.2 % of `css/css-flexbox` (569 of 1012), 40.8 % of `css/css-text`
+(608 of 1489) and 19.1 % of `css/css-position` (48 of 251) pass today. Most
+failing tests use something Erk does not support yet (external stylesheets,
+web fonts, `white-space: pre`, block-in-inline) or never will (tables,
+floats, script). A fuzz job feeds the renderer random input on every
+change.
 
 The Linux release binary is held under a size budget in CI. Similarity to
 Chrome 154 on the reference pages: every element box matches within 1 CSS
-pixel on all sixteen pages, and pixel scores range from 48 % on text-heavy
+pixel on all seventeen pages, and pixel scores range from 48 % on text-heavy
 pages (glyph antialiasing differs) to 100 % on boxes; the scores are in
 [expectations.txt](crates/erk-renderer/tests/reference/expectations.txt)
 and may only rise unless a written reason says otherwise.
@@ -170,7 +172,7 @@ and may only rise unless a written reason says otherwise.
 |---|---|---|
 | M0 | First pixel | Done |
 | M0.5 | The embedding contract | Done |
-| M1 | Static UI: inline layout, flexbox, positioning, borders, images, system fonts | In progress |
+| M1 | Static UI: inline layout, flexbox, positioning, borders, images, system fonts | Acceptance: one check left (the fuzz job catching a deliberate crash) |
 | M2 | Input, hit testing, scrolling, GPU rendering; the counter demo | Planned |
 | M3 | Rust API and C ABI | Planned |
 | M4 | Mutable DOM and events; TodoMVC | Planned |

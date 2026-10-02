@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Ayarlar</title>
+<!-- M1's acceptance mockup: a desktop settings screen in what M1 draws
+     (flexbox, inline layout, borders, rounded corners, opacity,
+     positioning, text-transform). Form controls are drawn with boxes until
+     M5 brings real ones. Scored against Chrome as a reference page. -->
+<style>
+  body { margin: 0; background: #e2e8f0; color: #1f2933; font-family: "Noto Sans"; font-size: 14px; }
+  .pencere { display: flex; height: 600px; }
+  .yan { width: 200px; padding: 20px 12px; background: #1e293b; color: #cbd5e1; }
+  .marka { display: flex; align-items: center; gap: 10px; margin: 0 8px 24px 8px; color: #ffffff; font-size: 16px; font-weight: bold; }
+  .logo { width: 28px; height: 28px; border-radius: 8px; background: #10b981; }
+  .menu { margin: 0 0 4px 0; padding: 8px 12px; border-radius: 6px; }
+  .menu.secili { background: #334155; color: #ffffff; font-weight: bold; }
+  .rozet { position: relative; top: -1px; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: #ef4444; color: #ffffff; font-size: 11px; font-weight: bold; }
+  .icerik { flex-grow: 1; padding: 24px 28px; }
+  h1 { margin: 0 0 4px 0; font-size: 22px; }
+  .alt { margin: 0 0 20px 0; color: #64748b; }
+  .kart { margin-bottom: 16px; padding: 4px 16px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px; }
+  .baslik { margin: 12px 0 4px 0; color: #475569; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+  .satir { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid #e2e8f0; }
+  .satir.ilk { border-top: 0; }
+  .ad { font-weight: bold; }
+  .aciklama { color: #64748b; font-size: 12px; }
+  .anahtar { position: relative; width: 36px; height: 20px; border-radius: 10px; background: #cbd5e1; }
+  .anahtar.acik { background: #10b981; }
+  .dugme { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 8px; background: #ffffff; }
+  .acik .dugme { left: 18px; }
+  .secim { width: 140px; padding: 5px 10px; border: 1px solid #94a3b8; border-radius: 6px; }
+  .pasif { opacity: 0.5; }
+  .eylemler { display: flex; justify-content: flex-end; gap: 10px; }
+  .buton { padding: 7px 16px; border: 1px solid #94a3b8; border-radius: 6px; background: #ffffff; font-weight: bold; }
+  .buton.ana { border-color: #047857; background: #059669; color: #ffffff; }
+</style>
+</head>
+<body>
+  <div class="pencere">
+    <div class="yan">
+      <div class="marka"><div class="logo"></div>Erk Ayarlar</div>
+      <div class="menu secili">Genel</div>
+      <div class="menu">Görünüm</div>
+      <div class="menu">Bildirimler<span class="rozet">3</span></div>
+      <div class="menu">Gizlilik</div>
+      <div class="menu">Hakkında</div>
+    </div>
+    <div class="icerik">
+      <h1>Genel</h1>
+      <p class="alt">Uygulamanın dilini, temasını ve açılış davranışını seçin.</p>
+      <div class="kart">
+        <p class="baslik">Görünüm</p>
+        <div class="satir ilk">
+          <div><div class="ad">Koyu tema</div><div class="aciklama">Arayüzü koyu renklerle gösterir.</div></div>
+          <div class="anahtar acik"><div class="dugme"></div></div>
+        </div>
+        <div class="satir">
+          <div><div class="ad">Dil</div><div class="aciklama">Menüler ve iletiler bu dilde.</div></div>
+          <div class="secim">Türkçe</div>
+        </div>
+        <div class="satir pasif">
+          <div><div class="ad">Yazı tipi boyutu</div><div class="aciklama">Sistem ayarını izliyor.</div></div>
+          <div class="secim">Sistemden</div>
+        </div>
+      </div>
+      <div class="kart">
+        <p class="baslik">Açılış</p>
+        <div class="satir ilk">
+          <div><div class="ad">Oturum açınca başlat</div><div class="aciklama">Bilgisayar açıldığında arka planda çalışır.</div></div>
+          <div class="anahtar"><div class="dugme"></div></div>
+        </div>
+        <div class="satir">
+          <div><div class="ad">Son pencereyi geri yükle</div><div class="aciklama">Kapattığınız yerden devam edin.</div></div>
+          <div class="anahtar acik"><div class="dugme"></div></div>
+        </div>
+      </div>
+      <div class="eylemler">
+        <div class="buton">Vazgeç</div>
+        <div class="buton ana">Kaydet</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

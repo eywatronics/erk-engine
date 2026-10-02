@@ -150,6 +150,22 @@ fn a_paragraph_is_one_line_high() {
 }
 
 #[test]
+fn smaller_text_at_the_end_of_a_line_does_not_shorten_it() {
+    // Every line box starts with the strut of its block's font (CSS 2
+    // §10.8.1). Parley 0.11 takes a line's height from its last run when
+    // that run is the smaller: the paragraph came out 15 high, not 22.
+    for body in [
+        r#"<p>Bildirimler<span style="font-size: 11px">3</span></p>"#,
+        r#"<p>Bildirimler <span style="font-size: 11px">3</span></p>"#,
+        r#"<p>Bild<span style="font-size: 11px">3</span>irimler</p>"#,
+    ] {
+        let (doc, layouts) = lay_out(body);
+        let p = boxes(&doc, &layouts, &local_name!("p"))[0];
+        assert_eq!(p.size.height, one_line(), "{body}");
+    }
+}
+
+#[test]
 fn a_narrow_container_wraps_the_paragraph() {
     let (doc, layouts) = lay_out(
         r#"<div style="width: 120px"><p>Erk sayfayı önce çizer, sonra izole eder,

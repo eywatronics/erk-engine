@@ -1,0 +1,26 @@
+# The cargo-fuzz targets (M1): `render_html` never panics, whatever the
+# input. A workspace of its own, run with a pinned nightly in CI (the `fuzz`
+# job); the engine's workspace and its lints do not include it.
+[package]
+name = "erk-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Links libFuzzer, which its build script compiles (C++, NCSA licence).
+libfuzzer-sys = "=0.4.13"
+erk-renderer = { path = "../crates/erk-renderer" }
+
+[[bin]]
+name = "render_html"
+path = "fuzz_targets/render_html.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

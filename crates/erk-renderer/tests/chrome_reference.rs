@@ -140,10 +140,17 @@ fn provide(request: &erk_renderer::ResourceRequest) -> Option<erk_renderer::Reso
 /// Every reference page: `(name, path)`. The pages directory may hold only
 /// `.html` files, so a misnamed page cannot silently drop out of the test.
 fn pages() -> Vec<(String, PathBuf)> {
-    let mut pages = vec![(
-        "merhaba".to_owned(),
-        manifest().join("../../examples/merhaba.html"),
-    )];
+    // The examples a user opens first are reference pages too: the first
+    // page, and M1's acceptance mockup.
+    let mut pages: Vec<(String, PathBuf)> = ["merhaba", "settings"]
+        .into_iter()
+        .map(|name| {
+            (
+                name.to_owned(),
+                manifest().join(format!("../../examples/{name}.html")),
+            )
+        })
+        .collect();
     let mut dir: Vec<_> = std::fs::read_dir(reference_dir().join("pages"))
         .expect("tests/reference/pages exists")
         .map(|entry| entry.unwrap().path())

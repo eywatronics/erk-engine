@@ -1048,12 +1048,17 @@ impl<'t> LayoutTree<'t> {
                 width: image.width(),
                 height: image.height(),
             });
-            let style = self.node(id).style.clone();
+            let mut style = self.node(id).style.clone();
             let calcs = self.calcs;
             let inputs =
                 if replaced.image.is_some() && inputs.sizing_mode == SizingMode::InherentSize {
+                    let known = replaced_size(&style, natural, inputs, calcs);
+                    // The ratio is applied: Taffy's leaf layout would apply
+                    // it again, keeping the box at least width / ratio high
+                    // whatever its height says.
+                    style.aspect_ratio = None;
                     LayoutInput {
-                        known_dimensions: replaced_size(&style, natural, inputs, calcs),
+                        known_dimensions: known,
                         ..inputs
                     }
                 } else {

@@ -32,6 +32,10 @@ allow = [
     "MPL-2.0",
     # The Noto fonts embedded in erk-renderer: free to embed and redistribute.
     "OFL-1.1",
+    # libFuzzer, in libfuzzer-sys: LLVM's former licence, attribution only.
+    # Only the fuzz targets (fuzz/, checked by the same gate) link it; no
+    # application does.
+    "NCSA",
 ]
 # Not allowed, on purpose: GPL and LGPL in any version (they would bind the
 # host application). r-efi offers "MIT OR Apache-2.0 OR LGPL-2.1-or-later";

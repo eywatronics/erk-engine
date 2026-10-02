@@ -1154,7 +1154,10 @@ impl TextEngine {
         let mut height = layout.height();
         let mut placed = Vec::new();
         let has_atoms = paragraph.atoms().next().is_some();
-        if has_atoms || !paragraph.raised.is_empty() {
+        // Styled ranges too: Parley 0.11 gives a line the height of its last
+        // run when that run is smaller than the rest, so a line ending in
+        // small text came out short. The strut corrects it below.
+        if has_atoms || !paragraph.raised.is_empty() || !paragraph.spans.is_empty() {
             // Parley ids are positions in `items`; atoms are measured in order.
             let mut sizes = atoms.iter();
             let atom_of: Vec<Option<(usize, AtomBox, VerticalAlign, ParentBox)>> = paragraph
@@ -1202,7 +1205,9 @@ impl TextEngine {
                         on_line.push((*atom, inline_box.x, *size, raise, *align));
                     }
                 }
-                if special {
+                // Every line box starts with the strut (CSS 2 §10.8.1).
+                if special || above < strut_above || below < strut_below {
+                    special = true;
                     above = above.max(strut_above);
                     below = below.max(strut_below);
                 }

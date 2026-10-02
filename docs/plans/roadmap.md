@@ -26,7 +26,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 |---|---|---|
 | **M0** | İlk piksel | Bitti |
 | **M0.5** | Mimari sözleşme | Bitti |
-| **M1** | Statik UI | Yeni |
+| **M1** | Statik UI | Kabulde: fuzz job'ının çökme yakaladığı kasıtlı bir çökmeyle doğrulanacak |
 | **M2** | Etkileşim temeli | Yeni |
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
 | **M4** | Etkileşimli DOM | Yeni |
@@ -178,6 +178,16 @@ Sınıflama "bu özelliği kullanıyor" der, "bu yüzden düşüyor" demez; bu y
 karar geçicidir. M1.6'dan (görüntüler, kenarlıklar, kaynak API'si) sonra
 sınıflama tekrarlanır, en büyük küme o zaman ölçülebilir hale gelir.
 `css/css-text` taban çizgisi ayrı bir PR'da gelir (M1 kabulünün parçası).
+
+**Karar (2026-10-02, kesin): Taffy'de kalınır.** Sınıflama M1.6'dan sonra
+tekrarlandı. Görüntüler ve kenarlıklar gelince normal-flow 508/746 geçiyor
+(tekrar sırasında bulunan bir `<img>` boyut hatası 86 testi tek başına
+geçirdi). Düşen 238 testin 205'i desteklenmeyen ya da planlanmayan bir şeyi
+kullanıyor (dış stil sayfası, tablo, betik, Erk'in çizmediği yerine konan
+elemanlar, float); kalan 33'ün çoğu Erk'in kendi inline layout'unda (inline
+içinde blok, 11) ya da tek tek boyut durumlarında. Taffy'nin block
+layout'unu bırakmayı gerektiren bir küme yok. `css/css-text` taban
+çizgisi: 608/1489.
 
 **Kabul:** Bir ayarlar ekranı maketi (form satırları, flex düzeni, kenarlıklar,
 Türkçe metin) Chrome referans testinde skorlu. `css/CSS2/normal-flow`,

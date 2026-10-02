@@ -4,6 +4,7 @@
 css/CSS2/normal-flow
 css/css-position
 css/css-flexbox
+css/css-text
 support: css/reference
 support: css/CSS2/reference
 support: css/CSS2/support

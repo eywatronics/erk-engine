@@ -199,14 +199,19 @@ M1'de yeni mimari özellik eklenmez; iş statik UI kapsamı ve bu kapının
 genişlemesidir.
 
 
-- [ ] Ayarlar ekranı maketi (`examples/settings.html`) Chrome referans
+- [x] Ayarlar ekranı maketi (`examples/settings.html`) Chrome referans
   testinde skorlu.
-- [ ] `css/CSS2/normal-flow`, `css/css-flexbox`, `css/css-position`,
+- [x] `css/CSS2/normal-flow`, `css/css-flexbox`, `css/css-position`,
   `css/css-text` taban çizgileri yayımlı, gerileme yasağı CI'da.
-- [ ] Fuzz job'ı yeşil; ikili boyutu bütçenin altında; bellek ve ilk kare
-  ölçümü M1 sonunda tekrarlanıp M1.0'la karşılaştırılmış.
-- [ ] Akış layout'u kararı gerekçesiyle belgelenmiş.
-- [ ] `roadmap.md`'de M1 "Bitti".
+- [x] İkili boyutu bütçenin altında; bellek ve ilk kare ölçümü M1 sonunda
+  tekrarlanıp M1.0'la karşılaştırılmış.
+- [x] Fuzz job'ı yapılandırılmış ve CI'da yeşil.
+- [ ] **Fuzz job'ının bir çökmeyi yakaladığı doğrulanmış:** kasıtlı bir
+  paniğin job'ı kırdığı ve girdinin artifact olarak saklandığı ayrı bir CI
+  koşusunda görülmüş. Yapılandırılmış olması bunu göstermez; muhafız
+  ilkesinin kasıtlı ihlal kuralı.
+- [x] Akış layout'u kararı gerekçesiyle belgelenmiş.
+- [ ] `roadmap.md`'de M1 "Bitti": fuzz doğrulaması kalana kadar "Kabulde".
 
 ---
 
@@ -634,3 +639,52 @@ host stili yok sayıyor (ilk turda **geçti**: en yakın yüz testi eklendi).
 çözülmediği hiçbir yerde görünmüyordu (fontique zaten kaydetmiyor, metin
 yedekle çiziliyor); denetim kaldırıldı, yalnızca MIME denetimi kaldı.
 Windows yayın ikilisi 810 KB büyüdü (%5,3, DirectWrite kodu).
+
+**İnceleme raporları: `docs/reviews/hidpi_commit_review.md` (#21) ve
+`docs/reviews/system_fonts_commit_review.md` (#22), 2026-10-02.**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| hidpi: düzeltilecek bir şey yok; önceki rapordaki 8000 düzeltmesi not edilmiş | Değerlendirilecek madde yok |
+| system_fonts: host'taki yüzde kod çözmede `%25`'in en son çözülmesi çift çözmeyi önlüyor | **Geçerli, ama korunmuyordu:** test (`A%26B %231 %3F%25`) `%25` önce çözülse de geçiyordu. Adında `%26` geçen bir aile (`100%26`) eklendi; sıra bozulunca test "100&" görüp kırılıyor (mutasyon yakaladı) |
+| system_fonts: çekirdeğin G/Ç yapmaması, muhafız, tembel katalog, Noto Sans son yedek | Tespit; yapılacak bir şey yok |
+| system_fonts: Parley güncellenince CSS `direction` desteği | Geçerli, zaten kayıtlı: css-support'ta "Later" satırı ve ayrı bir görev önerisi |
+
+**M1 kabulü (2026-10-02).** M1 bununla bitti.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Ayarlar ekranı maketi Chrome referans testinde | `examples/settings.html`: yan menü, kartlar, anahtarlar ve seçim kutuları (form denetimleri M5'e kadar kutularla), büyük harfli bölüm başlıkları, rozet, soluk bir satır, düğmeler. `merhaba` gibi örneklerden okunan bir referans sayfası. %97,40, kutuların 48/48'i Chrome'la 1 px içinde. Görünen tek fark: satır içi elemanın arka planı köşe yarıçapı almıyor, rozet Chrome'da hap, Erk'te kare |
+| — | **Maket iki gerçek hata buldu.** (1) Satırı küçük puntolu bir span'la biten metin satırı kısaltıyordu ("Bildirimler" + rozet: 35 yerine 31 px): Parley 0.11 satıra son koşunun yüksekliğini veriyor, daha küçükse de. Her satır kutusu bloğun fontunun strut'ıyla başlar (CSS 2 §10.8.1); stil aralıkları olan paragraflarda satır yüksekliği artık strut'ın altına inmiyor. (2) İlk yakalamada tolerans muhafızı iki tasarım hatasını gösterdi: kartların 1 px'lik gölgesi kenar boyunca 1000 pikselden uzun düz renk satırları bırakıyordu (gölge kaldırıldı) ve seçim kutusunun `#f8fafc` zemini beyaz karttan yalnızca 7 farklıydı, zemin çizilmese fark edilmezdi (zemin kaldırıldı) |
+| Akış layout'u sınıflaması M1.6'dan sonra tekrarlanır | Tekrarlanırken üçüncü bir hata çıktı: genişliği ve yüksekliği verilen bir `<img>` yüksekliğini yok sayıyordu (40 × 1 istenen 4 × 2'lik görüntü 40 × 20). Taffy 0.14'ün yaprak layout'u en-boy oranı olan bir kutuyu en az genişlik / oran yüksekliğinde tutuyor; Erk boyutu `replaced_size` ile zaten çözdüğü için oranı Taffy'ye ikinci kez vermiyor. **WPT'de 87 test geçti** (normal-flow 422 → 508, flexbox 568 → 569), gerileme yok; hepsi bu düzeltmeden (strut düzeltmesi tek başına hiçbir WPT sonucunu değiştirmedi) |
+| **Akış layout'u kararı** | **Kesin: Taffy'de kalınır.** normal-flow'da düşen 238 testin 205'i Erk'in desteklemediği ya da planlamadığı bir şeyi kullanıyor: dış stil sayfası (54), tablo (51), betik (50), Erk'in çizmediği bir yerine konan eleman (30), float (8), yazı yönü (5) ve birkaç başka. Kalan 33'ün 11'i inline içinde blok (Erk'in kendi inline layout'u), 7'si yüzdelik ya da miras boyut, 6'sı yerine konan eleman boyutu, 4'ü inline-block boyama sırası, 5'i diğer. Hiçbiri Taffy'nin block layout'unu bütünüyle değiştirmeyi gerektirmiyor |
+| `css/css-text` taban çizgisi | Kullanıcı izniyle (3017 dosya, 4,2 MB) `tests/wpt/dirs.txt`'e eklendi; ek destek dizini gerekmedi. 1489 reftest'ten 608'i geçiyor (%40,8; 15'i boş karede). Geçenler: i18n 158/158, text-transform 91/108, shaping 26/28. En büyük açık white-space (45/422: `pre` ve benzeri yok); 718 test Ahem fontunu `@font-face` ile istiyor |
+| Fuzz job'ı | `fuzz/`: kendi workspace'i olan `erk-fuzz` crate'i, `render_html` hedefi; girdi UTF-8'e kayıpla çevrilip renderer iş parçacığının 16 MiB yığınlı bir iş parçacığında çiziliyor. CI `fuzz` job'ı sabit `nightly-2026-09-25` ve `cargo-fuzz 0.13.2` ile beş dakika koşuyor; tohum: sağlamlık korpusu ve referans sayfaları; çöken girdi artifact olarak saklanıyor. Kilit dosyası ana kilitten kopyalandı (renderer'ın bağımlılıkları aynı sürümde); `cargo fetch --locked` güncelliğini denetliyor. Yeni crate'ler: `libfuzzer-sys` 0.4.13 (izinle) ve onun zorunlu bağımlılığı `arbitrary`. libFuzzer'ın lisansı NCSA izin listesine gerekçesiyle girdi; lisans kapısı `fuzz/`'u da denetliyor. Yerelde nightly yok: hedef kararlı araç zinciriyle derlendi (libFuzzer MSVC ile derlendi), ilk gerçek koşu bu PR'ın CI'ında. **Doğrulanmadı:** job'ın bir çökmeyi yakaladığı, kırıldığı ve girdiyi artifact olarak sakladığı henüz kasıtlı bir çökmeyle denenmedi; M1 kabulünün açık maddesi |
+| — | **İlk CI koşusu kırmızıydı, bir sızıntı yüzünden:** LeakSanitizer korpusun ilk sayfasında 6 parça, 40.800 bayt bildirdi (exit 77); job girdiyi `fuzz/artifacts/` altına yazdı ve artifact yüklendi (571 bayt). Bu, kırılma ve saklama akışını **bir sızıntı için** gösterdi; panik yolu hâlâ denenmedi. Yerel ölçüm: aynı sayfa tek bir iş parçacığında 1000 kez çizilince süreç belleği 6,07'den 6,41 MB'a çıkıyor (büyüme yok sayılacak kadar az), her çizim için yeni bir iş parçacığında ise 7,57'den 20,43 MB'a (iş parçacığı başına ~14 KB). Sızıntı bir bağımlılığın iş parçacığı yerel verisi: iş parçacığı bitince geri verilmiyor. Kabuğun tek bir renderer iş parçacığı olduğu için pencere büyümüyor; fuzz hedefi artık kabuk gibi tek ve kalıcı bir iş parçacığında çiziyor (çizim başına bir sızıntıyı yine yakalar). **Açık (M3):** uygulamayı tekrar tekrar kurup yıkan bir host her seferinde ~14 KB kaybeder; hangi bağımlılık olduğu bulunmalı |
+| Bellek ve ilk kare M1.0'la karşılaştırılır | Aşağıdaki tablo; yöntem M1.0'ınki |
+
+| Ölçüm | M1.0 | M1 sonu |
+|---|---|---|
+| `erk.exe`, varsayılan yayın profili | 14.899.200 bayt | 16.211.968 bayt (+%8,8: görüntü çözücüleri, ICU casemap, DirectWrite) |
+| `nodes-1000.html`, `render_html` ilk çağrı / 30 çağrının medyanı | 116,85 / 70,95 ms | 120,26 / 71,21 ms |
+| `merhaba.html`, ilk çağrı / medyan | 8,32 / 6,88 ms | 9,38 / 6,35 ms |
+| `settings.html`, ilk çağrı / medyan | — | 15,87 / 12,44 ms |
+| `erk nodes-1000.html` penceresi, ilk kareden 3 sn sonra: özel bellek / çalışma kümesi / tepe | 13,0 / 30,1 / 40,3 MB | 14,2 / 32,1 / 42,4 MB |
+| `erk merhaba.html` penceresi, aynı ölçüm | 12,6 / 29,6 / 35,5 MB | 12,8 / 31,0 / 37,7 MB |
+| `erk settings.html` penceresi, aynı ölçüm | — | 13,3 / 31,6 / 38,5 MB |
+
+Okuma: M1'in getirdiği her şeye (satır içi layout, flexbox, konumlandırma,
+kenarlıklar, gölgeler, görüntüler, sistem fontları) rağmen tam yeniden
+çizim süresi değişmedi; bellekteki ~1 MB'lık artış fontique'in sistem
+koleksiyonu. 1000 elemanlı bir sayfanın tam yeniden çizimi hâlâ ~71 ms:
+M5'in artımlı işinin gerekçesi aynen duruyor.
+
+Mutasyonlar (3/3 yakalandı): `%25` önce çözülüyor; strut alt sınırı
+kaldırılıyor; oran Taffy'ye yine veriliyor. **Açık doğrulama:** fuzz job'ı
+kasıtlı bir ihlalle denenmedi. Yapılacak: `render_html`'i kolay bulunan bir
+girdide panikleten geçici bir dal ve taslak PR; `fuzz` job'ının kırıldığı ve
+`fuzz-artifacts`'ta çöken girdinin bulunduğu görülür, sonra PR kapatılıp dal
+silinir. O zamana kadar M1 "Kabulde". Kural takviminin M1 satırları
+(fuzz, boyut bütçesi, css-support'taki her "Supported" satırın testi) proje
+kurallarında yürürlükteki kurallara taşındı; son ikisi M1.0'dan beri CI'da
+zorlanıyordu.
