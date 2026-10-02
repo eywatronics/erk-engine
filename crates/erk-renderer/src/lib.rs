@@ -8,6 +8,7 @@
 //! the renderer's own tests. CI checks both
 //! (.github/scripts/check-renderer-surface.sh).
 
+mod case;
 mod color;
 mod display;
 mod layout;
@@ -57,10 +58,10 @@ impl Frame {
 }
 
 /// Parse, style, lay out and paint `html` in a `width` × `height` viewport
-/// of CSS pixels (1 CSS pixel = 1 device pixel in M0). No resource is
-/// loaded: images render as missing.
+/// at one device pixel per CSS pixel. No resource is loaded: images render
+/// as missing.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
-    render_document(html, width, height, &mut Resources::default()).0
+    render_document(html, width, height, 1.0, &mut Resources::default()).0
 }
 
 /// Like [`render_html`], answering the document's resource requests with
@@ -72,13 +73,39 @@ pub fn render_html_with_resources(
     height: u16,
     provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
 ) -> Frame {
+    render_html_at_scale(html, width, height, 1.0, provide)
+}
+
+/// Like [`render_html_with_resources`] on a screen with `scale` device
+/// pixels per CSS pixel: the frame is `width` × `height` device pixels, the
+/// page is laid out in a viewport of `width / scale` × `height / scale` CSS
+/// pixels and painted at device resolution. A scale that is not a positive
+/// number is taken as 1.
+pub fn render_html_at_scale(
+    html: &str,
+    width: u16,
+    height: u16,
+    scale: f32,
+    provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
+) -> Frame {
     let mut resources = Resources::default();
-    let (frame, requests) = render_document(html, width, height, &mut resources);
+    let (frame, requests) = render_document(html, width, height, scale, &mut resources);
     if requests.is_empty() {
         return frame;
     }
     answer(&mut resources, &requests, provide);
-    render_document(html, width, height, &mut resources).0
+    render_document(html, width, height, scale, &mut resources).0
+}
+
+/// `scale` if it is a usable number of device pixels per CSS pixel, else 1.
+/// Beyond 1/64 and 64 the page would be laid out in a viewport of thousands
+/// of CSS pixels per device pixel, or the other way round.
+fn device_scale(scale: f32) -> f32 {
+    if (1.0 / 64.0..=64.0).contains(&scale) {
+        scale
+    } else {
+        1.0
+    }
 }
 
 /// Answer `requests` with `provide`, each response under its request's id.
@@ -105,16 +132,21 @@ pub(crate) fn render_document(
     html: &str,
     width: u16,
     height: u16,
+    scale: f32,
     resources: &mut Resources,
 ) -> (Frame, Vec<ResourceRequest>) {
-    let (w, h) = (f32::from(width), f32::from(height));
+    let scale = device_scale(scale);
+    // The viewport in CSS pixels.
+    let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
     let doc = Document::parse_html(html);
-    let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
+    let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics))
+        .with_device_scale(scale)
+        .style(&doc);
     let requests = resources.requests(&doc, &styles);
     let mut text = TextEngine::new();
     let layouts = layout::layout(&doc, &styles, resources, &mut text, w, h);
     let list = DisplayList::build(&doc, &styles, &layouts, resources);
-    let pixmap = paint::paint(&list, width, height);
+    let pixmap = paint::paint(&list, width, height, scale);
     let frame = Frame::new(
         width,
         height,

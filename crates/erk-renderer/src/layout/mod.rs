@@ -45,6 +45,7 @@ use erk_dom::{Document, NodeData, NodeId};
 use erk_style::style::Atom;
 use erk_style::style::values::specified::box_::{DisplayInside, DisplayOutside};
 use erk_style::{ComputedValues, Styles};
+use icu_locale_core::LanguageIdentifier;
 use taffy::{
     AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Dimension, Display, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
@@ -530,7 +531,11 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                 Some(NodeData::Text(text)) => {
                     if let Some(style) = styles.computed(parent) {
                         entries.push(Entry::Inline(
-                            vec![InlineToken::Text(text.clone(), style)],
+                            vec![InlineToken::Text(
+                                text.clone(),
+                                style.clone(),
+                                text_language(doc, parent, &style),
+                            )],
                             Vec::new(),
                         ));
                     }
@@ -847,7 +852,7 @@ impl Run {
     /// text, an atomic inline or an anchor.
     fn has_content(&self) -> bool {
         self.tokens.iter().any(|token| match token {
-            InlineToken::Text(text, _) => text.chars().any(|c| !c.is_ascii_whitespace()),
+            InlineToken::Text(text, ..) => text.chars().any(|c| !c.is_ascii_whitespace()),
             InlineToken::Atom(..) | InlineToken::Anchor(_) => true,
             InlineToken::Open(_) | InlineToken::Close => false,
         })
@@ -932,6 +937,27 @@ fn is_atomic_inline(style: &ComputedValues) -> bool {
         )
 }
 
+/// The language of the text in element `id`, for `text-transform`: its
+/// nearest `lang` attribute (HTML §3.2.6.2). Not looked up when the text is
+/// not transformed.
+fn text_language(doc: &Document, id: NodeId, style: &ComputedValues) -> LanguageIdentifier {
+    if style.get_inherited_text().clone_text_transform().is_none() {
+        return LanguageIdentifier::UNKNOWN;
+    }
+    let mut node = Some(id);
+    while let Some(current) = node {
+        let lang = doc
+            .node(current)
+            .and_then(|node| node.as_element())
+            .and_then(|element| element.attr(&erk_dom::local_name!("lang")));
+        if let Some(lang) = lang {
+            return crate::case::language(lang);
+        }
+        node = doc.node(current).and_then(|node| node.parent());
+    }
+    LanguageIdentifier::UNKNOWN
+}
+
 /// The content of inline element `id`, in tree order: its start, the text
 /// of each text node with the style of its element, nested inline elements,
 /// atomic inlines, and its end.
@@ -950,7 +976,11 @@ fn inline_tokens(
     for child in doc.children(id) {
         match doc.node(child).map(|node| &node.data) {
             Some(NodeData::Text(content)) => {
-                tokens.push(InlineToken::Text(content.clone(), style.clone()));
+                tokens.push(InlineToken::Text(
+                    content.clone(),
+                    style.clone(),
+                    text_language(doc, id, style),
+                ));
             }
             Some(NodeData::Element(_)) => {
                 if let Some(child_style) = styles.computed(child) {

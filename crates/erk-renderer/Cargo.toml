@@ -38,6 +38,12 @@ vello_cpu = "=0.2.0"
 # Zlib).
 png = "0.18"
 zune-jpeg = "0.5"
+# text-transform's case mapping, by language (Turkish i/İ, Dutch IJ, Greek
+# capitals), as Chrome does with ICU. Same ICU4X version Parley's segmenter
+# brings; the locale and property crates are already in the tree through it.
+icu_casemap = "2.3.0"
+icu_locale_core = "2.3.0"
+icu_properties = "2.3.0"
 
 [lints]
 workspace = true

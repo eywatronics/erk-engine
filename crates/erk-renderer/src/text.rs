@@ -15,7 +15,9 @@ use erk_style::style::values::computed::font::{GenericFontFamily, QueryFontMetri
 use erk_style::style::values::computed::{CSSPixelLength, Length};
 use erk_style::{ComputedValues, FontMetricsProvider, StyleFontMetrics};
 
+use crate::case;
 use crate::color::{Rgba, srgb_bytes};
+use icu_locale_core::LanguageIdentifier;
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontWeight, Layout, LayoutContext, LineHeight,
@@ -205,8 +207,9 @@ impl VerticalAlign {
 
 /// One item of a block's inline content, in tree order.
 pub(crate) enum InlineToken<S> {
-    /// The text of a text node, with the style of its element.
-    Text(String, S),
+    /// The text of a text node, with the style of its element and the
+    /// language it is written in (for `text-transform`).
+    Text(String, S, LanguageIdentifier),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
     Open(S),
@@ -376,17 +379,30 @@ impl Paragraph {
         // character was a space, and whether a space is due before the next
         // content.
         let (mut has_content, mut last_was_space, mut pending_space) = (false, false, false);
+        // The last character of the text so far, white space included, for
+        // `text-transform: capitalize`: a word it ends continues in the next
+        // text node.
+        let mut previous: Option<char> = None;
         // Element ends seen since the last content: whether each came after
         // the pending space (the space is then inside the element).
         let mut closes: Vec<(OpenElement, bool)> = Vec::new();
 
         for token in tokens {
             match token {
-                InlineToken::Text(raw, style) => {
+                InlineToken::Text(raw, style, lang) => {
+                    // Case mapping never makes or removes white space, so
+                    // it can come before the collapsing below.
+                    let case = style
+                        .as_ref()
+                        .get_inherited_text()
+                        .clone_text_transform()
+                        .case();
+                    let raw = case::transform(raw, case, lang, previous);
                     let mut style = TextStyle::of(style.as_ref());
                     style.color.raise = open.last().map_or(0.0, |element| element.raise);
                     let mut start = None;
                     for c in raw.chars() {
+                        previous = Some(c);
                         if is_document_whitespace(c) {
                             pending_space |= has_content && !last_was_space;
                             continue;

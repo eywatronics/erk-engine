@@ -178,9 +178,9 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
   koleksiyonu çekirdeğe veri olarak verilir. Karar ve gerekçe
   p1-contract'a eklenir.
 - [ ] Fallback: CJK ve emoji için sistem fontları; testler yine gömülü fontla.
-- [ ] HiDPI: cihaz ölçeği `ErkConfig.scale` / pencereden; layout CSS
+- [x] HiDPI: cihaz ölçeği `ErkConfig.scale` / pencereden; layout CSS
   pikselinde, boyama cihaz pikselinde.
-- [ ] `text-transform`, elemanın `lang`'ına göre (`icu_casemap`): Türkçede
+- [x] `text-transform`, elemanın `lang`'ına göre (`icu_casemap`): Türkçede
   `i → İ`, `ı → I` (test).
 
 ### M1 kabulü
@@ -569,3 +569,38 @@ reddediyordu; dizinin içini gösteren mutlak yol eklendi); `Load`'da kimlik
 sayacı sıfırlanıyor; ikinci yanıt kabul ediliyor. Sağlamlık üretecine
 gelen ve gelmeyen görüntüler, uç `background-size`/`background-position`
 değerleri ve görüntülü öğeler eklendi.
+
+**İnceleme raporu: `docs/reviews/images_commit_review.md` (2026-10-01, #20).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| Ele alınacak bir hata ya da öneri yok | Değerlendirilecek madde yok |
+| Boyut sınırı `MAX_SIDE = 8000` | **Yanlış aktarım:** kodda kenar sınırı 16384 piksel, ayrıca görüntü başına 2²⁵ piksellik bir bütçe var; ikisi de başlıktan, pikseller ayrılmadan önce denetleniyor. Kodda değişiklik gerekmedi |
+
+**M1.7a, `text-transform` ve HiDPI (2026-10-01).** M1.7 ikiye bölündü: bu
+PR `text-transform` ve cihaz ölçeği; sistem fontları, `font-family` ve
+fallback ayrı PR'da (sözleşmeye yazılacak bir karar istiyor: taramayı kim
+yapar). İki yeni referans sayfası: `text-transform` %95,74 (9/9 kutu),
+`hidpi` %96,19 (8/8 kutu, ölçek 2). Diğer skorlar değişmedi; WPT değişmedi.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| `text-transform`, `icu_casemap` ile | `icu_casemap` 2.3 (ağaçtaki ICU4X sürümü; yalnızca `icu_casemap` ve `icu_casemap_data` indirildi, Unicode-3.0). `uppercase`, `lowercase` ve `capitalize`, metnin diliyle: Türkçe/Azerice `i → İ`, `I → ı`; Yunancada büyük harf vurgusuz; Felemenkçede `ij → IJ`; Almanca `ß → SS` |
+| Elemanın `lang`'ı | En yakın `lang` özniteliği (HTML §3.2.6.2), metin düğümü başına ve yalnızca metin dönüştürülüyorsa aranıyor. Geçersiz bir etiket bilinmeyen dil. **Dili olmayan metin kök kurallarla** dönüşüyor: Chrome orada tarayıcının kendi diline düşüyor (bu makinede Türkçe), Erk makinenin dilini okumuyor; bu yüzden referans sayfasında her metnin dili açıkça yazılı |
+| — | Dönüşüm paragraf kurulurken, beyaz boşluk daraltılmadan önce yapılıyor (büyük/küçük harf eşlemesi boşluk üretmez ya da silmez). `capitalize` kelime sınırlarını öğe sınırlarında kesmiyor: `<span>a</span><b>b</b>` tek kelime, `Ab` |
+| — | `capitalize`'ın kelimeleri Unicode kelime sınırlarına yakın: harf, işaret, rakam ve birleştirici; harfler arasındaki kesme işareti ya da nokta kelimeyi bölmüyor (`don't`), tire bölüyor (`foo-bar` → `Foo-Bar`); rakamla başlayan kelime değişmiyor (`3rd`) |
+| — | **Chrome'dan bilinçli fark:** Chrome `capitalize`'da dili yok sayıyor, karakter başına başlık harfi alıyor: `lang="tr"` ile "ilk iş" Chrome'da "Ilk Iş". Erk "İlk İş" yazıyor (CSS Text 3 dile duyarlı eşlemeyi öneriyor; Türkçe bu adımın gerekçesi). Referans sayfasının skoru bu farkı taşıyor |
+| HiDPI: cihaz ölçeği, layout CSS pikselinde, boyama cihaz pikselinde | Yeni `ToRenderer::Scale { factor }` mesajı ve `render_html_at_scale`. `Resize` cihaz pikseli; viewport `boyut / ölçek` CSS pikseli. Display list CSS pikselinde kalıyor; boyama tek bir `scale` dönüşümüyle, glifler, gölge bulanıklığı ve görüntüler dahil cihaz çözünürlüğünde. Stylo'nun cihazı ölçeği biliyor: `resolution` medya sorguları çalışıyor. Kabuk pencerenin ölçeğini açılışta ve `ScaleFactorChanged`'de gönderiyor. 1/64 ile 64 dışındaki ya da sayı olmayan ölçek 1 sayılıyor |
+| — | Konumlar CSS pikseline yuvarlanıyor; ölçek 2'de bu cihaz pikseline de denk düşüyor, 1,5'te düşmüyor (kenarlar yarım cihaz pikselinde yumuşak). Chrome cihaz pikseline yuvarlıyor; kesirli ölçekte kenar keskinliği açık |
+| — | **Referans testi ölçek öğrendi:** sayfa `<meta name="erk-device-scale" content="2">` ile ölçek seçiyor; Chrome `--force-device-scale-factor` ile yakalıyor, Erk aynı ölçekte çiziyor. Tolerans muhafızının "düz renk" eşiği (1000 piksel) CSS pikseli alanı olarak ölçekle büyüyor: ölçek 2'de yumuşak gölgenin her tonu dört kat piksel kaplayıp düz renk sayılıyordu. Aynı muhafız sayfanın ilk hâlinde gerçek bir hatayı da yakaladı: kartın beyazıyla sayfanın `#f8fafc`'si 7 farklıydı, kart çizilmese fark edilmezdi; zemin `#e2e8f0` oldu |
+
+Mutasyonlar (14/14 yakalandı): dil yok sayılıyor; `lang` atalardan
+aranmıyor; öğeler arası kelime bağlamı yok; kesme işareti kelimeyi bölüyor;
+başlık harfinden sonrası küçültülüyor; baştaki harf olmayanlar atlanıyor;
+kelime harf harf başlık harfine çevriliyor (Felemenkçe `IJ`); büyük harf dili
+yok sayıyor; boyama ölçeği yok sayıyor; viewport ölçeğe bölünmüyor; ölçek
+aralığı denetlenmiyor; iş parçacığı `Scale`'i yok sayıyor; Stylo ölçeği yok
+sayıyor; Stylo'nun viewport'u ölçekleniyor. Sağlamlık üretecine
+`text-transform`, uzunluğu değişen harfler ve tuhaf `lang` değerleri eklendi;
+üretilen sayfalar 1, 1,5 ve 2 ölçeklerinde sırayla çiziliyor. Windows yayın
+ikilisi 94 KB büyüdü (%0,6).

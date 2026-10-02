@@ -115,9 +115,17 @@ struct App {
 }
 
 impl App {
+    /// The renderer paints at the window's scale (device pixels per CSS
+    /// pixel): a page laid out for 800 CSS pixels fills an 800-point window
+    /// on any screen, sharply.
+    fn send_scale(&self, window: &Window) {
+        let _ = self.to_renderer.send(ToRenderer::Scale {
+            factor: window.scale_factor() as f32,
+        });
+    }
+
+    /// The viewport is the window's size in device pixels.
     fn request_frame(&self, size: PhysicalSize<u32>) {
-        // M0: one CSS pixel per device pixel, so the viewport is the window's
-        // physical size. Device scale arrives with the GPU path (M2).
         let clamp = |v: u32| u16::try_from(v).unwrap_or(u16::MAX);
         let _ = self.to_renderer.send(ToRenderer::Resize {
             width: clamp(size.width),
@@ -194,6 +202,7 @@ impl ApplicationHandler<UserEvent> for App {
                 return;
             }
         };
+        self.send_scale(&window);
         self.request_frame(window.inner_size());
         self.window = Some(WindowState { window, surface });
     }
@@ -205,6 +214,12 @@ impl ApplicationHandler<UserEvent> for App {
                 self.request_frame(size);
                 if let Some(state) = &self.window {
                     state.window.request_redraw();
+                }
+            }
+            // Moved to a screen of another scale; a Resized follows.
+            WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(state) = &self.window {
+                    self.send_scale(&state.window);
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(),

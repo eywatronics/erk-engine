@@ -16,7 +16,10 @@ use crate::display::{DisplayItem, DisplayList, Frame, Radii};
 /// round differently, and golden images must come out identical on every
 /// machine CI runs on. `Level::baseline()` is not enough, because it is
 /// scalar on x86_64 but NEON on aarch64. Speed is the GPU path's job (M2).
-pub(crate) fn paint(list: &DisplayList, width: u16, height: u16) -> Pixmap {
+/// Paint `list`, in CSS pixels, into a `width` × `height` pixmap of device
+/// pixels, `scale` device pixels per CSS pixel. Everything is drawn through
+/// one scale transform, so glyphs are rasterised at device resolution.
+pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> Pixmap {
     let settings = RenderSettings {
         level: Level::fallback(),
         num_threads: 0,
@@ -26,7 +29,15 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16) -> Pixmap {
 
     // The canvas colour is laid over white, as browsers do: a translucent
     // root background must not make the frame itself translucent.
-    let page = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+    let scale = f64::from(scale);
+    ctx.set_transform(Affine::scale(scale));
+    // The page in CSS pixels.
+    let page = Rect::new(
+        0.0,
+        0.0,
+        f64::from(width) / scale,
+        f64::from(height) / scale,
+    );
     ctx.set_paint(color([255, 255, 255, 255]));
     ctx.fill_rect(&page);
     ctx.set_paint(color(list.canvas));

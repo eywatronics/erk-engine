@@ -134,3 +134,29 @@ fn css_custom_properties_resolve() {
     let [r, g, b] = rgb(&computed(&doc, &styles, "p"));
     assert_eq!([r, g, b].map(|c| (c * 255.0).round() as u8), [0, 51, 255]);
 }
+
+#[test]
+fn resolution_media_queries_see_the_device_scale() {
+    let html = "<style>p { color: blue } @media (min-resolution: 2dppx) { p { color: red } }</style><p>x</p>";
+    let doc = Document::parse_html(html);
+    let at = |scale: f32| {
+        let styles = StyleEngine::new(400.0, 300.0)
+            .with_device_scale(scale)
+            .style(&doc);
+        rgb(&computed(&doc, &styles, "p"))
+    };
+    assert_eq!(at(1.0), [0.0, 0.0, 1.0]);
+    assert_eq!(at(2.0), [1.0, 0.0, 0.0]);
+}
+
+#[test]
+fn the_viewport_stays_in_css_pixels_at_any_scale() {
+    // 400 CSS pixels wide, whatever the device pixels.
+    let html =
+        "<style>p { color: blue } @media (max-width: 400px) { p { color: red } }</style><p>x</p>";
+    let doc = Document::parse_html(html);
+    let styles = StyleEngine::new(400.0, 300.0)
+        .with_device_scale(2.0)
+        .style(&doc);
+    assert_eq!(rgb(&computed(&doc, &styles, "p")), [1.0, 0.0, 0.0]);
+}
