@@ -27,7 +27,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M0** | İlk piksel | Bitti |
 | **M0.5** | Mimari sözleşme | Bitti |
 | **M1** | Statik UI | Bitti |
-| **M2** | Etkileşim temeli | Yeni |
+| **M2** | Etkileşim temeli | Başladı: adım planı ([m2-interaction.md](m2-interaction.md)) |
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
 | **M4** | Etkileşimli DOM | Yeni |
 | **M5** | Artımlı render ve formlar | Yeni |
@@ -216,6 +216,18 @@ layout'u kararı gerekçesiyle belgelenmiş.
   Tıklama, hit-test'in bulduğu düğümle host'a mesaj olarak döner; mesajlar
   düz veri kuralında kalır
 - macOS CI
+
+M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-interaction.md)):
+
+| Adım | Kapsam | Durum |
+|---|---|---|
+| M2.0 | Kalıcı belge (bir kez ayrıştırılır, kareler arasında yaşar), metin geometrisi testi (M1'in bulgusu), kare süresi tabanı | Yeni |
+| M2.1 | Girdi mesajları, hit-test, tıklama olayı ve yayılma yolu, `inspect_at` ve vurgu kaplaması | Yeni |
+| M2.2 | `:hover`, `:active`, `:focus`; odak ve klavyeyle gezinme | Yeni |
+| M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Yeni |
+| M2.4 | `SetText` ve `Query` (ilk `Mutation`), sayaç demosu ve altın görüntülü testi | Yeni |
+| M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm | Yeni |
+| M2.6 | macOS CI, kabul | Yeni |
 
 **Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
 (hover, kaydırma) tam yeniden stil, layout ve boyama ister. M2'nin kare süresi
