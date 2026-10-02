@@ -25,7 +25,7 @@ forbid() {
 #    here is a design change: update this list in the same pull request.
 #    Each public item is read whole, however rustfmt wraps it: a type added
 #    to a multi-line `pub use` list must show up here too.
-expected='pub use messages::{ ElementBox, Frame, FromRenderer, ResourceKind, ResourceRequest, ResourceResponse, ToRenderer, };
+expected='pub use messages::{ ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, ToRenderer, };
 pub use thread::spawn;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {

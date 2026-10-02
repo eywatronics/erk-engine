@@ -17,16 +17,22 @@ use erk_style::{ComputedValues, FontMetricsProvider, StyleFontMetrics};
 
 use crate::case;
 use crate::color::{Rgba, srgb_bytes};
+use crate::fonts::{self, Family, HostFonts};
+use crate::messages::FontCatalog;
 use icu_locale_core::LanguageIdentifier;
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
+use parley::fontique::{FallbackKey, FamilyId, Language, Script as FontScript};
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontWeight, Layout, LayoutContext, LineHeight,
     PositionedLayoutItem, StyleProperty,
 };
+use parley::{FontFamily, FontFamilyName, FontStyle as ParleyFontStyle};
+use std::borrow::Cow;
+use std::str::FromStr;
 #[cfg(test)]
 use taffy::{AvailableSpace, Size};
 
-const NOTO_SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+pub(crate) const NOTO_SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 const NOTO_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSans-Bold.ttf");
 const FAMILY: &str = "Noto Sans";
 
@@ -46,6 +52,11 @@ struct TextStyle {
     font_size: f32,
     line_height: LineHeight,
     weight: f32,
+    italic: bool,
+    /// The `font-family` list; the embedded font comes after it.
+    families: Arc<[Family]>,
+    /// The text's language, for language-specific fallback fonts.
+    language: Option<Language>,
     color: TextBrush,
 }
 
@@ -62,6 +73,9 @@ impl TextStyle {
             font_size,
             line_height,
             weight,
+            italic: fonts::is_italic(style),
+            families: fonts::families(style),
+            language: None,
             color: TextBrush {
                 color: srgb_bytes(style.clone_color()),
                 raise: 0.0,
@@ -399,6 +413,9 @@ impl Paragraph {
                         .case();
                     let raw = case::transform(raw, case, lang, previous);
                     let mut style = TextStyle::of(style.as_ref());
+                    if *lang != LanguageIdentifier::UNKNOWN {
+                        style.language = fonts::language(&lang.to_string());
+                    }
                     style.color.raise = open.last().map_or(0.0, |element| element.raise);
                     let mut start = None;
                     for c in raw.chars() {
@@ -1016,14 +1033,24 @@ impl FontMetricsProvider for EmbeddedFontMetrics {
     }
 }
 
-/// Parley's font and layout contexts, with the embedded fonts registered.
+/// Parley's font and layout contexts, with the embedded fonts registered,
+/// and the host's fonts that have arrived.
 pub(crate) struct TextEngine {
     fonts: FontContext,
     layouts: LayoutContext<TextBrush>,
+    catalogue: Option<FontCatalog>,
 }
 
 impl TextEngine {
+    /// The embedded fonts only.
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
+        Self::with_fonts(&HostFonts::default())
+    }
+
+    /// The embedded fonts, the host's faces that have arrived, and what its
+    /// catalogue says the generic families and the fallback lists are.
+    pub(crate) fn with_fonts(host: &HostFonts) -> Self {
         let mut fonts = FontContext {
             collection: Collection::new(CollectionOptions {
                 shared: false,
@@ -1036,10 +1063,73 @@ impl TextEngine {
                 .collection
                 .register_fonts(Blob::new(Arc::new(font)), None);
         }
+        for blob in host.loaded() {
+            fonts.collection.register_fonts(blob.clone(), None);
+        }
+        if let Some(catalogue) = host.catalogue() {
+            let collection = &mut fonts.collection;
+            let mut ids = |names: &[String]| -> Vec<FamilyId> {
+                names
+                    .iter()
+                    .filter_map(|name| collection.family_id(name))
+                    .collect()
+            };
+            let generics: Vec<_> = catalogue
+                .generic
+                .iter()
+                .filter_map(|entry| {
+                    Some((fonts::generic_named(&entry.generic)?, ids(&entry.families)))
+                })
+                .collect();
+            let fallbacks: Vec<_> = catalogue
+                .fallback
+                .iter()
+                .filter_map(|entry| {
+                    let script = FontScript::from_str(&entry.script).ok()?;
+                    let key = FallbackKey::new(script, fonts::language(&entry.language).as_ref());
+                    Some((key, ids(&entry.families)))
+                })
+                .collect();
+            for (generic, families) in generics {
+                fonts
+                    .collection
+                    .set_generic_families(generic, families.into_iter());
+            }
+            for (key, families) in fallbacks {
+                fonts.collection.set_fallbacks(key, families.into_iter());
+            }
+        }
         Self {
             fonts,
             layouts: LayoutContext::new(),
+            catalogue: host.catalogue().cloned(),
         }
+    }
+
+    /// The font family list Parley gets for `style`: the CSS list, then the
+    /// embedded font.
+    fn family_list(style: &TextStyle) -> FontFamily<'static> {
+        let mut list: Vec<FontFamilyName<'static>> = style
+            .families
+            .iter()
+            .map(|family| match family {
+                Family::Named(name) => FontFamilyName::Named(Cow::Owned(name.clone())),
+                Family::Generic(generic) => FontFamilyName::Generic(*generic),
+            })
+            .collect();
+        list.push(FontFamilyName::Named(Cow::Borrowed(FAMILY)));
+        FontFamily::List(Cow::Owned(list))
+    }
+
+    /// The language Parley is told for `style`: only one the catalogue has
+    /// a fallback list for, so that every other text uses the lists for any
+    /// language (fontique finds nothing for a language it keys but has no
+    /// list for).
+    fn locale(&self, style: &TextStyle) -> Option<Language> {
+        let catalogue = self.catalogue.as_ref()?;
+        style
+            .language
+            .filter(|language| fonts::has_language_fallback(catalogue, language))
     }
 
     /// Shape `paragraph` and break it into lines no wider than
@@ -1187,16 +1277,37 @@ impl TextEngine {
         max_advance: Option<f32>,
         atoms: &[AtomBox],
     ) -> Layout<TextBrush> {
+        let base_locale = self.locale(&paragraph.base);
+        let locales: Vec<Option<Language>> = paragraph
+            .spans
+            .iter()
+            .map(|(_, style)| self.locale(style))
+            .collect();
         let mut builder = self
             .layouts
             .ranged_builder(&mut self.fonts, &paragraph.text, 1.0, true);
         let base = &paragraph.base;
-        builder.push_default(StyleProperty::FontFamily(FAMILY.into()));
+        builder.push_default(StyleProperty::FontFamily(Self::family_list(base)));
+        if base.italic {
+            builder.push_default(StyleProperty::FontStyle(ParleyFontStyle::Italic));
+        }
+        builder.push_default(StyleProperty::Locale(base_locale));
         builder.push_default(StyleProperty::FontSize(base.font_size));
         builder.push_default(StyleProperty::LineHeight(base.line_height));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(base.weight)));
         builder.push_default(StyleProperty::Brush(base.color));
-        for (range, style) in &paragraph.spans {
+        for ((range, style), locale) in paragraph.spans.iter().zip(locales) {
+            builder.push(
+                StyleProperty::FontFamily(Self::family_list(style)),
+                range.clone(),
+            );
+            let font_style = if style.italic {
+                ParleyFontStyle::Italic
+            } else {
+                ParleyFontStyle::Normal
+            };
+            builder.push(StyleProperty::FontStyle(font_style), range.clone());
+            builder.push(StyleProperty::Locale(locale), range.clone());
             builder.push(StyleProperty::FontSize(style.font_size), range.clone());
             builder.push(StyleProperty::LineHeight(style.line_height), range.clone());
             builder.push(
@@ -1260,6 +1371,9 @@ mod tests {
                 font_size: 16.0,
                 line_height: LineHeight::MetricsRelative(1.0),
                 weight,
+                italic: false,
+                families: Arc::new([]),
+                language: None,
                 color: TextBrush::default(),
             },
             spans: Vec::new(),

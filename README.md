@@ -131,7 +131,8 @@ Today Erk does **not**:
 - decode images other than PNG and JPEG, or load stylesheets and fonts
   from the host (later);
 - draw dotted, dashed or double borders (drawn solid), or inset shadows;
-- load system fonts: text uses the embedded Noto Sans (M1);
+- take a paragraph's direction from CSS `direction`: right-to-left text
+  is drawn, but a paragraph's direction comes from its first letter;
 - render incrementally: every change redraws the whole page (M5).
 
 Never planned: floats, table layout, multi-column, print, and a

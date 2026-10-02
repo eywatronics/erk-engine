@@ -6,14 +6,20 @@
 //! a `..` that climbs out of the directory are refused, so a page cannot
 //! read `file:///etc/passwd`. `memory://` is the scheme for assets an
 //! application embeds; the demo embeds none yet, so it finds nothing.
+//! Fonts come from the system's, by the URLs of the catalogue sent to the
+//! renderer, and from nowhere else.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use erk_renderer::{ResourceKind, ResourceRequest, ResourceResponse, ToRenderer};
+
+use crate::fonts::SystemFonts;
 
 pub(crate) struct Provider {
     /// The opened page's directory, resolved; `None` if it cannot be.
     root: Option<PathBuf>,
+    fonts: Option<Arc<SystemFonts>>,
 }
 
 impl Provider {
@@ -26,12 +32,31 @@ impl Provider {
         };
         Self {
             root: directory.canonicalize().ok(),
+            fonts: None,
+        }
+    }
+
+    /// The same provider, serving the faces of `fonts`' catalogue.
+    pub(crate) fn with_fonts(self, fonts: Arc<SystemFonts>) -> Self {
+        Self {
+            fonts: Some(fonts),
+            ..self
         }
     }
 
     /// The renderer message that answers `request`.
     pub(crate) fn answer(&self, request: &ResourceRequest) -> ToRenderer {
-        match self.load(request) {
+        let found = match request.kind {
+            ResourceKind::Image => self.load(request),
+            // The bytes say what kind of font file it is.
+            ResourceKind::Font => self
+                .fonts
+                .as_ref()
+                .and_then(|fonts| fonts.data(&request.url))
+                .map(|data| (String::new(), data)),
+            ResourceKind::Stylesheet => None,
+        };
+        match found {
             Some((mime, data)) => ToRenderer::Resource(ResourceResponse {
                 id: request.id,
                 mime,
@@ -42,9 +67,6 @@ impl Provider {
     }
 
     fn load(&self, request: &ResourceRequest) -> Option<(String, Vec<u8>)> {
-        if request.kind != ResourceKind::Image {
-            return None;
-        }
         let url = request.url.trim();
         if url.starts_with("memory://") {
             return None;
@@ -82,6 +104,46 @@ mod tests {
             url: url.to_owned(),
             kind: ResourceKind::Image,
         }
+    }
+
+    #[test]
+    fn fonts_are_served_only_from_the_system_catalogue() {
+        let (_base, provider) = site();
+        let font = |url: &str| ResourceRequest {
+            kind: ResourceKind::Font,
+            ..request(url)
+        };
+        // Without the system fonts nothing is a font, and a file beside the
+        // page is not one either.
+        for url in ["font:0", "img/logo.png"] {
+            assert!(
+                matches!(
+                    provider.answer(&font(url)),
+                    ToRenderer::ResourceMissing { id: 7 }
+                ),
+                "{url}"
+            );
+        }
+        let fonts = Arc::new(SystemFonts::scan());
+        let first = format!(
+            "font:{}?weight=400&style=normal",
+            fonts.catalogue().families[0]
+        );
+        let provider = provider.with_fonts(fonts);
+        assert!(matches!(
+            provider.answer(&font(&first)),
+            ToRenderer::Resource(_)
+        ));
+        // A catalogue URL asked for as an image is not served, nor a page's
+        // file asked for as a font.
+        assert!(matches!(
+            provider.answer(&request(&first)),
+            ToRenderer::ResourceMissing { id: 7 }
+        ));
+        assert!(matches!(
+            provider.answer(&font("img/logo.png")),
+            ToRenderer::ResourceMissing { id: 7 }
+        ));
     }
 
     /// A page in a fresh directory with an image beside it and a secret one

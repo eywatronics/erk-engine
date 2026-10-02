@@ -141,7 +141,7 @@ kendi testleri ve render değiştiriyorsa kendi Chrome referans sayfasıyla geli
 | M1.4 | Block ve absolute positioning doğrulaması (Taffy); float `none` gibi dizilir, metni düşürmez | Bitti: konumlandırma, `z-index`, float, WPT altyapısı (normal-flow %42,8, css-position %16,3), akış layout'u kararı (geçici: Taffy) |
 | M1.5 | Flexbox doğrulaması (Taffy) | Bitti: `order`, flex kapsayıcıda metin, absolute elemanların statik konumu; `css/css-flexbox` %53,2 |
 | M1.6 | Renk, kenarlık, yuvarlak köşe, gölge, `opacity`, görüntüler (png, jpeg); görüntüler ve CSS `url()` sözleşmenin kaynak API'sinden (demo kabukta bir kök dizin ve `memory://`) | Bitti: kenarlık, yuvarlak köşe, gölge, `opacity`, `<img>` ve `background-image` (png, jpeg) kaynak API'siyle, lisans kapısı (`cargo deny`) |
-| M1.7 | Sistem fontları ve fallback (fontique; gömülü font yalnızca testlerde), HiDPI cihaz ölçeği, `lang`'a göre `text-transform` (`icu_casemap`: Türkçede `i → İ`, `ı → I`) | Başladı: `text-transform` ve HiDPI var; sistem fontları ve fallback kaldı |
+| M1.7 | Sistem fontları ve fallback (fontique; gömülü font yalnızca testlerde), HiDPI cihaz ölçeği, `lang`'a göre `text-transform` (`icu_casemap`: Türkçede `i → İ`, `ı → I`) | Bitti: `text-transform`, HiDPI, sistem fontları (host'ta fontique), `font-family`, yazı sistemine ve dile göre yedek, renkli emoji |
 
 Adımlar boyunca, ilk gerektiği adımda:
 

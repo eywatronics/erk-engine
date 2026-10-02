@@ -173,11 +173,11 @@ Daralan kutuda metin alt satıra iner (`narrow_width_breaks_into_more_lines`,
 
 ### M1.7: Sistem fontları, HiDPI, text-transform
 
-- [ ] **Karar:** sistem fontlarını kim tarar? Çekirdek G/Ç yapmaz; fontique'in
+- [x] **Karar:** sistem fontlarını kim tarar? Çekirdek G/Ç yapmaz; fontique'in
   sistem taraması host tarafında (`erk-shell`, M3'te `erk`) çalışır ve font
   koleksiyonu çekirdeğe veri olarak verilir. Karar ve gerekçe
   p1-contract'a eklenir.
-- [ ] Fallback: CJK ve emoji için sistem fontları; testler yine gömülü fontla.
+- [x] Fallback: CJK ve emoji için sistem fontları; testler yine gömülü fontla.
 - [x] HiDPI: cihaz ölçeği `ErkConfig.scale` / pencereden; layout CSS
   pikselinde, boyama cihaz pikselinde.
 - [x] `text-transform`, elemanın `lang`'ına göre (`icu_casemap`): Türkçede
@@ -604,3 +604,33 @@ sayıyor; Stylo'nun viewport'u ölçekleniyor. Sağlamlık üretecine
 `text-transform`, uzunluğu değişen harfler ve tuhaf `lang` değerleri eklendi;
 üretilen sayfalar 1, 1,5 ve 2 ölçeklerinde sırayla çiziliyor. Windows yayın
 ikilisi 94 KB büyüdü (%0,6).
+
+**M1.7b, sistem fontları (2026-10-02).** M1.7 bununla bitti. #21 için
+inceleme raporu gelmedi. Karar p1-contract §6.2'de: tarama host'ta,
+çekirdek bir katalog ve istediği yüzlerin baytlarını alıyor.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| fontique'in sistem taraması host'ta | Kullanıcıya soruldu (2026-10-02), plandaki yol seçildi: fontique `system` özelliği yalnızca `erk-shell`'de; Windows'ta DirectWrite, Linux'ta fontconfig (`fontconfig-dlopen`: bağlama zamanında C kütüphanesi yok), macOS'te CoreText. 13 yeni crate (9,1 MB'ı `windows` 0.62), hepsi izin listesinde. Reddedilen: saf Rust ile font dizinlerini taramak; yedek listeleri bizim tablolarımız olurdu |
+| Font koleksiyonu çekirdeğe veri olarak | **İlk tasarım yüzleri katalogda gönderiyordu ve açılışı 1,3 s geciktirdi:** fontique bir ailenin yüzlerini dosyalarını açarak listeliyor (200 aile, 399 yüz). Katalog artık yalnızca aile adları, generic eşlemeler ve yazı sistemi yedekleri (12 ms); çekirdek yüzü `font:<aile>?weight=..&style=..` ile istiyor, en yakın yüzü host seçiyor. Ekran görüntüsü kipinde sayfa başına toplam süre 0,7–0,9 s |
+| — | Çekirdek istemeden önce Parley'nin seçeceğini hesaplıyor: her metin için `font-family` listesinde katalogda bulunan ilk aile; gömülü Noto Sans'ın çizemediği her karakter için yazı sisteminin (ICU) yedek listesi, katalogda o dil için liste varsa onunla; emoji için `emoji` generic ailesi. Gelen yüzler fontique'e kaydediliyor, generic aileler ve yedekler katalogdan kuruluyor; gömülü font her listenin sonunda |
+| — | **Dil yalnızca listesi olan diller için Parley'ye söyleniyor:** fontique'in izlediği bir dil (Yidiş, Farsça, Japonca) listesiz kalırsa hiçbir yedek bulunmuyor. Han karakterleri için fontique her sorguya dilsiz Han listesini kendisi ekliyor; bu yüzden bu kuralın testi İbranice (`lang="yi"`) |
+| — | `font-style: italic` artık yüz seçiyor (host'un fontlarıyla; gömülü fontta italik yok, dik çiziliyor) |
+| Testler yine gömülü fontla | Katalog yoksa her aile Noto Sans: altın görüntüler ve Chrome referansı değişmedi. Font testleri için `tests/fonts/ErkTest.ttf` (896 bayt, fontTools ile üretildi, üreteci yanında): `x`, `中`, `文`, `א`, `😀`, her biri dolu bir kare; hangi fontun çizdiği piksellerden okunuyor |
+| — | **Muhafız:** `check-core-io.sh` artık çekirdeğin bağımlılıklarında fontique ya da Parley `system` özelliğini (`cargo tree -p erk-renderer -e features`) ve kaynakta `load_system_fonts`, `load_fonts_from_paths`, `system_fonts: true`'yu reddediyor. Kasıtlı ihlaller: Parley'ye `system`, fontique'i doğrudan `system` ile eklemek, üç kaynak çağrısı (5/5 yakalandı; Python'un `bash`'inde `cargo` bulunamayınca betik geçmedi, doğru) |
+| — | **Bulunan sınır:** sağdan sola bir paragraf yönünü `direction`'dan değil ilk güçlü karakterinden alıyor; soldan sağa bir kutudaki İbranice sağdan başlıyor. Parley 0.11'de taban yönü ayarı yok (`None` sabit). css-support'ta "Later" |
+| — | Satır yükseklikleri ve `vertical-align` hâlâ Noto Sans'ın ölçüleriyle; sistem fontuyla `line-height: normal` Chrome'dan birkaç piksel farklı olabilir. Açık |
+
+Mutasyonlar (çekirdek 14/14, host 3/3 yakalandı): CSS aile listesi yok
+sayılıyor; gelen yüzler kaydedilmiyor; generic aileler kurulmuyor; yedekler
+kurulmuyor; dil hiç söylenmiyor; dil hep söyleniyor (ilk turda **geçti**:
+fontique Han için dilsiz listeyi kendisi ekliyor; İbranice testi eklendi);
+yedek yüzler istenmiyor; gömülü fontun kapsamı yok sayılıyor; dil listesi
+istekte yok sayılıyor; font MIME'ı yok sayılıyor; aile adı kodlanmıyor;
+italik URL'de yok; fontlar beklenmiyor; aile adı büyük-küçük harfe duyarlı;
+host'ta fazladan sorgu anahtarı kabul ediliyor; host her türe font veriyor;
+host stili yok sayıyor (ilk turda **geçti**: en yakın yüz testi eklendi).
+İlk turda geçen bir mutasyon daha vardı: font baytlarının çözülüp
+çözülmediği hiçbir yerde görünmüyordu (fontique zaten kaydetmiyor, metin
+yedekle çiziliyor); denetim kaldırıldı, yalnızca MIME denetimi kaldı.
+Windows yayın ikilisi 810 KB büyüdü (%5,3, DirectWrite kodu).

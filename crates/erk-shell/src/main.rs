@@ -10,6 +10,7 @@
 //! thread, only ever receives the document's text. The engine core does no
 //! I/O of its own; resources, time and configuration come from the host.
 
+mod fonts;
 mod resources;
 mod window;
 
@@ -18,6 +19,7 @@ use std::process::ExitCode;
 
 use erk_renderer::{FromRenderer, ToRenderer};
 
+use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 
 /// Screenshot size, the same as the golden images.
@@ -77,12 +79,14 @@ fn read_page(page: &PathBuf) -> Result<String, String> {
 /// write the frame as a PNG: the first frame painted after every resource
 /// request has been answered.
 fn screenshot(page: &std::path::Path, html: String, out: &PathBuf) -> Result<(), String> {
-    let provider = Provider::for_page(page);
+    let fonts = std::sync::Arc::new(SystemFonts::scan());
+    let provider = Provider::for_page(page).with_fonts(fonts.clone());
     let (to, from, handle) = erk_renderer::spawn();
     let send = |message| {
         to.send(message)
             .map_err(|_| "the renderer stopped".to_owned())
     };
+    send(ToRenderer::Fonts(fonts.catalogue().clone()))?;
     send(ToRenderer::Load { html })?;
     send(ToRenderer::Resize {
         width: SCREENSHOT_WIDTH,

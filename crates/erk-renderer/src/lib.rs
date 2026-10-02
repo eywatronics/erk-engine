@@ -11,6 +11,7 @@
 mod case;
 mod color;
 mod display;
+mod fonts;
 mod layout;
 mod messages;
 mod paint;
@@ -19,7 +20,8 @@ mod text;
 mod thread;
 
 pub use messages::{
-    ElementBox, Frame, FromRenderer, ResourceKind, ResourceRequest, ResourceResponse, ToRenderer,
+    ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest,
+    ResourceResponse, ScriptFallback, ToRenderer,
 };
 pub use thread::spawn;
 
@@ -143,7 +145,7 @@ pub(crate) fn render_document(
         .with_device_scale(scale)
         .style(&doc);
     let requests = resources.requests(&doc, &styles);
-    let mut text = TextEngine::new();
+    let mut text = TextEngine::with_fonts(resources.fonts());
     let layouts = layout::layout(&doc, &styles, resources, &mut text, w, h);
     let list = DisplayList::build(&doc, &styles, &layouts, resources);
     let pixmap = paint::paint(&list, width, height, scale);
@@ -172,7 +174,14 @@ pub fn element_boxes(
     let mut resources = Resources::default();
     let requests = resources.requests(&doc, &styles);
     answer(&mut resources, &requests, provide);
-    let layouts = layout::layout(&doc, &styles, &resources, &mut TextEngine::new(), w, h);
+    let layouts = layout::layout(
+        &doc,
+        &styles,
+        &resources,
+        &mut TextEngine::with_fonts(resources.fonts()),
+        w,
+        h,
+    );
     let mut boxes = Vec::new();
     let mut index = 0;
     collect_boxes(

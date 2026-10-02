@@ -16,7 +16,8 @@ use erk_style::Styles;
 use vello_cpu::Pixmap;
 use vello_cpu::color::PremulRgba8;
 
-use crate::messages::{ResourceKind, ResourceRequest, ResourceResponse};
+use crate::fonts::HostFonts;
+use crate::messages::{FontCatalog, ResourceKind, ResourceRequest, ResourceResponse};
 
 /// The largest image side Erk decodes. Larger ones are refused rather than
 /// allocated: a host is trusted, its files are not necessarily sane.
@@ -61,12 +62,20 @@ enum State {
     Missing,
 }
 
-/// What is known about every URL a document has named.
+/// What a request id was for.
+enum Requested {
+    Image(String),
+    Font(String),
+}
+
+/// What is known about every URL a document has named, and about the
+/// host's fonts, which outlive the document.
 #[derive(Default)]
 pub(crate) struct Resources {
     by_url: HashMap<String, State>,
-    by_id: HashMap<u64, String>,
+    by_id: HashMap<u64, Requested>,
     next_id: u64,
+    fonts: HostFonts,
 }
 
 impl Resources {
@@ -78,62 +87,101 @@ impl Resources {
         }
     }
 
-    /// A request for every URL the document names that is not known yet.
+    pub(crate) fn fonts(&self) -> &HostFonts {
+        &self.fonts
+    }
+
+    /// The host's fonts, from now on (p1-contract §6.2).
+    pub(crate) fn set_fonts(&mut self, catalogue: FontCatalog) {
+        self.fonts.set_catalogue(catalogue);
+    }
+
+    /// A request for every image URL and every font face the document uses
+    /// that is not known yet.
     pub(crate) fn requests(&mut self, doc: &Document, styles: &Styles) -> Vec<ResourceRequest> {
         let mut requests = Vec::new();
         for url in wanted(doc, styles) {
             if self.by_url.contains_key(&url) {
                 continue;
             }
-            self.next_id += 1;
-            let id = self.next_id;
+            let id = self.next_id();
             self.by_url.insert(url.clone(), State::Pending);
-            self.by_id.insert(id, url.clone());
+            self.by_id.insert(id, Requested::Image(url.clone()));
             requests.push(ResourceRequest {
                 id,
                 url,
                 kind: ResourceKind::Image,
             });
         }
+        for url in self.fonts.wanted(doc, styles) {
+            if self.fonts.is_known(&url) {
+                continue;
+            }
+            let id = self.next_id();
+            self.fonts.requested(&url);
+            self.by_id.insert(id, Requested::Font(url.clone()));
+            requests.push(ResourceRequest {
+                id,
+                url,
+                kind: ResourceKind::Font,
+            });
+        }
         requests
     }
 
-    /// The same store for a new document: nothing known, but the ids go on
-    /// from where they were, so a late answer to the previous document's
-    /// request cannot be taken for one of this document's.
-    pub(crate) fn for_new_document(&self) -> Self {
-        Self {
-            next_id: self.next_id,
-            ..Self::default()
-        }
+    fn next_id(&mut self) -> u64 {
+        self.next_id += 1;
+        self.next_id
+    }
+
+    /// Forget the document's images for a new document. The ids go on from
+    /// where they were, so a late answer to the previous document's request
+    /// cannot be taken for one of this document's; fonts, and the requests
+    /// for them, are kept.
+    pub(crate) fn new_document(&mut self) {
+        self.by_url.clear();
+        self.by_id
+            .retain(|_, requested| matches!(requested, Requested::Font(_)));
     }
 
     /// The host's answer to request `response.id`. A response that is not an
-    /// image Erk can decode leaves the URL missing. A request is answered
-    /// once: a second answer, or one to a request never made, is ignored.
+    /// image Erk can decode, or not a font, leaves the URL missing. A
+    /// request is answered once: a second answer, or one to a request never
+    /// made, is ignored.
     pub(crate) fn complete(&mut self, response: &ResourceResponse) {
-        let Some(url) = self.by_id.remove(&response.id) else {
-            return;
-        };
-        let state = match decode(&response.mime, &response.data) {
-            Ok(image) => State::Ready(Arc::new(image)),
-            Err(_) => State::Missing,
-        };
-        self.by_url.insert(url, state);
+        match self.by_id.remove(&response.id) {
+            Some(Requested::Image(url)) => {
+                let state = match decode(&response.mime, &response.data) {
+                    Ok(image) => State::Ready(Arc::new(image)),
+                    Err(_) => State::Missing,
+                };
+                self.by_url.insert(url, state);
+            }
+            Some(Requested::Font(url)) => {
+                self.fonts.complete(&url, &response.mime, &response.data);
+            }
+            None => {}
+        }
     }
 
     /// The host has no resource for request `id`.
     pub(crate) fn missing(&mut self, id: u64) {
-        if let Some(url) = self.by_id.remove(&id) {
-            self.by_url.insert(url, State::Missing);
+        match self.by_id.remove(&id) {
+            Some(Requested::Image(url)) => {
+                self.by_url.insert(url, State::Missing);
+            }
+            Some(Requested::Font(url)) => self.fonts.missing(&url),
+            None => {}
         }
     }
 
     /// Whether any request is still unanswered.
     pub(crate) fn pending(&self) -> bool {
-        self.by_url
-            .values()
-            .any(|state| matches!(state, State::Pending))
+        self.fonts.pending()
+            || self
+                .by_url
+                .values()
+                .any(|state| matches!(state, State::Pending))
     }
 }
 

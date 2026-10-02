@@ -8,11 +8,13 @@
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use erk_renderer::{Frame, FromRenderer, ToRenderer};
 use softbuffer::{Context, Surface};
 
+use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -40,7 +42,11 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
     let proxy = event_loop.create_proxy();
     // The forwarder also answers the renderer's resource requests: the host
     // reads files, the renderer never does.
-    let provider = Provider::for_page(page);
+    // The system's fonts: the catalogue goes to the renderer before the
+    // page, the files are read when it asks for them.
+    let fonts = Arc::new(SystemFonts::scan());
+    let _ = to_renderer.send(ToRenderer::Fonts(fonts.catalogue().clone()));
+    let provider = Provider::for_page(page).with_fonts(fonts);
     let answers = to_renderer.clone();
     let forwarder = std::thread::Builder::new()
         .name("erk-frames".to_owned())
