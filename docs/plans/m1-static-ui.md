@@ -206,12 +206,13 @@ genişlemesidir.
 - [x] İkili boyutu bütçenin altında; bellek ve ilk kare ölçümü M1 sonunda
   tekrarlanıp M1.0'la karşılaştırılmış.
 - [x] Fuzz job'ı yapılandırılmış ve CI'da yeşil.
-- [ ] **Fuzz job'ının bir çökmeyi yakaladığı doğrulanmış:** kasıtlı bir
+- [x] **Fuzz job'ının bir çökmeyi yakaladığı doğrulanmış:** kasıtlı bir
   paniğin job'ı kırdığı ve girdinin artifact olarak saklandığı ayrı bir CI
   koşusunda görülmüş. Yapılandırılmış olması bunu göstermez; muhafız
-  ilkesinin kasıtlı ihlal kuralı.
+  ilkesinin kasıtlı ihlal kuralı. (2026-10-02, taslak PR #24, koşu
+  37002635739.)
 - [x] Akış layout'u kararı gerekçesiyle belgelenmiş.
-- [ ] `roadmap.md`'de M1 "Bitti": fuzz doğrulaması kalana kadar "Kabulde".
+- [x] `roadmap.md`'de M1 "Bitti".
 
 ---
 
@@ -680,11 +681,30 @@ koleksiyonu. 1000 elemanlı bir sayfanın tam yeniden çizimi hâlâ ~71 ms:
 M5'in artımlı işinin gerekçesi aynen duruyor.
 
 Mutasyonlar (3/3 yakalandı): `%25` önce çözülüyor; strut alt sınırı
-kaldırılıyor; oran Taffy'ye yine veriliyor. **Açık doğrulama:** fuzz job'ı
-kasıtlı bir ihlalle denenmedi. Yapılacak: `render_html`'i kolay bulunan bir
-girdide panikleten geçici bir dal ve taslak PR; `fuzz` job'ının kırıldığı ve
-`fuzz-artifacts`'ta çöken girdinin bulunduğu görülür, sonra PR kapatılıp dal
-silinir. O zamana kadar M1 "Kabulde". Kural takviminin M1 satırları
+kaldırılıyor; oran Taffy'ye yine veriliyor.
+
+**Fuzz job'ının kasıtlı ihlalle denenmesi (2026-10-02, taslak PR #24,
+birleştirilmeden kapatıldı, dal silindi).**
+
+| Deneme | Sonuç |
+|---|---|
+| `render_html` `Z` ile başlayan bir sayfada panikliyor | **Job yeşil geçti: panik hiç bulunamadı.** Boru hattı değil hız: hedef saniyede 6–9 girdi deniyor (ASan, 55 KB'a varan tohumlar), beş dakikada ~2–3 bin; ~1300 baytlık bir girdinin ilk baytının `Z` olması bu kadar denemede pek olası değil. Bu, job'ın bugünkü haliyle zayıf bir kapı olduğunu gösterdi |
+| Fuzz hedefinin render iş parçacığı, uzunluğu 7'ye bölümünden 3 kalan her girdide panikliyor | **Job kırıldı (1 dk 19 sn):** `fuzz canary: length 661`, libFuzzer "deadly signal", girdi `crash-947da3ff…` olarak yazıldı ve `fuzz-artifacts` artifact'ı yüklendi (654 bayt). Render iş parçacığındaki bir panik libfuzzer-sys'in panik kancasıyla süreci durduruyor; yakalama ve saklama akışı panik için doğrulandı (koşu 37002635739) |
+
+**Açık (M2'nin ilk işi):** fuzz hızı. Saniyede 6–9 girdi, beş dakikada
+yalnızca birkaç bin deneme demek; kolay bir panik bile bulunamadı. Tohumları
+küçültmek, `-max_len`'i düşürmek ve renderer'ı daha küçük bir viewport'ta
+çalıştırmakla hızı ölçerek artırmak ayrı bir PR'da.
+
+**İnceleme raporu: `docs/reviews/acceptance_commit_review.md` (#23,
+2026-10-02).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| Uzun ömürlü render iş parçacığı, bağımlılıkların iş parçacığı yerel sızıntılarının "önüne geçmiş" | **Kısmen:** düzeltme sızıntıdan kaçınıyor, onu gidermiyor. Hangi bağımlılığın iş parçacığı başına ~14 KB bıraktığı M3 için açık; uygulamayı tekrar tekrar kuran bir host bunu görür |
+| "Tüm CSS2 layout gereksinimlerinin son ve en zorlu edge-case senaryoları halledilmiş" | **Yanlış:** normal-flow'da 238 test düşüyor; 205'i desteklenmeyen ya da planlanmayan özellik, ama 33'ü açık durumlar (11'i inline içinde blok) |
+| "M1 acceptance tamamlanabilir" | O commit'te fuzz job'ının bir paniği yakaladığı henüz denenmemişti; yukarıdaki denemeyle doğrulandı, M1 ancak şimdi bitti |
+| Strut, oran ve kod çözme testleri | Tespit; yapılacak bir şey yok | Kural takviminin M1 satırları
 (fuzz, boyut bütçesi, css-support'taki her "Supported" satırın testi) proje
 kurallarında yürürlükteki kurallara taşındı; son ikisi M1.0'dan beri CI'da
 zorlanıyordu.
