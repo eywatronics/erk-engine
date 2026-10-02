@@ -203,6 +203,12 @@ mod tests {
                 italic: true,
             })
         );
+        // A family whose name holds an escape: `%25` is decoded last, or
+        // "100%26" would come back as "100&".
+        assert_eq!(
+            parse("font:100%2526 %253F?weight=400&style=normal").map(|request| request.family),
+            Some("100%26 %3F".to_owned())
+        );
         for url in [
             "font:Arial",
             "font:?weight=400&style=normal",
