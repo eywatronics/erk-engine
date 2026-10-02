@@ -32,8 +32,6 @@ fn renderer() -> &'static Mutex<Renderer> {
             .stack_size(RENDERER_STACK)
             .spawn(move || {
                 for html in inbox {
-                    // CANARY, removed in the next commit.
-                    assert!(html.len() % 7 != 3, "fuzz canary: length {}", html.len());
                     erk_renderer::render_html(&html, 320, 240);
                     if outbox.send(()).is_err() {
                         return;

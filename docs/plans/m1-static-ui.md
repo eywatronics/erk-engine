@@ -710,7 +710,12 @@ kopyalamak). ASan'ı kaldırmanın bedeli LeakSanitizer'ı ve bağımlılıklar�
 kararıyla iki job paralel koşuyor: `fuzz (none)` sanitizer'sız (67/sn,
 panikler için), `fuzz (address)` ASan'la (9/sn, sızıntı ve bellek hataları
 için). CI süresi aynı kaldı, CI dakikası iki katı. Sanitizer'sız job yeni
-bir muhafız olduğu için kasıtlı bir panikle ayrıca denendi (aşağıda).
+bir muhafız olduğu için kasıtlı bir panikle ayrıca denendi: render
+iş parçacığında uzunluğu 7'ye bölümünden 3 kalan girdide panik (PR #26'da
+geçici bir commit, koşu 37004949441). İki job da kırıldı (`fuzz canary:
+length 661`, "deadly signal"), girdi `crash-947da3ff…` olarak yazıldı ve
+`fuzz-artifacts-none` ile `fuzz-artifacts-address` yüklendi; panik sonraki
+commit'te kaldırıldı.
 
 **İnceleme raporu: `docs/reviews/acceptance_commit_review.md` (#23,
 2026-10-02).**
