@@ -241,9 +241,23 @@ jobs:
   # a crash fails the job and its input is kept as an artifact, to go into
   # crates/erk-renderer/tests/robustness/ with the fix. The nightly is
   # pinned so that a new nightly cannot turn the job red on its own.
+  #
+  # Two jobs side by side, measured on PR #26: without a sanitizer libFuzzer
+  # tries 67 inputs a second and finds panics; with AddressSanitizer it
+  # tries 9, but also finds leaks and memory errors in the dependencies'
+  # unsafe code (it found the per-thread leak).
   fuzz:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: none
+            max_len: 4096
+          - sanitizer: address
+            max_len: 65536
+    name: fuzz (${{ matrix.sanitizer }})
     env:
       NIGHTLY: nightly-2026-09-25
     steps:
@@ -257,6 +271,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
+          key: ${{ matrix.sanitizer }}
 
       - name: The fuzz lock file is current
         run: cargo "+$NIGHTLY" fetch --locked --manifest-path fuzz/Cargo.toml
@@ -264,17 +279,17 @@ jobs:
       - name: render_html survives five minutes of fuzzing
         run: |
           mkdir -p fuzz/corpus/render_html
-          cargo "+$NIGHTLY" fuzz run render_html \
+          cargo "+$NIGHTLY" fuzz run -s ${{ matrix.sanitizer }} render_html \
             fuzz/corpus/render_html \
             crates/erk-renderer/tests/robustness \
             crates/erk-renderer/tests/reference/pages \
-            -- -max_total_time=300 -max_len=65536 -timeout=60 -rss_limit_mb=4096
+            -- -max_total_time=300 -max_len=${{ matrix.max_len }} -timeout=60 -rss_limit_mb=4096 -print_final_stats=1
 
       - name: Keep the input that broke it
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-artifacts
+          name: fuzz-artifacts-${{ matrix.sanitizer }}
           path: fuzz/artifacts
 
   # The Web Platform Tests reftests of tests/wpt/dirs.txt, at the commit in
