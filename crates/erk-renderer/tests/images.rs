@@ -134,6 +134,35 @@ fn one_given_dimension_keeps_the_natural_ratio() {
 }
 
 #[test]
+fn both_given_dimensions_win_over_the_ratio() {
+    // Taffy's leaf layout keeps a box with an aspect ratio at least
+    // width / ratio high, which turned a 4 × 2 image sized 40 × 1 into 40 × 20.
+    let image = png(4, 2, |_, _| RED);
+    for (img, size) in [
+        (
+            r#"<img src="a.png" style="width: 40px; height: 1px">"#,
+            (40.0, 1.0),
+        ),
+        (r#"<img src="a.png" width="40" height="1">"#, (40.0, 1.0)),
+        (
+            r#"<img src="a.png" style="display: block; width: 40px; height: 1px">"#,
+            (40.0, 1.0),
+        ),
+        (
+            r#"<img src="a.png" style="width: 100%; height: 3px">"#,
+            (120.0, 3.0),
+        ),
+        (
+            r#"<img src="a.png" style="width: 10px; height: 30px">"#,
+            (10.0, 30.0),
+        ),
+    ] {
+        let mut provide = serving("a.png", image.clone(), "image/png");
+        assert_eq!(img_box(&page(img), &mut provide), size, "{img}");
+    }
+}
+
+#[test]
 fn an_image_that_never_arrives_has_no_size_and_paints_nothing() {
     let html = page(r#"<img src="missing.png">"#);
     assert_eq!(img_box(&html, &mut |_| None), (0.0, 0.0));
