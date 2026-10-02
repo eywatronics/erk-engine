@@ -244,6 +244,15 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # MEASUREMENT, not to be merged: inputs a second under three settings.
+    strategy:
+      fail-fast: false
+      matrix:
+        setting:
+          - { name: asan-64k, sanitizer: address, max_len: 65536 }
+          - { name: asan-4k, sanitizer: address, max_len: 4096 }
+          - { name: none-4k, sanitizer: none, max_len: 4096 }
+    name: fuzz (${{ matrix.setting.name }})
     env:
       NIGHTLY: nightly-2026-09-25
     steps:
@@ -257,25 +266,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
+          key: ${{ matrix.setting.sanitizer }}
 
       - name: The fuzz lock file is current
         run: cargo "+$NIGHTLY" fetch --locked --manifest-path fuzz/Cargo.toml
 
-      - name: render_html survives five minutes of fuzzing
+      - name: Two minutes of fuzzing, with final statistics
         run: |
           mkdir -p fuzz/corpus/render_html
-          cargo "+$NIGHTLY" fuzz run render_html \
-            fuzz/corpus/render_html \
-            crates/erk-renderer/tests/robustness \
-            crates/erk-renderer/tests/reference/pages \
-            -- -max_total_time=300 -max_len=65536 -timeout=60 -rss_limit_mb=4096
-
-      - name: Keep the input that broke it
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-artifacts
-          path: fuzz/artifacts
+          cargo "+$NIGHTLY" fuzz run -s ${{ matrix.setting.sanitizer }} render_html             fuzz/corpus/render_html             crates/erk-renderer/tests/robustness             crates/erk-renderer/tests/reference/pages             -- -max_total_time=120 -max_len=${{ matrix.setting.max_len }} -timeout=60 -rss_limit_mb=4096 -print_final_stats=1
 
   # The Web Platform Tests reftests of tests/wpt/dirs.txt, at the commit in
   # tests/wpt/WPT_COMMIT, against the baseline in tests/wpt/expectations.txt.
