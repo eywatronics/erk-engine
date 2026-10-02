@@ -691,10 +691,26 @@ birleştirilmeden kapatıldı, dal silindi).**
 | `render_html` `Z` ile başlayan bir sayfada panikliyor | **Job yeşil geçti: panik hiç bulunamadı.** Boru hattı değil hız: hedef saniyede 6–9 girdi deniyor (ASan, 55 KB'a varan tohumlar), beş dakikada ~2–3 bin; ~1300 baytlık bir girdinin ilk baytının `Z` olması bu kadar denemede pek olası değil. Bu, job'ın bugünkü haliyle zayıf bir kapı olduğunu gösterdi |
 | Fuzz hedefinin render iş parçacığı, uzunluğu 7'ye bölümünden 3 kalan her girdide panikliyor | **Job kırıldı (1 dk 19 sn):** `fuzz canary: length 661`, libFuzzer "deadly signal", girdi `crash-947da3ff…` olarak yazıldı ve `fuzz-artifacts` artifact'ı yüklendi (654 bayt). Render iş parçacığındaki bir panik libfuzzer-sys'in panik kancasıyla süreci durduruyor; yakalama ve saklama akışı panik için doğrulandı (koşu 37002635739) |
 
-**Açık (M2'nin ilk işi):** fuzz hızı. Saniyede 6–9 girdi, beş dakikada
-yalnızca birkaç bin deneme demek; kolay bir panik bile bulunamadı. Tohumları
-küçültmek, `-max_len`'i düşürmek ve renderer'ı daha küçük bir viewport'ta
-çalıştırmakla hızı ölçerek artırmak ayrı bir PR'da.
+**Fuzz hızı (2026-10-02, PR #26).** Saniyede 6–9 girdi kolay bir paniği
+bile bulamıyordu. Üç ayar ikişer dakika ölçüldü (libFuzzer'ın son
+istatistikleri):
+
+| Ayar | Saniyede girdi | 2 dakikada deneme | Yeni birim | Bellek tepe |
+|---|---|---|---|---|
+| ASan, `max_len` 65536 (o güne kadarki) | 9 | 1.124 | 717 | 546 MB |
+| ASan, `max_len` 4096 | 10 | 1.285 | 742 | 525 MB |
+| Sanitizer yok, `max_len` 4096 | 67 | 8.128 | 2.128 | 102 MB |
+
+Girdi boyutu değil AddressSanitizer yavaşlatıyor. Yerel ölçüm de bunu
+söylüyor: 320 × 240'ta tek bir `render_html` çağrısının sabit maliyeti
+0,78 ms (ayrıştırma ve stil 0,4 ms; 800 × 600'de 4,15 ms, yani sabit
+maliyetin çoğu piksel sayısıyla orantılı: zemini boyamak ve kareyi
+kopyalamak). ASan'ı kaldırmanın bedeli LeakSanitizer'ı ve bağımlılıkların
+`unsafe` kodundaki bellek hatası denetimini kaybetmek olurdu; kullanıcı
+kararıyla iki job paralel koşuyor: `fuzz (none)` sanitizer'sız (67/sn,
+panikler için), `fuzz (address)` ASan'la (9/sn, sızıntı ve bellek hataları
+için). CI süresi aynı kaldı, CI dakikası iki katı. Sanitizer'sız job yeni
+bir muhafız olduğu için kasıtlı bir panikle ayrıca denendi (aşağıda).
 
 **İnceleme raporu: `docs/reviews/acceptance_commit_review.md` (#23,
 2026-10-02).**
