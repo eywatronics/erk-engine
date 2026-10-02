@@ -63,8 +63,6 @@ impl Frame {
 /// at one device pixel per CSS pixel. No resource is loaded: images render
 /// as missing.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
-    // CANARY, never merged: a deliberate panic the fuzz job must catch.
-    assert!(!html.starts_with('Z'), "fuzz canary: a page starting with Z");
     render_document(html, width, height, 1.0, &mut Resources::default()).0
 }
 

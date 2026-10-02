@@ -32,6 +32,9 @@ fn renderer() -> &'static Mutex<Renderer> {
             .stack_size(RENDERER_STACK)
             .spawn(move || {
                 for html in inbox {
+                    // CANARY, never merged: a deliberate panic on the render
+                    // thread, hit by one input in seven.
+                    assert!(html.len() % 7 != 3, "fuzz canary: length {}", html.len());
                     erk_renderer::render_html(&html, 320, 240);
                     if outbox.send(()).is_err() {
                         return;
