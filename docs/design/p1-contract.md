@@ -209,6 +209,45 @@ sıradan öznitelikler olarak yazar. `erk-dom`'un düğüm yapısına şimdiden
 boş alanlar M5'e kadar ölü kod olurdu. AccessKit ağacı M5'te bu özniteliklerden
 kurulur.
 
+### 6.2 Fontlar (M1.7)
+
+**Karar: sistem fontlarını host tarar, çekirdek yalnızca bir katalog ve
+istediği fontların baytlarını alır.** Font dosyası okumak, işletim sisteminin
+font listesini sorgulamak ve kullanıcının fontconfig ayarını okumak G/Ç'dir;
+çekirdek bunların hiçbirini yapmaz (§6, check-core-io).
+
+- **Tarama host'ta:** demo kabuk (M3'te `erk`) fontique'in sistem
+  taramasıyla platformun kendi kaynağını kullanır: Windows'ta DirectWrite,
+  Linux'ta fontconfig (çalışma anında `dlopen` ile; bağlama zamanında C
+  bağımlılığı yok, kütüphane yoksa yalnızca gömülü font kalır), macOS'te
+  CoreText. Chrome da yedek fontu bu kaynaklardan seçiyor.
+- **Katalog veri olarak gelir** (`ToRenderer::Fonts(FontCatalog)`, M3'te
+  `ErkConfig`'te ya da ayrı bir çağrıda): ailelerin adları (font
+  dosyalarının verdiği adlar), generic ailelerin eşlemesi (`sans-serif`,
+  `serif`, `monospace`, `cursive`, `fantasy`, `system-ui`, `emoji`) ve yazı
+  sistemine (ISO 15924, isteğe bağlı dil) göre yedek aile listeleri.
+  **Yüzler katalogda yok:** bir ailenin yüzlerini listelemek dosyalarını
+  açmak demek; Windows'ta 200 ailenin 399 yüzü 1,3 s sürdü, katalog 12 ms.
+- **Baytlar kaynak API'siyle gelir:** çekirdek belgenin kullandığı her yüzü
+  `ResourceKind::Font` ile `font:<aile>?weight=<n>&style=<normal|italic>`
+  olarak ister (ailede `%`, `?`, `&`, `#` yüzde kodlu); host o ailenin bu
+  ağırlık ve stile en yakın yüzünü seçer ve dosyasını verir. MIME
+  `font/ttf`, `font/otf`, `font/collection` ya da boş olmalı; font olmayan
+  baytları fontique kaydetmez, metin yedek fontla çizilir. Gelen fontlar
+  belge değişse de saklanır; bir yüz ikinci kez istenmez.
+- **Gömülü Noto Sans her zaman son yedektir.** Katalog yoksa (testler,
+  `render_html`) her aile ona çözülür; bu yüzden altın görüntüler ve Chrome
+  referans testleri makineden bağımsız kalır.
+- **Erk makinenin dilini okumaz:** yedek seçimi metnin `lang`'ından gelir
+  (Japonca ve Çince Han karakterleri farklı fontlarla çizilir); dili
+  olmayan metin için host'un kataloğundaki dilsiz liste kullanılır.
+
+Reddedilen yol: fontique'in sistem taramasını çekirdekte açmak. Çekirdek
+dosya okur hâle gelirdi ve aynı sayfa her makinede başka ölçülürdü; testler
+deterministik kalmazdı. Reddedilen ikinci yol: font dizinlerini saf Rust ile
+taramak. Yeni bağımlılık getirmezdi, ama yedek listeleri bizim tablolarımız
+olurdu ve fontconfig ayarları ile platformun yedek kuralları yok sayılırdı.
+
 ## 7. Zaman ve olay döngüsü
 
 - **Erk'in döngüsü** (M3): `erk_app_run(app)` pencereyi açar ve pencere

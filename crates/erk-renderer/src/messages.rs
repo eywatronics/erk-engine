@@ -17,6 +17,9 @@ pub enum ToRenderer {
     /// The screen now has `factor` device pixels per CSS pixel (1 until
     /// told otherwise; a window moved to a HiDPI screen sends 2).
     Scale { factor: f32 },
+    /// The fonts the host can provide; until it is sent, every family is
+    /// the embedded Noto Sans. Kept across documents.
+    Fonts(FontCatalog),
     /// The host's answer to a resource request.
     Resource(ResourceResponse),
     /// The host has no resource for request `id`; the page renders
@@ -60,6 +63,39 @@ pub struct ResourceResponse {
     pub id: u64,
     pub mime: String,
     pub data: Vec<u8>,
+}
+
+/// The fonts the host can provide (p1-contract §6.2). The renderer asks
+/// for a face of a family it uses as a `ResourceKind::Font` request for
+/// `font:<family>?weight=<weight>&style=<normal|italic>`, the family with
+/// `%`, `?`, `&` and `#` percent-encoded; the host answers with the file of
+/// the family's face nearest that weight and style.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FontCatalog {
+    /// Every family the host has, by the name its font files give.
+    pub families: Vec<String>,
+    /// The families each generic family stands for, in order of preference.
+    pub generic: Vec<GenericFamilies>,
+    /// The families that draw a writing system the chosen font lacks.
+    pub fallback: Vec<ScriptFallback>,
+}
+
+/// What a generic family (`serif`, `sans-serif`, `monospace`, `cursive`,
+/// `fantasy`, `system-ui`, `emoji`) stands for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GenericFamilies {
+    pub generic: String,
+    pub families: Vec<String>,
+}
+
+/// The families for text in `script` (an ISO 15924 code such as `Hani`),
+/// in `language` (a BCP 47 tag such as `ja`), or in any language when it is
+/// empty.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScriptFallback {
+    pub script: String,
+    pub language: String,
+    pub families: Vec<String>,
 }
 
 /// A rendered page.

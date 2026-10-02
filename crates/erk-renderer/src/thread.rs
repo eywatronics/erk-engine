@@ -35,7 +35,7 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
     let mut size: Option<(u16, u16)> = None;
     let mut scale = 1.0;
     // The resources of the current document: asked for once, kept across
-    // resizes, dropped with the document.
+    // resizes, dropped with the document; the host's fonts outlive it.
     let mut resources = Resources::default();
     while let Ok(first) = inbox.recv() {
         // Apply everything already queued before painting: during a window
@@ -46,10 +46,11 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             match current {
                 ToRenderer::Load { html: document } => {
                     html = Some(document);
-                    resources = resources.for_new_document();
+                    resources.new_document();
                 }
                 ToRenderer::Resize { width, height } => size = Some((width, height)),
                 ToRenderer::Scale { factor } => scale = factor,
+                ToRenderer::Fonts(catalogue) => resources.set_fonts(catalogue),
                 ToRenderer::Resource(response) => resources.complete(&response),
                 ToRenderer::ResourceMissing { id } => resources.missing(id),
                 ToRenderer::Shutdown => return,

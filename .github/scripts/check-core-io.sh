@@ -14,7 +14,9 @@ done
 # Code lines only: a comment may explain the rule without breaking it.
 code=$(grep -rnv --include='*.rs' '^[[:space:]]*//' $core)
 
-forbidden='std::(fs|net|process|env)\b|std::\{[^}]*\b(fs|net|process|env)\b|\b(fs|net|env)::|\bFile::|\bOpenOptions\b|\bTcp(Stream|Listener)\b|\bUdpSocket\b|\bCommand::new\b|\bInstant::now\b|\bSystemTime\b'
+# fontique reads font files itself when asked to scan the system or load
+# paths; the host scans and sends the fonts (p1-contract §6.2).
+forbidden='std::(fs|net|process|env)\b|std::\{[^}]*\b(fs|net|process|env)\b|\b(fs|net|env)::|\bFile::|\bOpenOptions\b|\bTcp(Stream|Listener)\b|\bUdpSocket\b|\bCommand::new\b|\bInstant::now\b|\bSystemTime\b|\bload_(system_fonts|fonts_from_paths)\b|system_fonts:[[:space:]]*true'
 
 rc=0
 matches=$(grep -E "$forbidden" <<< "$code") || rc=$?
@@ -27,3 +29,19 @@ case $rc in
   1) echo "no I/O, environment or clock access in the engine core" ;;
   *) echo "grep failed with $rc"; exit 1 ;;
 esac
+
+# A dependency doing the I/O for the core breaks the rule as well: with its
+# `system` feature fontique (directly or through Parley) scans and reads the
+# system's fonts. Resolved for the renderer alone, as building it alone
+# would: the shell enables the feature for itself.
+if ! tree=$(cargo tree -p erk-renderer -e features --target all --locked 2>&1); then
+  echo "cargo tree failed:"
+  echo "$tree"
+  exit 1
+fi
+if grep -Eq '(fontique|parley) feature "system"' <<< "$tree"; then
+  echo "erk-renderer must not enable the system font scan of fontique or parley:"
+  grep -E '(fontique|parley) feature "system"' <<< "$tree"
+  exit 1
+fi
+echo "no system font scan in the engine core's dependencies"

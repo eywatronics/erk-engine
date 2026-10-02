@@ -534,7 +534,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                             vec![InlineToken::Text(
                                 text.clone(),
                                 style.clone(),
-                                text_language(doc, parent, &style),
+                                text_language(doc, parent),
                             )],
                             Vec::new(),
                         ));
@@ -937,25 +937,10 @@ fn is_atomic_inline(style: &ComputedValues) -> bool {
         )
 }
 
-/// The language of the text in element `id`, for `text-transform`: its
-/// nearest `lang` attribute (HTML §3.2.6.2). Not looked up when the text is
-/// not transformed.
-fn text_language(doc: &Document, id: NodeId, style: &ComputedValues) -> LanguageIdentifier {
-    if style.get_inherited_text().clone_text_transform().is_none() {
-        return LanguageIdentifier::UNKNOWN;
-    }
-    let mut node = Some(id);
-    while let Some(current) = node {
-        let lang = doc
-            .node(current)
-            .and_then(|node| node.as_element())
-            .and_then(|element| element.attr(&erk_dom::local_name!("lang")));
-        if let Some(lang) = lang {
-            return crate::case::language(lang);
-        }
-        node = doc.node(current).and_then(|node| node.parent());
-    }
-    LanguageIdentifier::UNKNOWN
+/// The language of the text in element `id`, for `text-transform` and the
+/// choice of fallback fonts: its nearest `lang` attribute (HTML §3.2.6.2).
+fn text_language(doc: &Document, id: NodeId) -> LanguageIdentifier {
+    crate::case::language(&crate::fonts::language_of(doc, id))
 }
 
 /// The content of inline element `id`, in tree order: its start, the text
@@ -979,7 +964,7 @@ fn inline_tokens(
                 tokens.push(InlineToken::Text(
                     content.clone(),
                     style.clone(),
-                    text_language(doc, id, style),
+                    text_language(doc, id),
                 ));
             }
             Some(NodeData::Element(_)) => {
