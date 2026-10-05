@@ -15,6 +15,7 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use crate::Interaction;
 use erk_dom::{Document, NodeData, NodeId, local_name};
 use selectors::matching::ElementSelectorFlags;
 use style::Atom;
@@ -43,8 +44,9 @@ impl<'a> StyledTree<'a> {
     }
 
     /// Create one node per arena slot, with the parts that come from
-    /// attributes (`id`, `style`) parsed up front.
-    pub(crate) fn populate(&'a self, url: &UrlExtraData) {
+    /// attributes (`id`, `style`) parsed up front and the state that comes
+    /// from `interaction`.
+    pub(crate) fn populate(&'a self, url: &UrlExtraData, interaction: &Interaction) {
         let mut nodes: Vec<_> = (0..self.doc.capacity_hint())
             .map(|_| StyledNode::new(self))
             .collect();
@@ -73,6 +75,38 @@ impl<'a> StyledTree<'a> {
                 node.state = ElementState::UNVISITED;
             }
         }
+
+        let mut mark = |node: Option<NodeId>, own: ElementState, inherited: ElementState| {
+            let Some(node) = node.filter(|id| self.doc.node(*id).is_some()) else {
+                return;
+            };
+            nodes[node.index() as usize].state |= own;
+            let mut current = Some(node);
+            while let Some(id) = current {
+                let Some(found) = self.doc.node(id) else {
+                    break;
+                };
+                if found.as_element().is_some() {
+                    nodes[id.index() as usize].state |= inherited;
+                }
+                current = found.parent();
+            }
+        };
+        mark(
+            interaction.hover,
+            ElementState::empty(),
+            ElementState::HOVER,
+        );
+        mark(
+            interaction.active,
+            ElementState::empty(),
+            ElementState::ACTIVE,
+        );
+        mark(
+            interaction.focus,
+            ElementState::FOCUS,
+            ElementState::FOCUS_WITHIN,
+        );
 
         if self.nodes.set(nodes).is_err() {
             panic!("StyledTree::populate called twice");

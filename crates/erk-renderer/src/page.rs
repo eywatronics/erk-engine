@@ -5,17 +5,22 @@
 //! recompute on purpose; incremental work is M5's.
 //!
 //! Pointer input is answered from the last frame: its hit regions, in paint
-//! order, say which node is topmost at a point.
+//! order, say which node is topmost at a point. What the user does (the
+//! element under the pointer, the one pressed, the one focused) is kept here
+//! and styled into the next frame.
 
 use std::sync::Arc;
 
-use erk_dom::{Document, NodeId, local_name};
-use erk_style::StyleEngine;
+use erk_dom::{Document, ElementData, NodeId, local_name};
+use erk_style::style::computed_values::visibility::T as Visibility;
+use erk_style::style::values::computed::Display;
+use erk_style::{Interaction, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    Event, EventKind, Frame, PointerButton, PointerInput, PointerKind, ResourceRequest,
+    Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
+    PointerKind, ResourceRequest,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -25,8 +30,14 @@ pub(crate) struct Page {
     doc: Document,
     /// The last frame's hit regions, in paint order.
     hits: Vec<(NodeId, Rect)>,
+    /// The last frame's styles: which elements are shown, for the focus.
+    styles: Styles,
+    /// The node under the pointer.
+    hover: Option<NodeId>,
     /// The node the primary button went down on, until it comes up.
     pressed: Option<NodeId>,
+    /// The element that has the keyboard focus.
+    focus: Option<NodeId>,
     /// The node the developer tools highlight.
     highlight: Option<NodeId>,
     /// The last frame's viewport, in CSS pixels.
@@ -38,7 +49,10 @@ impl Page {
         Self {
             doc: Document::parse_html(html),
             hits: Vec::new(),
+            styles: Styles::default(),
+            hover: None,
             pressed: None,
+            focus: None,
             highlight: None,
             viewport: (0.0, 0.0),
         }
@@ -58,10 +72,11 @@ impl Page {
         // The viewport in CSS pixels.
         let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
         self.viewport = (w, h);
+        let interaction = self.interaction();
         let doc = &self.doc;
         let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics))
             .with_device_scale(scale)
-            .style(doc);
+            .style_with(doc, &interaction);
         let requests = resources.requests(doc, &styles);
         let mut text = TextEngine::with_fonts(resources.fonts());
         let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
@@ -89,7 +104,23 @@ impl Page {
             pixmap.data_as_u8_slice().to_vec(),
             list.dump(),
         );
+        self.styles = styles;
         (frame, requests)
+    }
+
+    /// Whether what the user is doing now looks different from `before`
+    /// under the last frame's styles.
+    pub(crate) fn shows_change_from(&self, before: &Interaction) -> bool {
+        self.styles.react_to(before, &self.interaction())
+    }
+
+    /// What the user is doing with the page, as the next frame styles it.
+    pub(crate) fn interaction(&self) -> Interaction {
+        Interaction {
+            hover: self.hover,
+            active: self.pressed,
+            focus: self.focus,
+        }
     }
 
     /// The topmost node that takes pointer input at `x`, `y` (CSS pixels) in
@@ -121,15 +152,27 @@ impl Page {
         })
     }
 
-    /// Pointer input: a press and a release of the primary button make a
-    /// click on the deepest node both are in (UI Events §3.5, as browsers
-    /// do when the pointer moves between the two).
+    /// Pointer input: the node under the pointer hovers; a press of the
+    /// primary button makes it active and moves the focus; a press and a
+    /// release make a click on the deepest node both are in (UI Events §3.5,
+    /// as browsers do when the pointer moves between the two).
     pub(crate) fn pointer(&mut self, input: &PointerInput) -> Vec<Event> {
         let target = self.hit_test(input.x, input.y);
+        self.hover = match input.kind {
+            PointerKind::Leave => None,
+            _ => target,
+        };
         match (input.kind, input.button) {
             (PointerKind::Down, PointerButton::Primary) => {
                 self.pressed = target;
-                Vec::new()
+                // The focus goes to the focusable element pressed, or away
+                // when there is none, as in browsers.
+                let focus = target.and_then(|target| {
+                    self.element_path(target)
+                        .into_iter()
+                        .find(|node| self.focusable(*node))
+                });
+                self.move_focus(focus, input.modifiers)
             }
             (PointerKind::Up, PointerButton::Primary) => {
                 let (Some(down), Some(up)) = (self.pressed.take(), target) else {
@@ -138,21 +181,176 @@ impl Page {
                 let Some(clicked) = self.common_ancestor(down, up) else {
                     return Vec::new();
                 };
-                vec![Event {
-                    kind: EventKind::Click,
-                    target: clicked.to_bits(),
-                    path: self
-                        .element_path(clicked)
-                        .into_iter()
-                        .map(NodeId::to_bits)
-                        .collect(),
-                    x: input.x,
-                    y: input.y,
-                    modifiers: input.modifiers,
-                }]
+                vec![self.event(
+                    EventKind::Click,
+                    clicked,
+                    (input.x, input.y),
+                    input.modifiers,
+                )]
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Keyboard input: Tab and Shift+Tab move the focus through the page in
+    /// sequential focus order (HTML §6.6.3), wrapping around; Enter on a
+    /// focused link or button and Space released on a focused button click
+    /// it, as browsers do. Keyboard clicks are at 0, 0.
+    pub(crate) fn key(&mut self, input: &KeyInput) -> Vec<Event> {
+        let focused = self.focus.filter(|node| self.doc.node(*node).is_some());
+        match (&input.key, input.state) {
+            (Key::Tab, KeyState::Down) => {
+                let order = self.focus_order();
+                let Some(last) = order.len().checked_sub(1) else {
+                    return Vec::new();
+                };
+                let at = focused.and_then(|node| order.iter().position(|n| *n == node));
+                let next = match (at, input.modifiers.shift) {
+                    (None, false) => 0,
+                    (None, true) => last,
+                    (Some(i), false) => {
+                        if i == last {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    (Some(i), true) => {
+                        if i == 0 {
+                            last
+                        } else {
+                            i - 1
+                        }
+                    }
+                };
+                self.move_focus(Some(order[next]), input.modifiers)
+            }
+            (Key::Enter, KeyState::Down) | (Key::Space, KeyState::Up) => {
+                let Some(node) = focused else {
+                    return Vec::new();
+                };
+                let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
+                    return Vec::new();
+                };
+                let name = &element.name.local;
+                let activates = *name == local_name!("button")
+                    || (input.key == Key::Enter
+                        && *name == local_name!("a")
+                        && element.attr(&local_name!("href")).is_some());
+                if activates {
+                    vec![self.event(EventKind::Click, node, (0.0, 0.0), input.modifiers)]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Move the focus to `focus`: a blur event for the element that had it,
+    /// then a focus event for the one that has it.
+    fn move_focus(&mut self, focus: Option<NodeId>, modifiers: Modifiers) -> Vec<Event> {
+        if focus == self.focus {
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        if let Some(old) = self
+            .focus
+            .take()
+            .filter(|node| self.doc.node(*node).is_some())
+        {
+            events.push(self.event(EventKind::Blur, old, (0.0, 0.0), modifiers));
+        }
+        self.focus = focus;
+        if let Some(new) = focus {
+            events.push(self.event(EventKind::Focus, new, (0.0, 0.0), modifiers));
+        }
+        events
+    }
+
+    fn event(
+        &self,
+        kind: EventKind,
+        target: NodeId,
+        (x, y): (f32, f32),
+        modifiers: Modifiers,
+    ) -> Event {
+        Event {
+            kind,
+            target: target.to_bits(),
+            path: self
+                .element_path(target)
+                .into_iter()
+                .map(NodeId::to_bits)
+                .collect(),
+            x,
+            y,
+            modifiers,
+        }
+    }
+
+    /// Whether `node` can take the focus (HTML §6.6.2): a link, an enabled
+    /// form control or an element with a `tabindex`, shown in the last frame.
+    fn focusable(&self, node: NodeId) -> bool {
+        let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
+            return false;
+        };
+        let shown = self.styles.computed(node).is_some_and(|style| {
+            style.get_box().clone_display() != Display::None
+                && style.clone_visibility() == Visibility::Visible
+        });
+        let name = &element.name.local;
+        let control = [
+            local_name!("button"),
+            local_name!("input"),
+            local_name!("select"),
+            local_name!("textarea"),
+        ]
+        .contains(name);
+        let focusable = if control {
+            element.attr(&local_name!("disabled")).is_none()
+                && !(*name == local_name!("input")
+                    && element
+                        .attr(&local_name!("type"))
+                        .is_some_and(|kind| kind.eq_ignore_ascii_case("hidden")))
+        } else {
+            tabindex(element).is_some()
+                || (*name == local_name!("a") && element.attr(&local_name!("href")).is_some())
+        };
+        shown && focusable
+    }
+
+    /// The elements Tab visits, in order: positive `tabindex` values from
+    /// the lowest, then the rest in document order; a negative `tabindex`
+    /// takes the focus only from the pointer.
+    fn focus_order(&self) -> Vec<NodeId> {
+        let mut first = Vec::new();
+        let mut rest = Vec::new();
+        let mut stack = vec![self.doc.root()];
+        while let Some(node) = stack.pop() {
+            let mut children: Vec<_> = self.doc.children(node).collect();
+            children.reverse();
+            stack.extend(children);
+            if !self.focusable(node) {
+                continue;
+            }
+            let index = self
+                .doc
+                .node(node)
+                .and_then(|found| found.as_element())
+                .and_then(tabindex);
+            match index {
+                Some(index) if index < 0 => {}
+                Some(index) if index > 0 => first.push((index, node)),
+                _ => rest.push(node),
+            }
+        }
+        first.sort_by_key(|(index, _)| *index);
+        first
+            .into_iter()
+            .map(|(_, node)| node)
+            .chain(rest)
+            .collect()
     }
 
     /// `node` and its ancestor elements, up to the root element.
@@ -210,6 +408,25 @@ impl Page {
         }
         None
     }
+}
+
+/// An element's `tabindex`, read as HTML reads integers: leading white
+/// space, a sign, digits, and anything after them ignored.
+fn tabindex(element: &ElementData) -> Option<i32> {
+    let value = element
+        .attr(&local_name!("tabindex"))?
+        .trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let (negative, digits) = match value.as_bytes().first() {
+        Some(b'-') => (true, &value[1..]),
+        Some(b'+') => (false, &value[1..]),
+        _ => (false, value),
+    };
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    let magnitude: i64 = digits[..end].parse().ok()?;
+    let value = if negative { -magnitude } else { magnitude };
+    Some(i32::try_from(value).unwrap_or(if negative { i32::MIN } else { i32::MAX }))
 }
 
 #[cfg(test)]

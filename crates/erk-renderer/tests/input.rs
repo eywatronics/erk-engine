@@ -1,14 +1,15 @@
-//! Pointer input through the renderer's messages (M2.1): hit-testing in
-//! paint order, clicks with their propagation path, the developer tools'
-//! inspection and highlight, and `#id` queries.
+//! Input through the renderer's messages: hit-testing in paint order,
+//! clicks with their propagation path, the developer tools' inspection and
+//! highlight, and `#id` queries (M2.1); hover, press and focus state, the
+//! focus order and keyboard activation (M2.2).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use erk_renderer::{
-    Event, EventKind, Frame, FromRenderer, Modifiers, PointerButton, PointerInput, PointerKind,
-    ToRenderer, spawn,
+    Event, EventKind, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton,
+    PointerInput, PointerKind, ToRenderer, spawn,
 };
 
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -38,6 +39,14 @@ struct Session {
 
 impl Session {
     fn new() -> (Self, Frame) {
+        Self::open(PAGE)
+    }
+
+    fn open(html: &str) -> (Self, Frame) {
+        Self::open_sized(html, 200, 150)
+    }
+
+    fn open_sized(html: &str, width: u16, height: u16) -> (Self, Frame) {
         let (to, from, renderer) = spawn();
         let session = Self {
             to,
@@ -46,12 +55,9 @@ impl Session {
             request: 0,
         };
         session.send(ToRenderer::Load {
-            html: PAGE.to_owned(),
+            html: html.to_owned(),
         });
-        session.send(ToRenderer::Resize {
-            width: 200,
-            height: 150,
-        });
+        session.send(ToRenderer::Resize { width, height });
         let frame = session.frame();
         (session, frame)
     }
@@ -133,6 +139,29 @@ impl Session {
             match self.from.recv_timeout(PATIENCE) {
                 Ok(FromRenderer::Event(e)) => event = Some(e),
                 Ok(FromRenderer::Inspected { request: r, .. }) if r == request => break event,
+                Ok(_) => {}
+                Err(error) => panic!("no answer: {error:?}"),
+            }
+        }
+    }
+
+    /// The events `inputs` make, in order (an inspection marks the end).
+    fn events(&mut self, inputs: Vec<ToRenderer>) -> Vec<Event> {
+        for input in inputs {
+            self.send(input);
+        }
+        self.request += 1;
+        let request = self.request;
+        self.send(ToRenderer::InspectAt {
+            request,
+            x: 0.0,
+            y: 0.0,
+        });
+        let mut events = Vec::new();
+        loop {
+            match self.from.recv_timeout(PATIENCE) {
+                Ok(FromRenderer::Event(event)) => events.push(event),
+                Ok(FromRenderer::Inspected { request: r, .. }) if r == request => break events,
                 Ok(_) => {}
                 Err(error) => panic!("no answer: {error:?}"),
             }
@@ -324,4 +353,376 @@ fn a_query_understands_ids_only_for_now() {
             }
         }
     }
+}
+
+/// Elements whose look follows the user's state, and a focus order with
+/// every kind of `tabindex`.
+const STATES: &str = r#"<style>
+  div { position: absolute; width: 40px; height: 40px; background: rgb(200, 200, 200) }
+  #h:hover { background: rgb(255, 0, 0) }
+  #h:active { background: rgb(0, 0, 255) }
+  #f:focus { background: rgb(0, 255, 0) }
+  #box:focus-within { background: rgb(255, 255, 0) }
+</style>
+<body style="margin: 0; font-family: 'Noto Sans'; font-size: 16px">
+  <div id="h" style="left: 0; top: 0"></div>
+  <div id="f" tabindex="0" style="left: 50px; top: 0"></div>
+  <div id="box" style="left: 100px; top: 0; width: 60px; height: 60px"><a id="link" href="x">bağ</a></div>
+  <div id="second" tabindex=" +2 " style="left: 0; top: 50px"></div>
+  <div id="first" tabindex="1" style="left: 50px; top: 50px"></div>
+  <div id="pointer-only" tabindex="-1" style="left: 0; top: 100px"></div>
+  <div id="gone" tabindex="0" style="display: none"></div>
+  <div id="hidden" tabindex="0" style="left: 150px; top: 100px; visibility: hidden"></div>
+  <div id="card" tabindex="-1" style="left: 150px; top: 50px"><div id="child" style="position: static; width: 20px; height: 20px"></div></div>
+  <input id="secret" type="Hidden">
+  <a id="plain">no href</a>
+  <button id="button" style="position: absolute; left: 100px; top: 100px">OK</button>
+  <button id="disabled" disabled tabindex="0">no</button>
+</body>"#;
+
+fn pixel(frame: &Frame, x: usize, y: usize) -> [u8; 3] {
+    let i = (y * usize::from(frame.width()) + x) * 4;
+    [frame.rgba()[i], frame.rgba()[i + 1], frame.rgba()[i + 2]]
+}
+
+fn pointer(kind: PointerKind, button: PointerButton, x: f32, y: f32) -> ToRenderer {
+    ToRenderer::Pointer(PointerInput {
+        kind,
+        x,
+        y,
+        button,
+        modifiers: Modifiers::default(),
+    })
+}
+
+fn key(key: Key, state: KeyState, shift: bool) -> ToRenderer {
+    ToRenderer::Key(KeyInput {
+        key,
+        state,
+        modifiers: Modifiers {
+            shift,
+            ..Modifiers::default()
+        },
+    })
+}
+
+fn press(x: f32, y: f32) -> Vec<ToRenderer> {
+    vec![
+        pointer(PointerKind::Down, PointerButton::Primary, x, y),
+        pointer(PointerKind::Up, PointerButton::Primary, x, y),
+    ]
+}
+
+/// Each event as its kind and the name of its target.
+fn named(events: &[Event], names: &[(&str, u64)]) -> Vec<(EventKind, String)> {
+    events
+        .iter()
+        .map(|event| {
+            let name = names
+                .iter()
+                .find(|(_, node)| *node == event.target)
+                .map_or_else(
+                    || format!("{:#x}", event.target),
+                    |(name, _)| (*name).to_owned(),
+                );
+            (event.kind, name)
+        })
+        .collect()
+}
+
+fn names(page: &mut Session, ids: &[&'static str]) -> Vec<(&'static str, u64)> {
+    ids.iter().map(|id| (*id, page.query(id))).collect()
+}
+
+#[test]
+fn hover_and_active_restyle_the_element_under_the_pointer() {
+    let (page, plain) = Session::open(STATES);
+    let grey = [200, 200, 200];
+    assert_eq!(pixel(&plain, 20, 20), grey);
+
+    page.send(pointer(PointerKind::Move, PointerButton::None, 20.0, 20.0));
+    assert_eq!(pixel(&page.frame(), 20, 20), [255, 0, 0], "hover");
+    page.send(pointer(
+        PointerKind::Down,
+        PointerButton::Primary,
+        20.0,
+        20.0,
+    ));
+    assert_eq!(pixel(&page.frame(), 20, 20), [0, 0, 255], "active");
+    page.send(pointer(PointerKind::Up, PointerButton::Primary, 20.0, 20.0));
+    assert_eq!(
+        pixel(&page.frame(), 20, 20),
+        [255, 0, 0],
+        "released, still hovered"
+    );
+    page.send(pointer(PointerKind::Leave, PointerButton::None, 20.0, 20.0));
+    assert_eq!(pixel(&page.frame(), 20, 20), grey, "left the page");
+}
+
+#[test]
+fn a_move_within_the_hovered_element_paints_nothing() {
+    let (page, _) = Session::open(STATES);
+    page.send(pointer(PointerKind::Move, PointerButton::None, 20.0, 20.0));
+    page.frame();
+    page.send(pointer(PointerKind::Move, PointerButton::None, 30.0, 10.0));
+    match page.from.recv_timeout(QUIET) {
+        Err(RecvTimeoutError::Timeout) => {}
+        other => panic!("expected nothing, got {:?}", other.map(|_| "a message")),
+    }
+}
+
+#[test]
+fn a_press_moves_the_focus_and_reports_blur_then_focus() {
+    let (mut page, _) = Session::open(STATES);
+    let ids = names(
+        &mut page,
+        &["h", "f", "box", "link", "pointer-only", "card", "child"],
+    );
+    let (click, focus, blur) = (EventKind::Click, EventKind::Focus, EventKind::Blur);
+    let s = |name: &str| name.to_owned();
+
+    let events = page.events(press(70.0, 20.0));
+    assert_eq!(named(&events, &ids), [(focus, s("f")), (click, s("f"))]);
+    assert_eq!(pixel(&page.frame(), 70, 20), [0, 255, 0], ":focus");
+
+    // On the link's text: the link takes the focus, its block matches
+    // :focus-within.
+    let events = page.events(press(108.0, 10.0));
+    assert_eq!(
+        named(&events, &ids),
+        [(blur, s("f")), (focus, s("link")), (click, s("link"))]
+    );
+    let frame = page.frame();
+    assert_eq!(pixel(&frame, 70, 20), [200, 200, 200], "blurred");
+    assert_eq!(pixel(&frame, 110, 50), [255, 255, 0], ":focus-within");
+
+    // A negative tabindex takes the focus from the pointer.
+    let events = page.events(press(20.0, 120.0));
+    assert_eq!(
+        named(&events, &ids),
+        [
+            (blur, s("link")),
+            (focus, s("pointer-only")),
+            (click, s("pointer-only"))
+        ]
+    );
+
+    // Pressing inside a focusable element focuses it.
+    let events = page.events(press(155.0, 55.0));
+    assert_eq!(
+        named(&events, &ids),
+        [
+            (blur, s("pointer-only")),
+            (focus, s("card")),
+            (click, s("child"))
+        ]
+    );
+
+    // An element that cannot take the focus takes it away.
+    let events = page.events(press(20.0, 20.0));
+    assert_eq!(named(&events, &ids), [(blur, s("card")), (click, s("h"))]);
+    assert!(
+        events
+            .iter()
+            .all(|event| event.path.last() == events[0].path.last())
+    );
+}
+
+#[test]
+fn tab_walks_the_focus_order_and_shift_tab_walks_it_back() {
+    let (mut page, _) = Session::open(STATES);
+    let ids = names(&mut page, &["first", "second", "f", "link", "button"]);
+    let focused = |events: Vec<Event>| -> Vec<String> {
+        named(&events, &ids)
+            .into_iter()
+            .filter(|(kind, _)| *kind == EventKind::Focus)
+            .map(|(_, name)| name)
+            .collect()
+    };
+    let tab = |shift| {
+        vec![
+            key(Key::Tab, KeyState::Down, shift),
+            key(Key::Tab, KeyState::Up, shift),
+        ]
+    };
+
+    // Positive tabindex values first, from the lowest; then the rest in
+    // document order; negative, hidden, undisplayed, disabled and
+    // href-less elements are skipped; the end wraps around.
+    let mut forward = Vec::new();
+    for _ in 0..6 {
+        forward.extend(focused(page.events(tab(false))));
+    }
+    assert_eq!(forward, ["first", "second", "f", "link", "button", "first"]);
+
+    let mut back = Vec::new();
+    for _ in 0..3 {
+        back.extend(focused(page.events(tab(true))));
+    }
+    assert_eq!(back, ["button", "link", "f"]);
+
+    // With nothing focused, Shift+Tab starts from the end.
+    let (mut fresh, _) = Session::open(STATES);
+    let button = fresh.query("button");
+    let events = fresh.events(tab(true));
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(
+        (events[0].kind, events[0].target),
+        (EventKind::Focus, button)
+    );
+}
+
+#[test]
+fn enter_and_space_click_the_focused_link_or_button_as_browsers_do() {
+    let (mut page, _) = Session::open(STATES);
+    let ids = names(&mut page, &["first", "second", "f", "link", "button"]);
+    let tab = || vec![key(Key::Tab, KeyState::Down, false)];
+    let clicks = |events: Vec<Event>| -> Vec<String> {
+        assert!(events.iter().all(|event| (event.x, event.y) == (0.0, 0.0)));
+        named(&events, &ids)
+            .into_iter()
+            .filter(|(kind, _)| *kind == EventKind::Click)
+            .map(|(_, name)| name)
+            .collect()
+    };
+    let enter = || {
+        vec![
+            key(Key::Enter, KeyState::Down, false),
+            key(Key::Enter, KeyState::Up, false),
+        ]
+    };
+    let space_down = || vec![key(Key::Space, KeyState::Down, false)];
+    let space_up = || vec![key(Key::Space, KeyState::Up, false)];
+
+    // first, second, f: a focusable div does not activate.
+    for _ in 0..3 {
+        page.events(tab());
+    }
+    assert!(clicks(page.events(enter())).is_empty());
+    assert!(clicks(page.events(space_down().into_iter().chain(space_up()).collect())).is_empty());
+    // link: Enter follows it, Space does not.
+    page.events(tab());
+    assert_eq!(clicks(page.events(enter())), ["link"]);
+    assert!(clicks(page.events(space_down().into_iter().chain(space_up()).collect())).is_empty());
+    // button: Enter on the press, Space on the release.
+    page.events(tab());
+    assert_eq!(clicks(page.events(enter())), ["button"]);
+    assert!(clicks(page.events(space_down())).is_empty());
+    assert_eq!(clicks(page.events(space_up())), ["button"]);
+    // Other keys do nothing.
+    let other = vec![
+        key(Key::Escape, KeyState::Down, false),
+        key(Key::Character("a".to_owned()), KeyState::Down, false),
+        key(Key::Other, KeyState::Down, false),
+    ];
+    assert!(page.events(other).is_empty());
+}
+
+#[test]
+fn keys_with_nothing_to_focus_do_nothing() {
+    let (mut page, _) = Session::new();
+    let keys = vec![
+        key(Key::Tab, KeyState::Down, false),
+        key(Key::Tab, KeyState::Down, true),
+        key(Key::Enter, KeyState::Down, false),
+        key(Key::Space, KeyState::Up, false),
+    ];
+    assert!(page.events(keys).is_empty());
+}
+
+/// The pixels of `frame` outside `x`, `y`, `width` × `height` (the boxes a
+/// state may restyle), and the same for `other`, differ nowhere.
+fn same_outside(frame: &Frame, other: &Frame, boxes: &[(usize, usize, usize, usize)]) -> bool {
+    let width = usize::from(frame.width());
+    frame
+        .rgba()
+        .chunks(4)
+        .zip(other.rgba().chunks(4))
+        .enumerate()
+        .all(|(i, (a, b))| {
+            let (x, y) = (i % width, i / width);
+            a == b
+                || boxes
+                    .iter()
+                    .any(|(bx, by, bw, bh)| x >= *bx && y >= *by && x < bx + bw && y < by + bh)
+        })
+}
+
+/// The `states` reference page, whose stateless look Chrome's screenshot
+/// checks, in each state its styles name: only the element in the state
+/// changes, to the colours its rules give (boxes from Chrome's geometry).
+#[test]
+fn the_states_reference_page_follows_the_pointer_and_the_focus() {
+    let html = include_str!("reference/pages/states.html");
+    let (page, plain) = Session::open_sized(html, 800, 600);
+    let rgb = |hex: u32| [(hex >> 16) as u8, (hex >> 8) as u8, hex as u8];
+    // "Vazgeç": its padding and its border; "Gönder"'s border; the form's
+    // border and inside; the "Ad" field's border; the second list item.
+    // Regions are a pixel larger than the boxes: Erk rounds their edges.
+    let cancel = (115, 15, 89, 43);
+    let (cancel_fill, cancel_edge) = ((125, 22), (117, 30));
+    let send_edge = (214, 30);
+    let form = (19, 91, 398, 174);
+    let (form_edge, form_fill) = ((21, 150), (30, 100));
+    let name = (37, 137, 362, 36);
+    let name_edge = (38, 150);
+    let item = (20, 321, 366, 39);
+    let item_fill = (380, 330);
+    let at = |frame: &Frame, (x, y): (usize, usize)| pixel(frame, x, y);
+
+    assert_eq!(at(&plain, cancel_fill), rgb(0xe2e8f0));
+    assert_eq!(at(&plain, cancel_edge), rgb(0x94a3b8));
+
+    let step = |input: ToRenderer| {
+        page.send(input);
+        page.frame()
+    };
+    let hovered = step(pointer(PointerKind::Move, PointerButton::None, 125.0, 22.0));
+    assert_eq!(at(&hovered, cancel_fill), rgb(0xbfdbfe), ":hover");
+    assert_eq!(at(&hovered, cancel_edge), rgb(0x3b82f6), ":hover");
+    assert!(same_outside(&hovered, &plain, &[cancel]));
+
+    let pressed = step(pointer(
+        PointerKind::Down,
+        PointerButton::Primary,
+        125.0,
+        22.0,
+    ));
+    assert_eq!(at(&pressed, cancel_fill), rgb(0x1d4ed8), ":active");
+    assert_eq!(
+        at(&pressed, cancel_edge),
+        rgb(0xf59e0b),
+        ":focus over :hover"
+    );
+    assert!(same_outside(&pressed, &plain, &[cancel]));
+
+    let released = step(pointer(
+        PointerKind::Up,
+        PointerButton::Primary,
+        125.0,
+        22.0,
+    ));
+    assert_eq!(at(&released, cancel_fill), rgb(0xbfdbfe));
+    let left = step(pointer(PointerKind::Leave, PointerButton::None, 0.0, 0.0));
+    assert_eq!(at(&left, cancel_fill), rgb(0xe2e8f0));
+    assert_eq!(at(&left, cancel_edge), rgb(0xf59e0b), "still focused");
+
+    let next = step(key(Key::Tab, KeyState::Down, false));
+    assert_eq!(at(&next, cancel_edge), rgb(0x94a3b8), "blurred");
+    assert_eq!(at(&next, send_edge), rgb(0xf59e0b), ":focus over .birincil");
+
+    let in_form = step(key(Key::Tab, KeyState::Down, false));
+    assert_eq!(at(&in_form, form_edge), rgb(0x22c55e), ":focus-within");
+    assert_eq!(at(&in_form, form_fill), rgb(0xf0fdf4), ":focus-within");
+    assert_eq!(at(&in_form, name_edge), rgb(0x22c55e), ":focus");
+    assert!(same_outside(&in_form, &plain, &[form, name]));
+
+    let over_item = step(pointer(
+        PointerKind::Move,
+        PointerButton::None,
+        200.0,
+        340.0,
+    ));
+    assert_eq!(at(&over_item, item_fill), rgb(0xf1f5f9), "list item :hover");
+    assert!(same_outside(&over_item, &in_form, &[item]));
 }

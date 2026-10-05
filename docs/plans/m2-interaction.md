@@ -106,15 +106,15 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.2: Eleman durumu ve odak
 
-- [ ] `:hover`: imlecin altındaki eleman ve ataları; `:active`: basılı tuşun
+- [x] `:hover`: imlecin altındaki eleman ve ataları; `:active`: basılı tuşun
   elemanı ve ataları; `:focus`, `:focus-within`. Durum erk-style'ın yan
   tablosundaki `ElementState`'e yazılır (bugün yalnızca bağlantılar için
   dolu) ve tam yeniden stil çalışır.
-- [ ] Odak: tıklama odaklanabilir elemanı (`button`, `a[href]`, `tabindex`)
+- [x] Odak: tıklama odaklanabilir elemanı (`button`, `a[href]`, `tabindex`)
   odaklar; Tab ve Shift+Tab belge sırasıyla gezer; odaktaki düğmede Enter ve
   Space bir tıklama üretir. `ERK_EVENT_FOCUS` ve `ERK_EVENT_BLUR`. Klavye
   mesajı: `ToRenderer::Key { key, state, modifiers }`.
-- [ ] Referans sayfası: `:hover` ve `:focus` stilli düğmeler; Chrome
+- [x] Referans sayfası: `:hover` ve `:focus` stilli düğmeler; Chrome
   görüntüsü durumsuz, Erk testi durumu mesajla verip pikselleri doğrular.
 
 ### M2.3: Kaydırma, kırpma, imleç
@@ -279,3 +279,31 @@ elemana gidiyor; her tuş tıklıyor (ilk hâlinde kaçtı, karışık tuş test
 eklendi); tuval kök elemana düşmüyor (betiğim mutasyonu yanlış uyguladı,
 elle uygulanınca iki test kırıldı); vurgu sayfanın altına çiziliyor; fare
 girdisi kare çiziyor; sorgu etiket adını da eşliyor.
+
+**M2.2 (2026-10-05).** Eleman durumu, odak, klavye.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Durum erk-style'ın yan tablosundaki `ElementState`'e yazılır | erk-style'ın yeni genel türü `Interaction { hover, active, focus }` (düğüm kimlikleri; Stylo türü dışarı sızmıyor) ve `StyleEngine::style_with`. Yan tablo doldurulurken `:hover` ve `:active` elemanın kendisine ve atalarına, `:focus` yalnızca elemana, `:focus-within` elemana ve atalarına yazılıyor. Belgede olmayan (eski nesilli) bir kimlik hiçbir elemanı duruma sokmuyor |
+| Tam yeniden stil çalışır | Çalışıyor, ama her fare hareketinde değil: Stylo stil sayfalarının hangi durumlara bağlı olduğunu biliyor (`has_state_dependency`); `Styles::react_to` bunu söylüyor ve sayfa yalnızca seçicilerin kullandığı bir durum değişince yeniden çiziliyor. `:hover` kuralı olmayan sayfada fare hareketi kare çizmiyor; aynı eleman içinde hareket de |
+| Tıklama odaklanabilir elemanı odaklar | Basma (bırakma değil, tarayıcılardaki gibi) basılan düğümün kendisi ya da en yakın odaklanabilir atasına odağı veriyor; odaklanabilir yoksa odak kalkıyor (Chrome). Olay sırası: blur, focus, sonra bırakmada click. Odaklanabilir: `href`'li `a`, etkin `button`/`input`/`select`/`textarea` (`type=hidden` hariç), `tabindex`'li her eleman; son karede gösterilmiş olmalı (`display`, `visibility`) |
+| Tab ve Shift+Tab belge sırasıyla gezer | Önce pozitif `tabindex`'ler küçükten büyüğe, sonra geri kalanlar belge sırasıyla (HTML'in sıralı odak sırası); negatif `tabindex` yalnızca fareyle odaklanır. Uçlarda başa sarıyor (gömülü bir motorda odağın gideceği tarayıcı çubuğu yok). **Bilinen basitleştirme:** sıra dışındaki bir elemandan (negatif `tabindex`) Tab ilk elemana gidiyor; tarayıcı belgedeki konumundan devam eder. `tabindex` HTML'in tamsayı kuralıyla okunuyor (baştaki boşluk, işaret) |
+| Enter ve Space bir tıklama üretir | Enter basılınca odaktaki bağlantıyı ya da düğmeyi, Space bırakılınca düğmeyi tıklıyor (tarayıcılardaki gibi; Space bağlantıda bir şey yapmaz). Klavye tıklaması 0, 0'da |
+| Klavye mesajı `ToRenderer::Key { key, state, modifiers }` | `ToRenderer::Key(KeyInput)`; `Key` motorun ayırdığı tuşlar (Tab, Enter, Space, Escape, karakter, diğer). Kabuk winit'in mantıksal tuşunu eşliyor (birim testli; boşluğu karakter olarak bildiren platformlar da Space); sentetik basmalar (pencere odak kazanırken basılı olanlar) gönderilmiyor. **Host'a tuş olayları** (`ERK_EVENT_KEY_DOWN`, `KEY_UP`) henüz yok: olayın tuş bilgisi taşıması gerekiyor, metin girdisiyle M5'te |
+| Referans sayfası: durumlu düğmeler | `states.html`: diğer referans sayfaları gibi div ve bağlantılardan düğmeler, form ve liste (form kontrolleri M5). Chrome'un durumsuz görüntüsüyle içerik %96,39; 14 kutunun 14'ü, 13 metin satırının 13'ü 1 px içinde (fark yalnızca glif kenar yumuşatması). Erk testi (`the_states_reference_page_follows_the_pointer_and_the_focus`) sayfayı mesajlarla her duruma sokuyor: durumdaki elemanın kuralın verdiği renge döndüğünü ve kutusu dışında hiçbir pikselin değişmediğini doğruluyor |
+| — | **Odak halkası yok:** Chrome odaktaki elemana bir `outline` çizer (`:focus-visible`); Erk `outline` çizmiyor. `:focus-visible` ile M5'te |
+
+Mutasyonlar (27'den 26'sı yakalandı): durum atalara ulaşmıyor; eski nesilli
+kimlik yine işaretleniyor; `:focus-within` hiç eşleşmiyor; hover değişimi
+hiç çizilmiyor; hover ve odak, kuralı olmayan sayfada da çiziliyor;
+`pointerleave` hover'ı bırakmıyor; basma yalnızca hedefin kendisini
+odaklıyor; blur olayı yok; gizli, gösterilmeyen, devre dışı, `type=hidden`
+ve `href`'siz elemanlar odaklanabiliyor; negatif `tabindex` sırada; pozitif
+`tabindex` önde değil (betikteki ilk biçimi derlenmedi, derlenen biçimiyle
+yakalandı); pozitifler sıralanmıyor; sıra başa sarmıyor; Shift yok
+sayılıyor; Space basılınca tıklıyor; Space bağlantıyı tıklıyor; her odaktaki
+eleman tıklanıyor; `tabindex`'in baştaki boşluğu atlanmıyor; tuşlar sayfaya
+ulaşmıyor; durum değişimi hiç çizilmiyor; kabukta boşluk karakteri Space
+değil. **Kaçan:** kabuğun sentetik tuşları göndermemesi; winit'in `KeyEvent`'i
+testte kurulamıyor (platforma özel gizli alanı var), kabuğun fare eşlemesi
+gibi pencere isteyen kısım otomatik testsiz.

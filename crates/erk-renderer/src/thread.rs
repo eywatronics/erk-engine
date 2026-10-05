@@ -44,11 +44,14 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
         // Apply everything already queued before painting: during a window
         // drag dozens of resizes arrive, and only the last one matters, and
         // the answers to a batch of resource requests arrive together.
-        // Input and questions are answered at once and paint nothing; a
-        // frame follows only a change that shows.
+        // Input and questions are answered at once; a frame follows only a
+        // change that shows.
         let mut changed = false;
         let mut message = Some(first);
         while let Some(current) = message {
+            // Input that changes what the user is doing (hover, press,
+            // focus) in a way some selector depends on is painted again.
+            let before = page.as_ref().map(Page::interaction);
             let reply = match current {
                 ToRenderer::Load { html } => {
                     page = Some(Page::parse(&html));
@@ -87,6 +90,12 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                         .map(FromRenderer::Event)
                         .collect()
                 }),
+                ToRenderer::Key(input) => page.as_mut().map_or_else(Vec::new, |page| {
+                    page.key(&input)
+                        .into_iter()
+                        .map(FromRenderer::Event)
+                        .collect()
+                }),
                 ToRenderer::InspectAt { request, x, y } => vec![FromRenderer::Inspected {
                     request,
                     node: page
@@ -110,6 +119,9 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                 }],
                 ToRenderer::Shutdown => return,
             };
+            if let (Some(page), Some(before)) = (page.as_ref(), before.as_ref()) {
+                changed |= page.shows_change_from(before);
+            }
             for answer in reply {
                 if outbox.send(answer).is_err() {
                     return;

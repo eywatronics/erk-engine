@@ -34,6 +34,7 @@ use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 use style::values::computed::font::{GenericFontFamily, QueryFontMetricsFlags};
 use style::values::computed::{CSSPixelLength, Length};
+use style_dom::ElementState;
 
 pub use style;
 pub use style::device::servo::FontMetricsProvider;
@@ -102,6 +103,12 @@ impl StyleEngine {
     /// Style every element in `doc`, using the UA stylesheet and the
     /// document's `<style>` elements.
     pub fn style(&self, doc: &Document) -> Styles {
+        self.style_with(doc, &Interaction::default())
+    }
+
+    /// Like [`StyleEngine::style`], with `:hover`, `:active`, `:focus` and
+    /// `:focus-within` matching what the user is doing.
+    pub fn style_with(&self, doc: &Document, interaction: &Interaction) -> Styles {
         let mut stylist = Stylist::new(self.device(), QuirksMode::NoQuirks);
         let read = self.guard.read();
         stylist.append_stylesheet(self.user_agent.clone(), &read);
@@ -113,7 +120,7 @@ impl StyleEngine {
         }
 
         let tree = StyledTree::new(doc, &self.guard);
-        tree.populate(&self.url);
+        tree.populate(&self.url, interaction);
         let Some(root) = TDocument::as_node(&ErkNode::new(&tree, doc.root())).first_element_child()
         else {
             return Styles::default();
@@ -147,7 +154,17 @@ impl StyleEngine {
         thread_state::exit(ThreadState::LAYOUT);
 
         // The styled tree borrows the document; keep only the results.
+        let depends = |state| {
+            stylist
+                .iter_origins()
+                .any(|(data, _)| data.has_state_dependency(state))
+        };
         Styles {
+            reacts: Reacts {
+                hover: depends(ElementState::HOVER),
+                active: depends(ElementState::ACTIVE),
+                focus: depends(ElementState::FOCUS | ElementState::FOCUS_WITHIN),
+            },
             computed: tree
                 .nodes()
                 .iter()
@@ -175,13 +192,46 @@ impl StyleEngine {
     }
 }
 
+/// What the user is doing with a document, for the pseudo-classes that
+/// follow it. An element matches `:hover` when it or a descendant is under
+/// the pointer, `:active` likewise for the pressed element, `:focus` when
+/// it has the focus and `:focus-within` when it or a descendant has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Interaction {
+    /// The element under the pointer.
+    pub hover: Option<NodeId>,
+    /// The element the primary button went down on, while it is down.
+    pub active: Option<NodeId>,
+    /// The element that has the focus.
+    pub focus: Option<NodeId>,
+}
+
 /// The result of styling one document.
 #[derive(Default)]
 pub struct Styles {
     computed: Vec<Option<Arc<ComputedValues>>>,
+    reacts: Reacts,
+}
+
+/// Which parts of an [`Interaction`] some selector of the document's
+/// stylesheets depends on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Reacts {
+    hover: bool,
+    active: bool,
+    focus: bool,
 }
 
 impl Styles {
+    /// Whether styling with `after` instead of `before` can change any
+    /// style: a page with no `:hover` rule looks the same wherever the
+    /// pointer is.
+    pub fn react_to(&self, before: &Interaction, after: &Interaction) -> bool {
+        (self.reacts.hover && before.hover != after.hover)
+            || (self.reacts.active && before.active != after.active)
+            || (self.reacts.focus && before.focus != after.focus)
+    }
+
     /// The computed style of an element, or `None` for non-elements and
     /// elements that were not styled (for example inside `display: none`).
     ///

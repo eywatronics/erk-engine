@@ -1,0 +1,17 @@
+0 body block 0 0 800 397
+1 div flex 0 0 800 72
+2 a block 20 16 84.453125 40
+3 div block 116.453125 16 85.0625 40
+4 div block 213.515625 16 89.15625 40
+5 div block 20 92 396 172
+6 div block 38 110 360 20
+7 div block 38 138 360 34
+8 div block 38 184 360 20
+9 div block 38 212 360 34
+10 div block 20 284 366 113
+11 div block 21 285 364 37
+12 span inline 111.59375 295 40.09375 18
+13 div block 21 322 364 37
+14 span inline 104.875 332 24.078125 18
+15 div block 21 359 364 37
+16 span inline 120.75 369 72.109375 18

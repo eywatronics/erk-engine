@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use erk_renderer::{
-    Frame, FromRenderer, Modifiers, PointerButton, PointerInput, PointerKind, ToRenderer,
+    Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
+    PointerKind, ToRenderer,
 };
 use softbuffer::{Context, Surface};
 
@@ -22,6 +23,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Window, WindowId};
 
 /// Initial window size in logical pixels, the same as the golden images.
@@ -189,6 +191,20 @@ impl App {
     }
 }
 
+/// The renderer's name for a key winit reports.
+fn key(logical: &WinitKey) -> Key {
+    match logical {
+        WinitKey::Named(NamedKey::Tab) => Key::Tab,
+        WinitKey::Named(NamedKey::Enter) => Key::Enter,
+        WinitKey::Named(NamedKey::Space) => Key::Space,
+        WinitKey::Named(NamedKey::Escape) => Key::Escape,
+        // Some platforms report the space bar as the character it types.
+        WinitKey::Character(text) if text.as_str() == " " => Key::Space,
+        WinitKey::Character(text) => Key::Character(text.to_string()),
+        _ => Key::Other,
+    }
+}
+
 /// Copy the overlapping part of `frame` into a softbuffer buffer of
 /// `width` × `height`. Frames are opaque, so premultiplied RGBA is also
 /// straight RGBA, and softbuffer wants `0x00RRGGBB`.
@@ -278,6 +294,22 @@ impl ApplicationHandler<UserEvent> for App {
                 };
                 self.send_pointer(kind, button);
             }
+            // Synthetic presses are keys already held when the window
+            // gained the focus: not typed on the page.
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } => {
+                let _ = self.to_renderer.send(ToRenderer::Key(KeyInput {
+                    key: key(&event.logical_key),
+                    state: match event.state {
+                        ElementState::Pressed => KeyState::Down,
+                        ElementState::Released => KeyState::Up,
+                    },
+                    modifiers: self.modifiers,
+                }));
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
                 self.modifiers = Modifiers {
@@ -309,6 +341,24 @@ mod tests {
     use super::*;
 
     const PAGE: &str = r#"<html style="background: #123456"></html>"#;
+
+    #[test]
+    fn keys_reach_the_renderer_by_the_names_it_acts_on() {
+        for (logical, expected) in [
+            (WinitKey::Named(NamedKey::Tab), Key::Tab),
+            (WinitKey::Named(NamedKey::Enter), Key::Enter),
+            (WinitKey::Named(NamedKey::Space), Key::Space),
+            (WinitKey::Character(" ".into()), Key::Space),
+            (WinitKey::Named(NamedKey::Escape), Key::Escape),
+            (
+                WinitKey::Character("ş".into()),
+                Key::Character("ş".to_owned()),
+            ),
+            (WinitKey::Named(NamedKey::ArrowDown), Key::Other),
+        ] {
+            assert_eq!(key(&logical), expected, "{logical:?}");
+        }
+    }
 
     /// A frame from the renderer thread, the only way the shell gets one.
     fn frame(width: u16, height: u16) -> Frame {

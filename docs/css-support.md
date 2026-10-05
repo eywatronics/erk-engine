@@ -31,7 +31,7 @@ does not lay out or paint is not supported.
 | `<style>` blocks, `style` attribute, inheritance | Supported | `author_stylesheet_applies`, `style_attribute_applies`, `inherited_properties_flow_down` |
 | Custom properties (`--name`, `var()`), which utility CSS such as Tailwind relies on | Supported | `css_custom_properties_resolve` |
 | User agent stylesheet (headings, block elements) | Supported | `user_agent_stylesheet_makes_headings_blocks_with_larger_text` |
-| `:hover`, `:active`, `:focus` | M2 | Element state from the input pipeline |
+| `:hover`, `:active`, `:focus`, `:focus-within` | Supported | `hover_active_and_focus_match_the_element_the_user_points_at`, `hover_and_active_restyle_the_element_under_the_pointer`, `the_states_reference_page_follows_the_pointer_and_the_focus`. A state change restyles the whole page; a page whose selectors do not use a state is not painted again when it changes (`styles_say_which_states_their_selectors_depend_on`) |
 | `:focus-visible`, form pseudo-classes (`:checked`, `:disabled`) | M5 | With form controls |
 
 ## Box model and layout
@@ -117,6 +117,9 @@ does not lay out or paint is not supported.
 | Hit-testing: the topmost box under the pointer in paint order (stacking, `z-index`), text targets its element, `pointer-events: none` passes through, `visibility: hidden` is no target | Supported | `a_click_reports_the_element_under_the_pointer_and_its_path`, `a_click_on_text_targets_the_element_the_text_is_in`, `the_topmost_target_wins_and_untargetable_boxes_are_passed_through`. A point in the viewport no box covers belongs to the root element, as in browsers |
 | Click events with the path from the target to the root element, for the host to capture and bubble | Supported | `a_press_and_a_release_on_different_elements_click_their_common_ancestor`, `only_a_press_and_release_of_the_primary_button_click`. A press and release on different elements click their deepest common ancestor |
 | Inspecting: the node at a point, a highlight drawn over a node's boxes | Supported | `inspect_at_answers_the_topmost_node_or_none`, `the_highlight_is_drawn_over_the_page_and_not_into_it` |
+| Focus: a press focuses the focusable element pressed (links, enabled controls, `tabindex`), Tab and Shift+Tab walk the sequential focus order, with focus and blur events | Supported | `a_press_moves_the_focus_and_reports_blur_then_focus`, `tab_walks_the_focus_order_and_shift_tab_walks_it_back`. The order wraps around at the ends; Tab from an element outside the order (a negative tabindex) starts from the first |
+| Keyboard activation: Enter clicks a focused link or button, Space released clicks a focused button | Supported | `enter_and_space_click_the_focused_link_or_button_as_browsers_do` |
+| Key events to the host (`keydown`, `keyup`), text input | M5 | With form controls; keys the engine does not act on are ignored until then |
 | Other `pointer-events` values (SVG) | Not planned | Only `auto` and `none` apply to HTML boxes |
 
 ## Forms
