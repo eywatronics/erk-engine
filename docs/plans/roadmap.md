@@ -224,7 +224,7 @@ M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-intera
 | M2.0 | Kalıcı belge (bir kez ayrıştırılır, kareler arasında yaşar), metin geometrisi testi (M1'in bulgusu), kare süresi tabanı | Bitti: 163 metin satırının 159'u Chrome'la 1 px içinde, iki gerçek hata bulundu; tam kare 1000 elemanda ~71 ms |
 | M2.1 | Girdi mesajları, hit-test, tıklama olayı ve yayılma yolu, `inspect_at` ve vurgu kaplaması | Bitti: hit-test boyama sırasıyla, tıklama ortak ataya yoluyla, vurgu belgeye girmiyor; fare girdisi kare çizmiyor |
 | M2.2 | `:hover`, `:active`, `:focus`; odak ve klavyeyle gezinme | Bitti: durum seçicileri, Tab sırası, Enter ve Space; durumu kullanmayan sayfa fare hareketinde yeniden çizilmiyor |
-| M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Yeni |
+| M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Bitti: kırpma Chrome'la aynı (`overflow` sayfası), tekerlek iç içe kaplarda zincirleniyor; WPT'de 17 test geçmeye başladı |
 | M2.4 | `SetText` ve `Query` (ilk `Mutation`), sayaç demosu ve altın görüntülü testi | Yeni |
 | M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm; host'a çizim için render hedefi (host'un penceresi) | Yeni |
 | M2.6 | Metin düzenini sağlamlaştırma: inline-boxes, paragraphs, vertical-align farkları, satır içi kutu parçalanması, `white-space` kararı | Yeni |

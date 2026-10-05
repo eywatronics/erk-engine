@@ -119,15 +119,15 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.3: Kaydırma, kırpma, imleç
 
-- [ ] `overflow: hidden | auto | scroll` çocukları kırpar (display list'e
+- [x] `overflow: hidden | auto | scroll` çocukları kırpar (display list'e
   kırpma katmanı); bu M1'de açık kalan "çocuklar kırpılmıyor" sınırını da
   kapatır.
-- [ ] Kaydırma kapları ve kök görüntü alanı: `ToRenderer::Wheel { dx, dy,
+- [x] Kaydırma kapları ve kök görüntü alanı: `ToRenderer::Wheel { dx, dy,
   x, y }` imlecin altındaki en içteki kaydırılabilir kabı kaydırır, sınırda
   dışarı taşar; kaydırma konumu belgeyle saklanır. Hit-test kaydırmayı
   hesaba katar. Basit kaydırma çubukları (kaplama olarak).
-- [ ] `cursor` özelliği: `FromRenderer::Cursor(shape)`, kabuk winit'e verir.
-- [ ] Otomatik test: uzun bir sayfa tekerlekle kayıyor ve görünen içerik
+- [x] `cursor` özelliği: `FromRenderer::Cursor(shape)`, kabuk winit'e verir.
+- [x] Otomatik test: uzun bir sayfa tekerlekle kayıyor ve görünen içerik
   değişiyor (kabulün maddesi). Referans sayfası: kırpılan ve kaydırılmış kaplar.
 
 ### M2.4: İlk değişiklik ve sayaç demosu
@@ -175,6 +175,10 @@ inceler, gerçek olanları düzeltir.
   satır sonundaki boşluğu kırpar ve elemanın açılış kenarını metniyle aynı
   satıra koyar. Test: arka planlı bir `<span>` satır sonunda kırılınca önceki
   satırda span'ın hiçbir pikseli kalmıyor.
+- [ ] **`<br>` satırı kırmıyor** (M2.3'te bulundu): hiçbir kod `<br>`'yi
+  ele almıyor, metin aynı satırda sürüyor. Zorunlu satır sonu olarak
+  eklenir; test: `<br>` ile ayrılmış kelimeler ayrı satırlarda, Chrome'un
+  metin geometrisiyle.
 - [ ] `white-space`: `css-text/white-space` 45/422 geçiyor. `nowrap`, `pre`,
   `pre-wrap`, `pre-line` alt kümesinin bu adımda mı geleceği, testlerin
   sınıflamasıyla kararlaştırılır ve gerekçesiyle yazılır.
@@ -307,3 +311,33 @@ ulaşmıyor; durum değişimi hiç çizilmiyor; kabukta boşluk karakteri Space
 değil. **Kaçan:** kabuğun sentetik tuşları göndermemesi; winit'in `KeyEvent`'i
 testte kurulamıyor (platforma özel gizli alanı var), kabuğun fare eşlemesi
 gibi pencere isteyen kısım otomatik testsiz.
+
+**M2.3 (2026-10-05).** Kırpma, kaydırma, imleç.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Display list'e kırpma katmanı | Kırpma, Appendix E'nin evrelerine uymuyor: bir kırpan kutunun içeriği birkaç evreye (arka planlar, satır içi içerik, konumlandırılmış katmanlar) dağılıyor, ve mutlak konumlu bir kutu, kapsayıcı bloğu dışındaysa, ebeveyninin içinde olduğu kırpmadan kaçıyor. Yeni `scroll.rs` her kutunun *kapsamını* hesaplıyor: onu içeren en içteki kırpan kutu (mutlak konumlu için kapsayıcı bloğunu içerenler, sabit konumlu için hiçbiri, görüntü alanı da değil). Her display öğesi kapsamıyla etiketli üretiliyor; son geçiş ardışık öğeleri kapsamlarının kırpmalarıyla (`PushClip`/`PopClip`) sarıyor. Bir opaklık grubu başladığı kırpmaları bitene kadar tutuyor; içinden kaçan bir kutu (yarı saydam bir kutunun içinde, kapsayıcı bloğu kırpmanın dışında olan mutlak konumlu kutu) kırpılı kalıyor: bilinen uç durum |
+| — | Kökün `overflow`'u, `visible` ise body'ninki görüntü alanınındır (CSS Overflow 3 §3.3): o eleman kırpmıyor, `hidden` belgeyi kullanıcıya kaydırtmıyor |
+| Kaydırma konumu belgeyle saklanır | `Page` kaydırma konumunu düğüm başına tutuyor, her karede kabın gidebileceği kadarına kırpıyor (pencere büyüyünce belge geri geliyor). Kaydırma aralığı kabın içindeki kenarlık kutularından ve metin satırlarından (kutusundan taşsalar da), dolgu kutusunun köşesinden ölçülüyor; Taffy'nin `scrollable_overflow_rect`'i kullanılmadı: Erk'in kendi paragraf düzeni onu doldurmuyor ve konumlar düzenden sonra DOM'a göre yeniden yazılıyor. **Mutasyonla bulunan hata:** ilk hâli yalnızca kutuları sayıyordu; yalnızca metin tutan bir kap hiç kaymıyordu ve testi, tekerlek belgeyi kaydırdığı için yanlış sebeple geçiyordu |
+| Tekerlek en içteki kabı kaydırır, sınırda dışarı taşar | `ToRenderer::Wheel`: imlecin altındaki elemanın yolundaki kullanıcı kaydırabilir kaplar (`auto`, `scroll`, belge) içten dışa; her biri alabildiğini alıyor, kalanı dıştakine. `hidden` ve `clip` tekerlekle kaymıyor. Bir şey kaymadıysa kare çizilmiyor. Kabuk satır başına 40 CSS pikseli, dokunmatik yüzeyin fiziksel pikselini ölçeğe bölerek gönderiyor (birim testli) |
+| Hit-test kaydırmayı hesaba katar | İsabet bölgeleri display list'ten geldiği için kaydırmayla zaten kayıyor; şimdi çevrelerindeki kırpmalarla da kesiliyor: kırpılmış içerik tıklanmıyor |
+| Basit kaydırma çubukları (kaplama olarak) | Kaplama başparmakları (6 px, yarı saydam), yalnızca imleç kabın (belgeninki için sayfanın) üstündeyken. Böylece referans görüntüleri (imleçsiz) etkilenmiyor ve yer ayrılmıyor; Chrome `--hide-scrollbars` ile de yer ayırmıyor. Kabın çubuğu kendi satır içi evresinde çiziliyor: konumlandırılmış torunlar üstüne biniyor; belgeninki her şeyin üstünde |
+| `cursor`: `FromRenderer::Cursor(shape)` | `Cursor`, CSS anahtar kelimeleri ve gizli imleç için `None`; değişince, kareden sonra gönderiliyor (`:hover` imleci değiştirebilir). `auto` metnin üstünde metin imleci (isabet bölgesi metin satırı mı, onu biliyor), başka yerde ok. UA'ya HTML'in `:any-link { cursor: pointer }` kuralı eklendi (bağlantı renkleri değil). İmleç görüntüleri yüklenmiyor |
+| Referans sayfası: kırpılan ve kaydırılmış kaplar | `overflow.html`: kaydırılan liste, kesilen metin kutusu, uzun kelime, kırpan konumlu kap, kırpmadan kaçan rozet, yatay kaydırılan satır. Chrome'la içerik %93,35; 22 kutunun 22'si, 19 metin satırının 19'u 1 px içinde. **İlk hâli bir fark buldu:** `white-space: nowrap`'lı kutu Erk'te iki satır (M2.6'nın kararı); sayfadan çıkarıldı. Erk testi listeyi ve yatay satırı kaydırıp yalnızca o kabın piksellerinin değiştiğini doğruluyor |
+| — | **WPT: 17 test geçmeye başladı**, düşen yok: normal-flow 508 → 511, flexbox 569 → 581 (`flexbox-overflow-*`, `overflow-area-*`), position 48 → 50 (iki sticky testi: kırpma doğru kutuyu gösteriyor) |
+| — | **Bulunan eksik: `<br>` satırı kırmıyor.** Hiçbir kod onu ele almıyor; M2.6'ya eklendi |
+| — | **Kırpma köşeleri yuvarlamıyor:** `border-radius`'lu bir kırpan kutu dikdörtgen kırpıyor |
+
+Mutasyonlar (20/20 yakalandı, üçü ancak test eklenince ya da düzeltilince):
+sabit konumlu kutu kırpmalarını tutuyor; mutlak konumlu kutu hiç kaçmıyor;
+kökün `overflow`'u görüntü alanına gitmiyor; kenarlık kutusuna kırpılıyor;
+yatay ve dikey konum kırpılmıyor (yatay için pencere genişleme testi
+eklendi); kabın kendi içeriği kaymıyor ve metin aralığa girmiyor (**ikisi
+gerçek bir hatayı gösterdi**, yukarıda; test yalnızca metin tutan kabı
+belgeyi kaydırmadan sınayacak biçimde yeniden yazıldı); anonim kutular
+aralığa girmiyor (test kabı sonuna kadar kaydırıyor); `hidden` kullanıcıyla
+kayıyor; iç içe kırpma dıştakinin kaydırmasıyla kaymıyor; isabet bölgeleri
+kırpılmıyor; tekerlek zincirlenmiyor; çubuk değişimi çizilmiyor; kabın ya da
+belgenin çubuğu hiç gösterilmiyor; metin üstünde `auto` ok; bağlantıda el
+yok; imleç hiç gönderilmiyor; opaklık grubu kırpmalarını tutmuyor (yarı
+saydam kutunun içinden kaçan kutunun saydam kaldığını sınayan test eklendi).

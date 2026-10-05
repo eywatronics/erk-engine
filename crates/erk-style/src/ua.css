@@ -80,6 +80,12 @@ u, ins {
   text-decoration: underline;
 }
 
+/* 15.3.4 Phrasing content: the cursor only. Link colours and underlines are
+ * left to the page. */
+:any-link {
+  cursor: pointer;
+}
+
 s, strike, del {
   text-decoration: line-through;
 }

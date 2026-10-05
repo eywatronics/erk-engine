@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 
 use erk_dom::NodeId;
 
-use crate::messages::{FromRenderer, ToRenderer};
+use crate::messages::{Cursor, FromRenderer, ToRenderer};
 use crate::page::Page;
 use crate::resources::Resources;
 
@@ -40,6 +40,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
     // The resources of the current document: asked for once, kept across
     // resizes, dropped with the document; the host's fonts outlive it.
     let mut resources = Resources::default();
+    // The cursor the shell was last told to show.
+    let mut cursor = Cursor::Default;
     while let Ok(first) = inbox.recv() {
         // Apply everything already queued before painting: during a window
         // drag dozens of resizes arrive, and only the last one matters, and
@@ -90,6 +92,12 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                         .map(FromRenderer::Event)
                         .collect()
                 }),
+                ToRenderer::Wheel { dx, dy, x, y } => {
+                    if let Some(page) = page.as_mut() {
+                        changed |= page.wheel((dx, dy), (x, y));
+                    }
+                    Vec::new()
+                }
                 ToRenderer::Key(input) => page.as_mut().map_or_else(Vec::new, |page| {
                     page.key(&input)
                         .into_iter()
@@ -129,10 +137,7 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             }
             message = inbox.try_recv().ok();
         }
-        if !changed {
-            continue;
-        }
-        if let (Some(page), Some((width, height))) = (page.as_mut(), size) {
+        if changed && let (Some(page), Some((width, height))) = (page.as_mut(), size) {
             let (frame, requests) = page.render(width, height, scale, &mut resources);
             // The requests first: a host that answers at once has its
             // answers queued before it sees the frame painted without them.
@@ -142,6 +147,14 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             let frame = frame.painted_with_resources_pending(resources.pending());
             if outbox.send(FromRenderer::Frame(frame)).is_err() {
                 // The shell has gone away.
+                return;
+            }
+        }
+        // After the frame: a restyle (`:hover`) may change the cursor.
+        let now = page.as_ref().map_or(Cursor::Default, Page::cursor);
+        if now != cursor {
+            cursor = now;
+            if outbox.send(FromRenderer::Cursor(now)).is_err() {
                 return;
             }
         }

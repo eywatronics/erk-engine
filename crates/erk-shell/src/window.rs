@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use erk_renderer::{
-    Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
+    Cursor, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
     PointerKind, ToRenderer,
 };
 use softbuffer::{Context, Surface};
@@ -21,16 +21,17 @@ use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 /// Initial window size in logical pixels, the same as the golden images.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(800.0, 600.0);
 
 enum UserEvent {
     Frame(Frame),
+    Cursor(Cursor),
     /// The renderer's channel closed while the window was open: the
     /// renderer has stopped, and the window would only show a stale frame.
     RendererGone,
@@ -65,6 +66,11 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
                     FromRenderer::Resources(requests) => {
                         for request in &requests {
                             let _ = answers.send(provider.answer(request));
+                        }
+                    }
+                    FromRenderer::Cursor(cursor) => {
+                        if proxy.send_event(UserEvent::Cursor(cursor)).is_err() {
+                            return;
                         }
                     }
                     // The demo shell subscribes to no event yet (its host
@@ -278,6 +284,19 @@ impl ApplicationHandler<UserEvent> for App {
                 self.pointer = ((position.x / scale) as f32, (position.y / scale) as f32);
                 self.send_pointer(PointerKind::Move, PointerButton::None);
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scale = self
+                    .window
+                    .as_ref()
+                    .map_or(1.0, |state| state.window.scale_factor());
+                let (dx, dy) = wheel_delta(delta, scale);
+                let _ = self.to_renderer.send(ToRenderer::Wheel {
+                    dx,
+                    dy,
+                    x: self.pointer.0,
+                    y: self.pointer.1,
+                });
+            }
             WindowEvent::CursorLeft { .. } => {
                 self.send_pointer(PointerKind::Leave, PointerButton::None);
             }
@@ -331,7 +350,74 @@ impl ApplicationHandler<UserEvent> for App {
                     state.window.request_redraw();
                 }
             }
+            UserEvent::Cursor(cursor) => {
+                if let Some(state) = &self.window {
+                    match icon(cursor) {
+                        Some(icon) => {
+                            state.window.set_cursor(icon);
+                            state.window.set_cursor_visible(true);
+                        }
+                        None => state.window.set_cursor_visible(false),
+                    }
+                }
+            }
             UserEvent::RendererGone => event_loop.exit(),
+        }
+    }
+}
+
+/// The window system's pointer for a CSS cursor; `None` hides it.
+fn icon(cursor: Cursor) -> Option<CursorIcon> {
+    Some(match cursor {
+        Cursor::None => return None,
+        Cursor::Default => CursorIcon::Default,
+        Cursor::ContextMenu => CursorIcon::ContextMenu,
+        Cursor::Help => CursorIcon::Help,
+        Cursor::Pointer => CursorIcon::Pointer,
+        Cursor::Progress => CursorIcon::Progress,
+        Cursor::Wait => CursorIcon::Wait,
+        Cursor::CellSelect => CursorIcon::Cell,
+        Cursor::Crosshair => CursorIcon::Crosshair,
+        Cursor::Text => CursorIcon::Text,
+        Cursor::VerticalText => CursorIcon::VerticalText,
+        Cursor::Alias => CursorIcon::Alias,
+        Cursor::Copy => CursorIcon::Copy,
+        Cursor::Move => CursorIcon::Move,
+        Cursor::NoDrop => CursorIcon::NoDrop,
+        Cursor::NotAllowed => CursorIcon::NotAllowed,
+        Cursor::Grab => CursorIcon::Grab,
+        Cursor::Grabbing => CursorIcon::Grabbing,
+        Cursor::EResize => CursorIcon::EResize,
+        Cursor::NResize => CursorIcon::NResize,
+        Cursor::NeResize => CursorIcon::NeResize,
+        Cursor::NwResize => CursorIcon::NwResize,
+        Cursor::SResize => CursorIcon::SResize,
+        Cursor::SeResize => CursorIcon::SeResize,
+        Cursor::SwResize => CursorIcon::SwResize,
+        Cursor::WResize => CursorIcon::WResize,
+        Cursor::EwResize => CursorIcon::EwResize,
+        Cursor::NsResize => CursorIcon::NsResize,
+        Cursor::NeswResize => CursorIcon::NeswResize,
+        Cursor::NwseResize => CursorIcon::NwseResize,
+        Cursor::ColResize => CursorIcon::ColResize,
+        Cursor::RowResize => CursorIcon::RowResize,
+        Cursor::AllScroll => CursorIcon::AllScroll,
+        Cursor::ZoomIn => CursorIcon::ZoomIn,
+        Cursor::ZoomOut => CursorIcon::ZoomOut,
+    })
+}
+
+/// How far a wheel turn scrolls per line it reports, in CSS pixels.
+const LINE: f32 = 40.0;
+
+/// A wheel turn as CSS pixels to scroll towards the end of the page: winit
+/// reports lines (a wheel) or physical pixels (a touchpad), positive when
+/// the content should move down, the other way round.
+fn wheel_delta(delta: MouseScrollDelta, scale: f64) -> (f32, f32) {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) => (-x * LINE, -y * LINE),
+        MouseScrollDelta::PixelDelta(position) => {
+            ((-position.x / scale) as f32, (-position.y / scale) as f32)
         }
     }
 }
@@ -341,6 +427,36 @@ mod tests {
     use super::*;
 
     const PAGE: &str = r#"<html style="background: #123456"></html>"#;
+
+    #[test]
+    fn a_wheel_turn_scrolls_towards_the_end_in_css_pixels() {
+        use winit::dpi::PhysicalPosition;
+        // A notch towards the user scrolls down.
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, -1.0), 2.0),
+            (0.0, LINE)
+        );
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(1.0, 0.0), 1.0),
+            (-LINE, 0.0)
+        );
+        // A touchpad's physical pixels, at scale 2.
+        assert_eq!(
+            wheel_delta(
+                MouseScrollDelta::PixelDelta(PhysicalPosition::new(10.0, -30.0)),
+                2.0
+            ),
+            (-5.0, 15.0)
+        );
+    }
+
+    #[test]
+    fn every_cursor_but_none_has_a_pointer() {
+        assert_eq!(icon(Cursor::None), None);
+        assert_eq!(icon(Cursor::Default), Some(CursorIcon::Default));
+        assert_eq!(icon(Cursor::Pointer), Some(CursorIcon::Pointer));
+        assert_eq!(icon(Cursor::Text), Some(CursorIcon::Text));
+    }
 
     #[test]
     fn keys_reach_the_renderer_by_the_names_it_acts_on() {

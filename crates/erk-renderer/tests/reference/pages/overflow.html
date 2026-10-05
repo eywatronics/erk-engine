@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Taşma</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .duzen { display: flex; gap: 20px; padding: 20px; }
+  .liste { width: 220px; height: 260px; overflow: auto; border: 1px solid #cbd5e1; background: #f1f5f9; }
+  .oge { margin: 8px; padding: 10px; background: #ffffff; border: 1px solid #e2e8f0; }
+  .oge b { display: block; margin-bottom: 4px; }
+  .sag { display: flex; flex-direction: column; gap: 16px; width: 300px; }
+  .kesik { height: 44px; overflow: hidden; padding: 8px 12px; background: #fef3c7; border-left: 4px solid #f59e0b; }
+  .tek { overflow: hidden; width: 200px; padding: 6px 10px; background: #e0f2fe; }
+  .dis { position: relative; height: 90px; overflow: hidden; background: #ddd6fe; }
+  .ic { position: absolute; left: 180px; top: 40px; width: 200px; height: 100px; background: #8b5cf6; }
+  .kac { overflow: hidden; height: 60px; background: #dcfce7; }
+  .rozet { position: absolute; left: 600px; top: 330px; padding: 4px 8px; background: #16a34a; color: #ffffff; }
+  .yatay { overflow: auto; height: 50px; background: #fee2e2; }
+  .genis { width: 600px; height: 30px; margin: 10px; background: #ef4444; }
+</style>
+</head>
+<body>
+  <div class="duzen">
+    <div class="liste">
+      <div class="oge"><b>Birinci</b>Uzun bir listenin ilk öğesi.</div>
+      <div class="oge"><b>İkinci</b>Liste kabından taşar.</div>
+      <div class="oge"><b>Üçüncü</b>Görünmeyen kısım kırpılır.</div>
+      <div class="oge"><b>Dördüncü</b>Kaydırınca görünür.</div>
+      <div class="oge"><b>Beşinci</b>Son öğe.</div>
+    </div>
+    <div class="sag">
+      <div class="kesik">Bu kutunun yüksekliği sabit; metin iki satırı aşınca alttaki satırlar kesilir ve görünmez olur.</div>
+      <div class="tek">Teksatırlıkuzunbirbaşlıksağdankırpılır</div>
+      <div class="dis"><div class="ic"></div>Konumlu kap çocuğunu kırpar.</div>
+      <div class="kac">Konumsuz kap, kapsayıcı bloğu dışarıda olan rozeti kırpmaz.<div class="rozet">Rozet</div></div>
+      <div class="yatay"><div class="genis"></div></div>
+    </div>
+  </div>
+</body>
+</html>
