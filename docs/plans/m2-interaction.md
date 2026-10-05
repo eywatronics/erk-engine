@@ -165,24 +165,24 @@ satırlar ve kelime kenarları Chrome'la 1 px içinde çıktı; ama metin ağır
 arayüzlerde görünür sorunlar kalmış olabilir. Bu adım farkları tek tek
 inceler, gerçek olanları düzeltir.
 
-- [ ] `inline-boxes`, `paragraphs`, `vertical-align` ve `inline-styles`
+- [x] `inline-boxes`, `paragraphs`, `vertical-align` ve `inline-styles`
   sayfalarında M2.0'ın metin geometrisi testinin bulduğu her fark: glif
   çizimi mi (kabul, gerekçesiyle) yerleşim mi (düzeltilir).
-- [ ] **Satır içi kutu parçalanması** (M1.6'nın bilinen sınırı, kullanıcının
+- [x] **Satır içi kutu parçalanması** (M1.6'nın bilinen sınırı, kullanıcının
   da gördüğü): satır sonuna sığmayıp alt satıra inen bir satır içi eleman
   açılış dolgusunu ya da kenarlığını ve önündeki boşluğu önceki satırda
   bırakıyor; arka planı orada ince bir dikey çizgi olarak görünüyor. Chrome
   satır sonundaki boşluğu kırpar ve elemanın açılış kenarını metniyle aynı
   satıra koyar. Test: arka planlı bir `<span>` satır sonunda kırılınca önceki
   satırda span'ın hiçbir pikseli kalmıyor.
-- [ ] **`<br>` satırı kırmıyor** (M2.3'te bulundu): hiçbir kod `<br>`'yi
+- [x] **`<br>` satırı kırmıyor** (M2.3'te bulundu): hiçbir kod `<br>`'yi
   ele almıyor, metin aynı satırda sürüyor. Zorunlu satır sonu olarak
   eklenir; test: `<br>` ile ayrılmış kelimeler ayrı satırlarda, Chrome'un
   metin geometrisiyle.
-- [ ] `white-space`: `css-text/white-space` 45/422 geçiyor. `nowrap`, `pre`,
+- [x] `white-space`: `css-text/white-space` 45/422 geçiyor. `nowrap`, `pre`,
   `pre-wrap`, `pre-line` alt kümesinin bu adımda mı geleceği, testlerin
   sınıflamasıyla kararlaştırılır ve gerekçesiyle yazılır.
-- [ ] Düzeltmelerin skoru ve WPT sonuçları commit gövdesinde.
+- [x] Düzeltmelerin skoru ve WPT sonuçları commit gövdesinde.
 
 ### M2.7: CSS Position analizi
 
@@ -362,3 +362,29 @@ başarısız değişiklik kare çiziyor; eski id geçiyor (renderer paniğe dü�
 0 eski sayılıyor; bozuk seçici boş sonuç veriyor; ilk değil son eşleşme;
 `:scope` yok; host yol yerine yalnızca hedefe bakıyor (düğmenin içindeki bir
 simgeye tıklama sayılmazdı; test eklendi); azaltma yok.
+
+**M2.6 (2026-10-05).** Metin düzenini sağlamlaştırma.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| inline-boxes, paragraphs, vertical-align, inline-styles farkları: glif mi yerleşim mi | **Glif çizimi, kabul.** M2.0'ın testi bu dört sayfanın bütün satırlarını zaten 1 px içinde buluyordu. Mürekkep ölçüldü: toplam mürekkep Chrome'la %2 içinde, mürekkebin ağırlık merkezi 1 px içinde, en iyi hizalama kayması sıfır; fark rasterleştirmede: Chrome her glifi yaklaşık %13 daha çok piksele yayıyor (koyu piksel az, açık piksel çok; metin gamma ve kontrastı). Hinting kapatılınca her metin sayfası kötüleşti (paragraphs %48,27 → %41,04), yani hinting kalıyor. Chrome'un metin gamma eğrisi vello_cpu'da yok; aynısı kendi glif rasterleştirmesini ister |
+| Satır içi kutu parçalanması | **Düzeltildi**, iki yönde. Erk elemanın kenarlarını (kenarlık, dolgu, kenar boşluğu) Parley'ye satır içi kutu olarak veriyor; Parley her satır içi kutudan sonra kırabiliyor ("We can always line break after an inline box") ve sığmayan kutudan hemen önce kırıyor. Böylece açılış kenarı satır sonunda kalıyor, ya da kapanış kenarı yeni satıra tek başına iniyordu. Erk satırları artık kendisi kırıyor (`break_lines`): kenarı metninden ayrılan satır, açılışta kenarın önünden, kapanışta son kelimenin önünden kırılacak darlıkta yeniden kırılıyor; hizalama için tam genişliğini koruyor. `borders` sayfasının üç bilinen farkı kalktı (%92,30 → %94,88). **Bulunan ikinci hata:** iç içe satır içi elemanların arka planı kapanış sırasıyla çiziliyordu, dıştaki içtekinin üstüne biniyordu; artık ağaç sırasıyla |
+| `<br>` satır kırmıyor | Zorunlu satır sonu. Önündeki boşluk siliniyor, ardındaki satır başında daralıyor. Bloğun sonundaki `<br>` satır eklemiyor, yalnız `<br>` bir boş satır (Chrome gibi; sıfır genişlikli bir boşluk tutuyor) |
+| `white-space`: testlerin sınıflamasıyla karar | `css-text/white-space`'in 456 testinden 168'i `break-spaces`, 158'i `pre-wrap`, 70'i `pre`, 19'u `pre-line`, 14'ü `nowrap`, 24'ü `textarea` kullanıyor. **Karar:** arayüz metninin günlük ihtiyacı olan `nowrap`, `pre`, `pre-wrap`, `pre-line` bu adımda (Stylo'nun `white-space-collapse` ve `text-wrap-mode` uzun biçimleriyle); `break-spaces` ve `tab-size` metin girdisiyle M5'te (`break-spaces` şimdilik `pre-wrap` gibi). Sekme bir boşluk genişliğinde |
+| — | **Parley'nin bir tuhaflığı:** bir kümenin kırılma ve satır sonunda asılma kararını bir önceki kümenin sarma kipiyle veriyor. `nowrap` bir parçanın hemen ardından gelen boşluk satır sonuna taşınca asılamıyor, Parley parçanın önündeki fırsata dönüyordu (Chrome boşluğu çevresindeki metne sayar). Aralarına konan sıfır genişlikli bir boşluk (UAX #14 LB8 ona kendi fırsatını vermez) boşluğa sarmasını ödünç veriyor. **Bilinen sınır:** boşlukla başlayan bir `pre` parçası, çevredeki metnin boşluğundan hemen sonra gelince aralarında kırılamıyor (UAX #14 iki boşluk arasına sınır koymuyor) |
+| — | Chrome'un `getClientRects()`'i, korunan ve satır sonunda asılan boşluğa ayrı bir dikdörtgen veriyor; metin testi aynı satırın dikdörtgenlerini birleştiriyor, Erk korunan boşlukları satırdan atmıyor. Satır içi bir kutudan (inline-block) önceki boşluk, kutu alt satıra inse de Chrome'da ölçülüyor; Erk de öyle |
+| — | **Gerçek bir hata daha (WPT'den):** esnek kapta mutlak konumlu bir çocuk metni iki anonim öğeye bölmüyordu (CSS Flexbox §4, `anonymous-flex-item-004..006`) |
+| Referans sayfaları | `line-breaks` (%94,94; 15 kutunun 15'i, 35 metin satırının 35'i) ve `white-space` (%92,35; 20 kutunun 20'si, 27 satırın 27'si) |
+| WPT | normal-flow 511 → 518, flexbox 581 → 587, css-text 608 → 371, `css-text/white-space` 45 → 53. **css-text'in düşüşü sahte geçişlerin ortaya çıkması:** düşen 283 testin hepsi referansında ya da kendisinde `<br>` ya da `white-space` kullanıyor; eskiden ikisi de iki tarafta yok sayıldığı için eşleşiyorlardı. Her satırın gerekçesi yazıldı: 217'si erk-wpt'nin sunmadığı bir fontla (Ahem, CJK) satır kırıyor, 22'si sayfayı betikle değiştiriyor, 10'u `<textarea>` (M5), kalanı desteklenmeyen özellikler (`hanging-punctuation`, `line-break`, `word-break`, `overflow-wrap`, `tab-size`, `break-spaces`, `word-spacing`). Biri (`white-space-collapse-preserve-breaks-001`) baştaki satır sonunun boş satır yapmamasını bekliyor; Chrome yapıyor, Erk de (yerel Chrome'la denendi). Ne `<br>` ne `white-space` kullanan bir düşüş yok |
+
+Mutasyonlar (16'dan 15'i yakalandı): kenarlar ayrılabiliyor; açılış kenarı satır
+sonunda kalabiliyor; kapanış kenarı satır başına inebiliyor; iç arka plan
+dıştakinin altında; `<br>` yok sayılıyor; kırılma hemen yazılıyor (sondaki
+`<br>` satır ekliyor); tek `<br>` satır yapmıyor; pre-line satır sonlarını
+daraltıyor; pre boşlukları daraltıyor; nowrap sarıyor; nowrap'ten sonra sıfır
+genişlikli boşluk yok; korunan son boşluklar atılıyor; alt satıra inen kutudan
+önceki boşluk atılıyor; sıfır genişlikli boşluklar metin sayılıyor; mutlak
+konumlu çocuk esnek metni bölmüyor. **Kaçan:** `<br>`'den önceki boşluğun
+silinmesi; asılan boşluk ekranda da satır geometrisinde de görünmüyor (sağa
+hizalı satırda bile, test eklendi); metin geri okununca (kopyalama, M5)
+görünecek, CSS Text §4.1.2 gereği duruyor.

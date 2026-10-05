@@ -227,7 +227,7 @@ M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-intera
 | M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Bitti: kırpma Chrome'la aynı (`overflow` sayfası), tekerlek iç içe kaplarda zincirleniyor; WPT'de 17 test geçmeye başladı |
 | M2.4 | `SetText` ve `Query` (ilk `Mutation`), sayaç demosu ve altın görüntülü testi | Bitti: CSS seçicili sorgu, eski id hata; yükleme aynı arenaya (sözleşmeye aykırılık düzeltildi); sayaç altın görüntüyle |
 | M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm; host'a çizim için render hedefi (host'un penceresi) | Yeni |
-| M2.6 | Metin düzenini sağlamlaştırma: inline-boxes, paragraphs, vertical-align farkları, satır içi kutu parçalanması, `white-space` kararı | Yeni |
+| M2.6 | Metin düzenini sağlamlaştırma: inline-boxes, paragraphs, vertical-align farkları, satır içi kutu parçalanması, `white-space` kararı | Bitti: parçalanma ve iç içe arka plan düzeltildi, `<br>` ve `white-space` (nowrap, pre, pre-wrap, pre-line) Chrome'la satır satır aynı; düşük metin skorları glif rasterleştirmesi |
 | M2.7 | `css/css-position` analizi: düşen her test sınıflanır, desteklenen özelliklerdeki hatalar düzeltilir | Yeni |
 | M2.8 | macOS CI, kabul | Yeni |
 

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Boşluklar</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .duzen { display: flex; gap: 24px; padding: 20px; }
+  .sutun { width: 240px; }
+  .kutu { margin-bottom: 12px; padding: 6px 8px; border: 1px solid #cbd5e1; background: #f1f5f9; }
+  .baslik { font-size: 13px; color: #64748b; }
+  pre { margin: 0; font-family: "Noto Sans"; }
+  .dugme { display: inline-block; padding: 4px 10px; background: #2563eb; color: #ffffff; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="duzen">
+    <div class="sutun">
+      <div class="baslik">nowrap</div>
+      <div class="kutu" style="white-space: nowrap">Bu satır kabın genişliğini aşar ama kırılmaz.</div>
+      <div class="kutu">Düğmeler: <span class="dugme">Kaydet ve kapat</span> <span class="dugme">Vazgeç</span></div>
+      <div class="baslik">pre</div>
+      <div class="kutu"><pre>Ad:      Ayşe
+Şehir:   İzmir
+   girintili satır
+</pre></div>
+      <div class="baslik">pre-line</div>
+      <div class="kutu" style="white-space: pre-line">Birinci   satır    boşlukları
+   daralır,     ikinci
+satır ayrı kalır.</div>
+    </div>
+    <div class="sutun">
+      <div class="baslik">pre-wrap</div>
+      <div class="kutu" style="white-space: pre-wrap">Boşluklar    korunur ama uzun satırlar kabın sonunda kırılır,    çünkü pre-wrap.
+Yeni satır da korunur.</div>
+      <div class="kutu" style="white-space: pre-wrap">  Baştaki boşluklar ve  çift  boşluk.</div>
+      <div class="baslik">karışık</div>
+      <div class="kutu">Normal metin <span style="white-space: pre">korunan   boşluk</span> ve yine normal metin satırı.</div>
+      <div class="kutu">Uzun bir cümlenin içinde <span style="white-space: nowrap">kırılmayan bir parça</span> var.</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -372,3 +372,46 @@ fn the_canvas_element_still_paints_its_border() {
     assert_eq!(rgb_at(&frame, 1, 20), [255, 0, 0]);
     assert_eq!(rgb_at(&frame, 100, 20), [255, 255, 0]);
 }
+
+#[test]
+fn an_inline_element_that_wraps_takes_its_opening_edge_with_it() {
+    // The span fits on no line with the words before it: it starts the
+    // second line, border and padding included, and leaves no sliver of
+    // its background or border at the end of the first.
+    let frame = render_html(
+        r#"<style>body { margin: 0; font-family: 'Noto Sans'; font-size: 16px }</style>
+        <p style="margin: 0; width: 120px">aaaa bbbb <span style="background: #ff0000; padding-left: 6px; border-left: 4px solid #0000ff">cccccccccc</span></p>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    let coloured = |x: usize, y: usize| {
+        let [r, g, b, _] = pixel(&frame, x, y);
+        (r > 200 && g < 60 && b < 60) || (b > 200 && r < 60 && g < 60)
+    };
+    let first_line = (0..WIDTH as usize).flat_map(|x| (0..20).map(move |y| (x, y)));
+    assert_eq!(
+        first_line.filter(|(x, y)| coloured(*x, *y)).count(),
+        0,
+        "a sliver is left"
+    );
+    assert!(coloured(1, 30), "the border starts the second line");
+    assert!(coloured(7, 30), "then the padding");
+}
+
+#[test]
+fn a_nested_inline_background_is_painted_over_its_parents() {
+    let frame = render_html(
+        r#"<style>body { margin: 0; font-family: 'Noto Sans'; font-size: 16px }</style>
+        <p style="margin: 0"><span style="background: #0000ff; padding: 0 20px">a <span style="background: #00ff00">bbbbbb</span> c</span></p>"#,
+        WIDTH,
+        HEIGHT,
+    );
+    // Inside the inner span, between its letters' strokes: green, not blue.
+    let green = (0..WIDTH as usize)
+        .filter(|x| {
+            let [r, g, b, _] = pixel(&frame, *x, 3);
+            r < 60 && g > 200 && b < 60
+        })
+        .count();
+    assert!(green > 30, "the inner background is covered: {green}");
+}

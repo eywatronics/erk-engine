@@ -760,13 +760,35 @@ fn text_hits(walk: &Walk<'_>, fragments: &[TextFragment], out: &mut Vec<DisplayI
 /// `origin` lies, line by line.
 fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> {
     let mut fragments = Vec::new();
+    let lines: Vec<_> = shaped.layout.layout.lines().collect();
+    // Whether a line starts with an atomic inline: Chrome measures the
+    // space before one at the end of the line above, as if no break came
+    // between them.
+    let starts_with_atom = |index: usize| {
+        lines.get(index).is_some_and(|line| {
+            matches!(
+                line.items().next(),
+                Some(PositionedLayoutItem::InlineBox(inline_box))
+                    if shaped.atom_boxes.contains(&inline_box.id)
+            )
+        })
+    };
     for (index, line) in shaped.layout.layout.lines().enumerate() {
         let shift = shaped.layout.shifts.get(index).copied().unwrap_or(0.0);
         let (mut clusters, then_a_box) = crate::text::placed_clusters(&line);
+        let then_a_box = then_a_box || starts_with_atom(index + 1);
+        // Zero-width spaces Erk adds (see `Paragraph::flush`, `<br>`) are
+        // nobody's text.
+        clusters.retain(|cluster| shaped.text.get(cluster.text.clone()) != Some("\u{200B}"));
         // White space at the end of a line hangs past it in CSS; before an
-        // inline box (an inline-block, an image) it is not at the end.
+        // inline box (an inline-block, an image) it is not at the end. A
+        // space `white-space` keeps hangs too, but is text all the same.
+        let kept = |at: usize| shaped.preserved.iter().any(|range| range.contains(&at));
         if !then_a_box {
-            while clusters.last().is_some_and(|cluster| cluster.space) {
+            while clusters
+                .last()
+                .is_some_and(|cluster| cluster.space && !kept(cluster.text.start))
+            {
                 clusters.pop();
             }
         }
