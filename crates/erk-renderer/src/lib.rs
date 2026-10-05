@@ -14,6 +14,7 @@ mod display;
 mod fonts;
 mod layout;
 mod messages;
+mod page;
 mod paint;
 mod resources;
 mod text;
@@ -21,7 +22,7 @@ mod thread;
 
 pub use messages::{
     ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest,
-    ResourceResponse, ScriptFallback, ToRenderer,
+    ResourceResponse, ScriptFallback, TextBox, ToRenderer,
 };
 pub use thread::spawn;
 
@@ -32,8 +33,8 @@ use erk_style::StyleEngine;
 use vello_cpu::Pixmap;
 use vello_cpu::color::PremulRgba8;
 
-use crate::display::DisplayList;
 use crate::layout::Layouts;
+use crate::page::Page;
 use crate::resources::Resources;
 use crate::text::{EmbeddedFontMetrics, TextEngine};
 
@@ -102,7 +103,7 @@ pub fn render_html_at_scale(
 /// `scale` if it is a usable number of device pixels per CSS pixel, else 1.
 /// Beyond 1/64 and 64 the page would be laid out in a viewport of thousands
 /// of CSS pixels per device pixel, or the other way round.
-fn device_scale(scale: f32) -> f32 {
+pub(crate) fn device_scale(scale: f32) -> f32 {
     if (1.0 / 64.0..=64.0).contains(&scale) {
         scale
     } else {
@@ -137,25 +138,7 @@ pub(crate) fn render_document(
     scale: f32,
     resources: &mut Resources,
 ) -> (Frame, Vec<ResourceRequest>) {
-    let scale = device_scale(scale);
-    // The viewport in CSS pixels.
-    let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
-    let doc = Document::parse_html(html);
-    let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics))
-        .with_device_scale(scale)
-        .style(&doc);
-    let requests = resources.requests(&doc, &styles);
-    let mut text = TextEngine::with_fonts(resources.fonts());
-    let layouts = layout::layout(&doc, &styles, resources, &mut text, w, h);
-    let list = DisplayList::build(&doc, &styles, &layouts, resources);
-    let pixmap = paint::paint(&list, width, height, scale);
-    let frame = Frame::new(
-        width,
-        height,
-        pixmap.data_as_u8_slice().to_vec(),
-        list.dump(),
-    );
-    (frame, requests)
+    Page::parse(html).render(width, height, scale, resources)
 }
 
 /// The border box of every element of `html`'s body that generates a box,
@@ -194,6 +177,69 @@ pub fn element_boxes(
         &mut boxes,
     );
     boxes
+}
+
+/// Where each text node of `html`'s body lies, line by line, laid out
+/// like [`render_html_with_resources`] would. For the renderer's own tests,
+/// which compare the text with Chrome's; the inspection queries of M3
+/// replace it.
+pub fn text_boxes(
+    html: &str,
+    width: u16,
+    height: u16,
+    provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
+) -> Vec<TextBox> {
+    let (w, h) = (f32::from(width), f32::from(height));
+    let doc = Document::parse_html(html);
+    let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
+    let mut resources = Resources::default();
+    let requests = resources.requests(&doc, &styles);
+    answer(&mut resources, &requests, provide);
+    let layouts = layout::layout(
+        &doc,
+        &styles,
+        &resources,
+        &mut TextEngine::with_fonts(resources.fonts()),
+        w,
+        h,
+    );
+    let list = display::DisplayList::build(&doc, &styles, &layouts, &resources);
+    // Each counted text node's position in document order, by arena index.
+    let mut order = std::collections::HashMap::new();
+    let mut stack = vec![(doc.root(), false)];
+    while let Some((id, in_body)) = stack.pop() {
+        let node = doc.node(id);
+        let element = node.and_then(|node| node.as_element());
+        if element.is_some_and(|element| {
+            matches!(element.name.local.as_ref(), "script" | "style" | "template")
+        }) {
+            continue;
+        }
+        let in_body =
+            in_body || element.is_some_and(|element| element.name.local == local_name!("body"));
+        if in_body
+            && let Some(text) = node.and_then(|node| node.as_text())
+            && !text.chars().all(char::is_whitespace)
+        {
+            let next = order.len();
+            order.insert(id.index() as usize, next);
+        }
+        let mut children: Vec<_> = doc.children(id).collect();
+        children.reverse();
+        stack.extend(children.into_iter().map(|child| (child, in_body)));
+    }
+    list.text
+        .iter()
+        .filter_map(|fragment| {
+            Some(TextBox {
+                index: *order.get(&fragment.node)?,
+                x: fragment.x,
+                y: fragment.y,
+                width: fragment.width,
+                height: fragment.height,
+            })
+        })
+        .collect()
 }
 
 /// Walk the tree in document order, adding each box's offset to its

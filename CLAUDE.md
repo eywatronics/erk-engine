@@ -207,6 +207,13 @@ zorunda. Bunu `the_tolerance_cannot_hide_a_missing_background` testi denetler:
 her Chrome görüntüsünde 1000 pikselden fazlasını kaplayan renkler düz sayılır
 ve ikisi arasındaki fark toleransın üstünde olmalı.
 
+Piksel skoru metin ağırlıklı bir sayfada glif çizimine takılır ve yerleşim
+hakkında az şey söyler. Yerleşimi iki test ölçer: her blok kutusu
+(`erk_boxes_match_chrome`) ve her metin düğümünün her satırı
+(`erk_text_matches_chrome`, Chrome'un `Range.getClientRects()`'iyle) Chrome'la
+1 CSS pikseli içinde olmalı. Bilinen metin farkları testteki gerekçeli
+listededir; liste iki yönlüdür, kaybolan bir fark da testi kırar.
+
 - **Render'ı etkileyen her önemli değişiklikten sonra çalıştırılır:** stil,
   layout, metin, boyama, UA stil sayfası, render bağımlılıklarının
   yükseltilmesi.

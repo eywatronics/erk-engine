@@ -102,6 +102,85 @@ window.addEventListener('load', () => document.fonts.ready.then(() => {
 </script>
 "#;
 
+/// Added to a copy of each page when capturing Chrome's text: once the
+/// fonts have loaded, it writes where every text node under the body lies,
+/// one line of the node per output line (`Range.getClientRects()`), into a
+/// `<pre>`. Text nodes are numbered in document order, counting only those
+/// that hold more than white space and are not inside `<script>`,
+/// `<style>` or `<template>`: the numbering `erk_renderer::text_boxes`
+/// uses.
+const TEXT_SCRIPT: &str = r#"<script id="erk-text-script">
+window.addEventListener('load', () => document.fonts.ready.then(() => {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => node.parentElement.closest('script, style, template')
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const lines = [];
+  let index = 0;
+  while (walker.nextNode()) {
+    const text = walker.currentNode;
+    if (!/\S/.test(text.data)) continue;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    for (const r of range.getClientRects()) {
+      if (r.width > 0) lines.push([index, r.x, r.y, r.width, r.height].join(' '));
+    }
+    index++;
+  }
+  const pre = document.createElement('pre');
+  pre.id = 'erk-text';
+  pre.textContent = ['viewport ' + innerWidth + ' ' + innerHeight, ...lines].join('\n');
+  document.body.appendChild(pre);
+}));
+</script>
+"#;
+
+/// Largest difference, in CSS pixels, between an edge of a text node's line
+/// in Erk and in Chrome.
+const TEXT_TOLERANCE: f32 = 1.0;
+
+/// Text nodes known to lie elsewhere than in Chrome, each with its reason:
+/// (page, text node, reason). The test fails on any other difference, and
+/// on a listed one that has gone, so the list cannot go stale.
+const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[
+    (
+        "borders",
+        2,
+        "the wrapped inline element's opening edge stays on this line, so the space before it is not at the line's end (M2.6)",
+    ),
+    (
+        "borders",
+        3,
+        "an inline element that wraps leaves its 6px left border on the previous line (M2.6)",
+    ),
+    (
+        "borders",
+        4,
+        "on the line of the wrapped inline element above, so 6px to the left too (M2.6)",
+    ),
+    (
+        "settings",
+        4,
+        "position: relative on an inline element does not move its text (top: -1px; M2.7)",
+    ),
+];
+
+/// A copy of `html` that loads the embedded fonts and runs `script` before
+/// `</body>`. The fonts go inside `<head>`, after the doctype: anything
+/// before `<!DOCTYPE html>` puts Chrome into quirks mode, where the body's
+/// first child loses its top margin and every page shifts.
+fn measuring_page(html: &str, font_face: &str, script: &str) -> String {
+    let at = html
+        .find("<head>")
+        .map(|i| i + "<head>".len())
+        .expect("reference pages have a <head>");
+    let with_fonts = format!("{}{font_face}{}", &html[..at], &html[at..]);
+    let end = with_fonts
+        .rfind("</body>")
+        .expect("reference pages have a </body>");
+    format!("{}{script}{}", &with_fonts[..end], &with_fonts[end..])
+}
+
 /// A colour covering at least this many CSS pixels of a Chrome reference is
 /// a flat colour (a background, a box), not antialiasing: about a 32 × 32
 /// box. No antialiasing shade on the current pages comes close. On a page
@@ -562,7 +641,16 @@ fn capture_chrome_references() {
         .into_iter()
         .filter(|(name, _)| all || !chrome_dir.join(format!("{name}.png")).exists())
         .collect();
-    if todo.is_empty() {
+    // Pages captured before text was measured: only their text is added,
+    // with the Chrome that took their screenshots.
+    let text_todo: Vec<_> = pages()
+        .into_iter()
+        .filter(|(name, _)| {
+            !todo.iter().any(|(n, _)| n == name)
+                && !chrome_dir.join(format!("{name}.text.txt")).exists()
+        })
+        .collect();
+    if todo.is_empty() && text_todo.is_empty() {
         println!("every page has a Chrome reference; set ERK_RECAPTURE_ALL=1 to recapture");
         return;
     }
@@ -593,6 +681,7 @@ fn capture_chrome_references() {
     );
 
     let mut hashes = captured_hashes();
+    let captured_screenshots = !todo.is_empty();
     for (name, path) in todo {
         let html = std::fs::read_to_string(&path).unwrap();
         hashes.retain(|(n, _)| *n != name);
@@ -642,9 +731,26 @@ fn capture_chrome_references() {
             ),
         )
         .unwrap();
-        let geometry = measure_geometry(&chrome, &work, &measured, &name, scale);
+        let geometry = measure_geometry(&chrome, &work, &measured, &name, scale, "erk-geometry");
         std::fs::write(chrome_dir.join(format!("{name}.geometry.txt")), geometry).unwrap();
+        measure_text(&chrome, &work, &chrome_dir, &name, &html, &font_face, scale);
         println!("captured {name}");
+    }
+    for (name, path) in &text_todo {
+        let html = std::fs::read_to_string(path).unwrap();
+        measure_text(
+            &chrome,
+            &work,
+            &chrome_dir,
+            name,
+            &html,
+            &font_face,
+            page_scale(&html),
+        );
+        println!("captured the text of {name}");
+    }
+    if !captured_screenshots {
+        return;
     }
     hashes.sort();
     let listing: String = hashes
@@ -666,7 +772,14 @@ fn capture_chrome_references() {
 /// Chrome's boxes for a page carrying the measuring script, measured in a
 /// viewport of exactly WIDTH x HEIGHT: the window is enlarged by whatever its
 /// frame takes, which depends on the operating system.
-fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str, scale: f32) -> String {
+fn measure_geometry(
+    chrome: &Path,
+    work: &Path,
+    page: &Path,
+    name: &str,
+    scale: f32,
+    marker: &str,
+) -> String {
     let (mut window_width, mut window_height) = (i32::from(WIDTH), i32::from(HEIGHT));
     for _ in 0..2 {
         let output = Command::new(chrome)
@@ -688,8 +801,8 @@ fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str, scale: 
             .expect("Chrome runs");
         assert!(output.status.success(), "Chrome failed measuring {name}");
         let dom = String::from_utf8_lossy(&output.stdout);
-        let open = r#"<pre id="erk-geometry">"#;
-        let start = dom.find(open).expect("the measuring script ran") + open.len();
+        let open = format!(r#"<pre id="{marker}">"#);
+        let start = dom.find(&open).expect("the measuring script ran") + open.len();
         let len = dom[start..].find("</pre>").expect("the <pre> is closed");
         let text = dom[start..start + len].replace("\r\n", "\n");
         let text = text.trim();
@@ -710,6 +823,111 @@ fn measure_geometry(chrome: &Path, work: &Path, page: &Path, name: &str, scale: 
         window_height += i32::from(HEIGHT) - size[1];
     }
     panic!("{name}: could not get a {WIDTH}x{HEIGHT} viewport in Chrome");
+}
+
+/// Write `{name}.text.txt`: where Chrome puts each text node of the page.
+fn measure_text(
+    chrome: &Path,
+    work: &Path,
+    chrome_dir: &Path,
+    name: &str,
+    html: &str,
+    font_face: &str,
+    scale: f32,
+) {
+    let measured = work.join(format!("{name}.text.html"));
+    std::fs::write(&measured, measuring_page(html, font_face, TEXT_SCRIPT)).unwrap();
+    let text = measure_geometry(chrome, work, &measured, name, scale, "erk-text");
+    std::fs::write(chrome_dir.join(format!("{name}.text.txt")), text).unwrap();
+}
+
+/// Where each text node lies, line by line, in Erk and in Chrome. The
+/// pixel score of a text-heavy page is held down by glyph antialiasing and
+/// says little about layout; the box test skips inline content. This test
+/// measures the text itself: every line of every text node, from its first
+/// to its last character, within a pixel of Chrome's.
+#[test]
+fn erk_text_matches_chrome() {
+    let chrome_dir = reference_dir().join("chrome");
+    let mut failures = Vec::new();
+    let mut report = String::from("page            nodes  lines  matched\n");
+    for (name, path) in pages() {
+        let Ok(chrome) = std::fs::read_to_string(chrome_dir.join(format!("{name}.text.txt")))
+        else {
+            failures.push(format!(
+                "{name}: no Chrome text; capture it (see module docs)"
+            ));
+            continue;
+        };
+        let html = std::fs::read_to_string(&path).unwrap();
+        let erk = erk_renderer::text_boxes(&html, WIDTH, HEIGHT, &mut provide);
+        let chrome: Vec<[f32; 5]> = chrome
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let fields: Vec<f32> = line
+                    .split_whitespace()
+                    .map(|v| v.parse().expect("number"))
+                    .collect();
+                [fields[0], fields[1], fields[2], fields[3], fields[4]]
+            })
+            .collect();
+        let nodes = chrome
+            .iter()
+            .map(|line| line[0] as usize)
+            .max()
+            .map_or(0, |n| n + 1);
+        let (mut lines, mut matched) = (0, 0);
+        for node in 0..nodes {
+            let known = KNOWN_TEXT_DIFFERENCES
+                .iter()
+                .any(|(page, n, _)| *page == name && *n == node);
+            let failures_before = failures.len();
+            let theirs: Vec<&[f32; 5]> = chrome.iter().filter(|l| l[0] as usize == node).collect();
+            let ours: Vec<&erk_renderer::TextBox> =
+                erk.iter().filter(|b| b.index == node).collect();
+            lines += theirs.len();
+            if theirs.len() != ours.len() {
+                failures.push(format!(
+                    "{name}: text node {node} has {} line(s) in Chrome, {} in Erk: Chrome {:?}, Erk {:?}",
+                    theirs.len(),
+                    ours.len(),
+                    theirs,
+                    ours.iter().map(|b| (b.x, b.y, b.width, b.height)).collect::<Vec<_>>()
+                ));
+                continue;
+            }
+            for (line, (c, e)) in theirs.iter().zip(&ours).enumerate() {
+                let edges = [
+                    e.x - c[1],
+                    e.y - c[2],
+                    (e.x + e.width) - (c[1] + c[3]),
+                    (e.y + e.height) - (c[2] + c[4]),
+                ];
+                if edges.iter().all(|d| d.abs() <= TEXT_TOLERANCE) {
+                    matched += 1;
+                } else {
+                    failures.push(format!(
+                        "{name}: text node {node}, line {line}: Erk {} {} {}x{}, Chrome {} {} {}x{}",
+                        e.x, e.y, e.width, e.height, c[1], c[2], c[3], c[4]
+                    ));
+                }
+            }
+            match (known, failures.len() > failures_before) {
+                // A known difference: expected, and not a failure.
+                (true, true) => failures.truncate(failures_before),
+                (true, false) => failures.push(format!(
+                    "{name}: text node {node} now matches Chrome; remove it from KNOWN_TEXT_DIFFERENCES"
+                )),
+                _ => {}
+            }
+        }
+        report.push_str(&format!(
+            "{name:<15} {nodes:>5}  {lines:>5}  {matched:>7}\n"
+        ));
+    }
+    println!("\n{report}");
+    assert!(failures.is_empty(), "\n{report}\n{}", failures.join("\n"));
 }
 
 /// Every element's box as Erk lays it out, against Chrome's. Unlike the pixel

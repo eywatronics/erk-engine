@@ -41,6 +41,23 @@ pub(crate) struct DisplayList {
     /// The canvas colour behind everything (CSS 2 §14.2).
     pub(crate) canvas: Rgba,
     pub(crate) items: Vec<DisplayItem>,
+    /// Where each text node's text lies, line by line: not painted, kept
+    /// for the renderer's tests and the inspection queries.
+    pub(crate) text: Vec<TextFragment>,
+}
+
+/// The part of a text node on one line, in CSS pixels relative to the
+/// viewport: from its first to its last placed cluster (white space at the
+/// end of the line left out), as high as its font's box. Chrome reports the
+/// same rectangles for a text node with `Range.getClientRects()`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TextFragment {
+    /// The text node's arena index.
+    pub(crate) node: usize,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
 }
 
 pub(crate) enum DisplayItem {
@@ -132,6 +149,8 @@ struct Walk<'a> {
     resources: &'a Resources,
     /// The element whose background became the canvas colour.
     canvas_source: Option<NodeId>,
+    /// The text fragments met so far.
+    text: std::cell::RefCell<Vec<TextFragment>>,
 }
 
 impl DisplayList {
@@ -144,6 +163,7 @@ impl DisplayList {
         let mut list = Self {
             canvas: WHITE,
             items: Vec::new(),
+            text: Vec::new(),
         };
         let walk = Walk {
             doc,
@@ -151,8 +171,10 @@ impl DisplayList {
             layouts,
             resources,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
+            text: std::cell::RefCell::new(Vec::new()),
         };
         list.items = stacking_context(&walk, doc.root(), (0.0, 0.0));
+        list.text = walk.text.into_inner();
         list
     }
 
@@ -437,28 +459,36 @@ fn add_box(
         }
     }
 
-    if let Some(shaped) = walk.layouts.text(id)
-        && visible
-    {
+    // Hidden text is laid out all the same: its fragments are kept, only
+    // its painting is skipped.
+    if let Some(shaped) = walk.layouts.text(id) {
         let content_x = x + layout.border.left + layout.padding.left;
         let content_y = y + layout.border.top + layout.padding.top;
-        context
-            .inline
-            .extend(inline_content(shaped, (content_x, content_y)));
+        if visible {
+            context
+                .inline
+                .extend(inline_content(shaped, (content_x, content_y)));
+        }
+        walk.text
+            .borrow_mut()
+            .extend(text_fragments(shaped, (content_x, content_y)));
     }
 
     // Anonymous boxes inherit their block's visibility and have no
     // border or padding of their own.
-    if visible {
-        for anonymous in walk.layouts.anonymous(id) {
-            let origin = (
-                x + anonymous.layout.location.x,
-                y + anonymous.layout.location.y,
-            );
+    for anonymous in walk.layouts.anonymous(id) {
+        let origin = (
+            x + anonymous.layout.location.x,
+            y + anonymous.layout.location.y,
+        );
+        if visible {
             context
                 .inline
                 .extend(inline_content(&anonymous.text, origin));
         }
+        walk.text
+            .borrow_mut()
+            .extend(text_fragments(&anonymous.text, origin));
     }
 
     for child in walk.doc.children(id) {
@@ -507,6 +537,50 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
         .collect();
     items.extend(glyph_runs(&shaped.text, &shaped.layout, origin));
     items
+}
+
+/// Where each text node of a shaped paragraph whose content box starts at
+/// `origin` lies, line by line.
+fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> {
+    let mut fragments = Vec::new();
+    for (index, line) in shaped.layout.layout.lines().enumerate() {
+        let shift = shaped.layout.shifts.get(index).copied().unwrap_or(0.0);
+        let (mut clusters, then_a_box) = crate::text::placed_clusters(&line);
+        // White space at the end of a line hangs past it in CSS; before an
+        // inline box (an inline-block, an image) it is not at the end.
+        if !then_a_box {
+            while clusters.last().is_some_and(|cluster| cluster.space) {
+                clusters.pop();
+            }
+        }
+        for (node, range) in &shaped.sources {
+            let mine = clusters
+                .iter()
+                .filter(|cluster| cluster.text.start < range.end && range.start < cluster.text.end);
+            let mut bounds: Option<(f32, f32, f32, f32)> = None;
+            for cluster in mine {
+                bounds = Some(match bounds {
+                    None => (cluster.left, cluster.right, cluster.top, cluster.bottom),
+                    Some((left, right, top, bottom)) => (
+                        left.min(cluster.left),
+                        right.max(cluster.right),
+                        top.min(cluster.top),
+                        bottom.max(cluster.bottom),
+                    ),
+                });
+            }
+            if let Some((left, right, top, bottom)) = bounds {
+                fragments.push(TextFragment {
+                    node: *node,
+                    x: origin.0 + left,
+                    y: origin.1 + shift + top,
+                    width: right - left,
+                    height: bottom - top,
+                });
+            }
+        }
+    }
+    fragments
 }
 
 /// The glyph runs of a shaped paragraph whose content box starts at

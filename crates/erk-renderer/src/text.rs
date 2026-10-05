@@ -221,9 +221,10 @@ impl VerticalAlign {
 
 /// One item of a block's inline content, in tree order.
 pub(crate) enum InlineToken<S> {
-    /// The text of a text node, with the style of its element and the
-    /// language it is written in (for `text-transform`).
-    Text(String, S, LanguageIdentifier),
+    /// The text of a text node, with the style of its element, the
+    /// language it is written in (for `text-transform`) and the text node's
+    /// arena index.
+    Text(String, S, LanguageIdentifier, usize),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
     Open(S),
@@ -346,6 +347,9 @@ pub(crate) struct Paragraph {
     pub(crate) items: Vec<InlineItem>,
     decorations: Vec<Decoration>,
     raised: Vec<Raised>,
+    /// Where each text node's text went: its arena index and its range of
+    /// `text`, in text order.
+    pub(crate) sources: Vec<(usize, Range<usize>)>,
 }
 
 /// An inline element being read, until its `Close`.
@@ -381,6 +385,7 @@ impl Paragraph {
             items: Vec::new(),
             decorations: Vec::new(),
             raised: Vec::new(),
+            sources: Vec::new(),
         };
         let mut open: Vec<OpenElement> = Vec::new();
         // The box an element or atom is aligned in: the innermost open
@@ -397,13 +402,16 @@ impl Paragraph {
         // `text-transform: capitalize`: a word it ends continues in the next
         // text node.
         let mut previous: Option<char> = None;
+        // The text node a pending space was written in: the space is its
+        // text, though it is emitted only before the next content.
+        let mut space_owner: Option<usize> = None;
         // Element ends seen since the last content: whether each came after
         // the pending space (the space is then inside the element).
         let mut closes: Vec<(OpenElement, bool)> = Vec::new();
 
         for token in tokens {
             match token {
-                InlineToken::Text(raw, style, lang) => {
+                InlineToken::Text(raw, style, lang, node) => {
                     // Case mapping never makes or removes white space, so
                     // it can come before the collapsing below.
                     let case = style
@@ -421,24 +429,49 @@ impl Paragraph {
                     for c in raw.chars() {
                         previous = Some(c);
                         if is_document_whitespace(c) {
-                            pending_space |= has_content && !last_was_space;
+                            if has_content && !last_was_space && !pending_space {
+                                pending_space = true;
+                                space_owner = Some(*node);
+                            }
                             continue;
                         }
-                        paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
+                        // A space this node wrote is in its own range: from
+                        // the space on if the node starts with it.
+                        let own_space = pending_space && space_owner == Some(*node);
+                        if own_space {
+                            space_owner = None;
+                            if start.is_none() {
+                                // Element ends add no text: the space is
+                                // the next character.
+                                start = Some(paragraph.text.len());
+                            }
+                        }
+                        paragraph.flush(
+                            &mut closes,
+                            &mut pending_space,
+                            &mut last_was_space,
+                            &mut space_owner,
+                        );
                         start.get_or_insert(paragraph.text.len());
                         paragraph.text.push(c);
                         has_content = true;
                         last_was_space = false;
                     }
-                    if let Some(start) = start
-                        && style != paragraph.base
-                    {
+                    if let Some(start) = start {
                         let end = paragraph.text.len();
-                        paragraph.spans.push((start..end, style));
+                        paragraph.attribute(*node, start..end);
+                        if style != paragraph.base {
+                            paragraph.spans.push((start..end, style));
+                        }
                     }
                 }
                 InlineToken::Open(style) => {
-                    paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
+                    paragraph.flush(
+                        &mut closes,
+                        &mut pending_space,
+                        &mut last_was_space,
+                        &mut space_owner,
+                    );
                     let style = style.as_ref();
                     let text_style = TextStyle::of(style);
                     let parent = parent_of(&open, &paragraph.base);
@@ -475,7 +508,12 @@ impl Paragraph {
                     }
                 }
                 InlineToken::Atom(index, style) => {
-                    paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
+                    paragraph.flush(
+                        &mut closes,
+                        &mut pending_space,
+                        &mut last_was_space,
+                        &mut space_owner,
+                    );
                     let parent = parent_of(&open, &paragraph.base);
                     let line_height = TextStyle::of(style.as_ref()).line_height_px();
                     let align = VerticalAlign::of(style.as_ref(), line_height, &parent);
@@ -491,7 +529,12 @@ impl Paragraph {
             closes.push((element, false));
         }
         pending_space = false;
-        paragraph.flush(&mut closes, &mut pending_space, &mut last_was_space);
+        paragraph.flush(
+            &mut closes,
+            &mut pending_space,
+            &mut last_was_space,
+            &mut space_owner,
+        );
         paragraph
     }
 
@@ -503,6 +546,7 @@ impl Paragraph {
         closes: &mut Vec<(OpenElement, bool)>,
         pending_space: &mut bool,
         last_was_space: &mut bool,
+        space_owner: &mut Option<usize>,
     ) {
         let (after, before): (Vec<_>, Vec<_>) =
             closes.drain(..).partition(|(_, after_space)| *after_space);
@@ -510,11 +554,28 @@ impl Paragraph {
             self.close(element);
         }
         if std::mem::take(pending_space) {
+            let at = self.text.len();
             self.text.push(' ');
             *last_was_space = true;
+            if let Some(node) = space_owner.take() {
+                self.attribute(node, at..at + 1);
+            }
         }
         for (element, _) in after {
             self.close(element);
+        }
+    }
+
+    /// Text node `node`'s text went to `range`: added to its last range when
+    /// the two meet (a collapsed space and the characters around it).
+    fn attribute(&mut self, node: usize, range: Range<usize>) {
+        if let Some((last, so_far)) = self.sources.last_mut()
+            && *last == node
+            && so_far.end == range.start
+        {
+            so_far.end = range.end;
+        } else {
+            self.sources.push((node, range));
         }
     }
 
@@ -903,6 +964,70 @@ pub(crate) fn glyph_run_ranges(line: &parley::Line<'_, TextBrush>) -> Vec<Range<
         ranges.push(range.unwrap_or(start..start));
     }
     ranges
+}
+
+/// One cluster of a line as it was placed: its range of the paragraph's
+/// text, its left and right edges and the top and bottom of its font's box
+/// (ascent and descent around its baseline, raised by `vertical-align`), in
+/// the layout's coordinates; and whether it is white space.
+pub(crate) struct PlacedCluster {
+    pub(crate) text: Range<usize>,
+    pub(crate) left: f32,
+    pub(crate) right: f32,
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+    pub(crate) space: bool,
+}
+
+/// The clusters of `line` in visual order, each where its glyph run put it,
+/// and whether an inline box that takes room follows the last of them. A
+/// glyph run takes its clusters from its run the way [`glyph_run_ranges`]
+/// counts them.
+pub(crate) fn placed_clusters(line: &parley::Line<'_, TextBrush>) -> (Vec<PlacedCluster>, bool) {
+    let mut placed = Vec::new();
+    let mut cursor: Option<(usize, usize)> = None;
+    let mut then_a_box = false;
+    for item in line.items() {
+        let glyph_run = match item {
+            PositionedLayoutItem::GlyphRun(glyph_run) => {
+                then_a_box = false;
+                glyph_run
+            }
+            PositionedLayoutItem::InlineBox(inline_box) => {
+                then_a_box |= inline_box.width > 0.0;
+                continue;
+            }
+        };
+        let run = glyph_run.run();
+        let skip = match cursor {
+            Some((index, used)) if index == run.index() => used,
+            _ => 0,
+        };
+        let wanted = glyph_run.glyphs().count();
+        let metrics = run.metrics();
+        let baseline = glyph_run.baseline() - glyph_run.style().brush.raise;
+        let (mut glyphs, mut taken) = (0, 0);
+        let mut x = glyph_run.offset();
+        for cluster in run.visual_clusters().skip(skip) {
+            if glyphs >= wanted {
+                break;
+            }
+            glyphs += cluster.glyphs().count();
+            taken += 1;
+            let advance = cluster.advance();
+            placed.push(PlacedCluster {
+                text: cluster.text_range(),
+                left: x,
+                right: x + advance,
+                top: baseline - metrics.ascent,
+                bottom: baseline + metrics.descent,
+                space: cluster.is_space_or_nbsp(),
+            });
+            x += advance;
+        }
+        cursor = Some((run.index(), skip + taken));
+    }
+    (placed, then_a_box)
 }
 
 /// The block's `text-align` as Parley's alignment. The legacy `-moz-` values
@@ -1386,6 +1511,7 @@ mod tests {
             items: Vec::new(),
             decorations: Vec::new(),
             raised: Vec::new(),
+            sources: Vec::new(),
         }
     }
 

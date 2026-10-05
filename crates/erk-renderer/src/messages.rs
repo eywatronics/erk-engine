@@ -153,6 +153,22 @@ impl Frame {
     }
 }
 
+/// Where a text node's text lies on one line, in CSS pixels relative to
+/// the viewport, from its first to its last character on that line and as
+/// high as its font's box: what Chrome's `Range.getClientRects()` reports
+/// for the node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextBox {
+    /// Position among the text nodes under the body that hold more than
+    /// white space, in document order; those inside `<script>`, `<style>`
+    /// and `<template>` are not counted.
+    pub index: usize,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// The border box of one element, in CSS pixels relative to the viewport.
 /// A forerunner of the inspection queries of M3 (p1-contract §8.1).
 #[derive(Clone, Debug, PartialEq)]
