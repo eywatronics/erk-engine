@@ -61,7 +61,7 @@ crates/erk-renderer/src/events.rs       tıklama ve odak olayları, yayılma yol
 crates/erk-renderer/src/scroll.rs       kaydırma kapları ve kırpma (M2.3)
 crates/erk-renderer/tests/input.rs      girdi protokolü testleri (M2.1–M2.3)
 crates/erk-renderer/tests/counter.rs    sayaç demosunun otomatik testi (M2.4)
-crates/erk-shell/src/gpu.rs             vello_hybrid yolu, CPU'ya düşme (M2.5)
+crates/erk-shell/src/gpu.rs             vello_hybrid yolu, CPU'ya düşme, render hedefi (M2.5)
 examples/counter.html                   sayaç demosunun sayfası (M2.4)
 examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfası (M2.0)
 ```
@@ -142,17 +142,55 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
   çizilir. Otomatik test: tıklama gönderilir, sayının değiştiği kare altın
   görüntüyle doğrulanır (kabulün maddesi).
 
-### M2.5: GPU yolu
+### M2.5: GPU yolu ve host'a çizim
 
 - [ ] `vello_hybrid` (wgpu) ile pencere yüzeyine çizim; yüzey ya da adaptör
   yoksa `vello_cpu`'ya düşme (test: GPU kapalıyken kare yine geliyor).
   Bağımlılık ağacı büyük: indirme izni ve lisans kapısı bu adımda.
+- [ ] **Host'a çizim:** render hedefi bir soyutlama olur; ya kabuğun kendi
+  penceresi ya da host'un verdiği bir pencere (raw-window-handle,
+  p1-contract §7'deki host'un döngüsü). M3'ün API'si bunun üstüne kurulur.
+  Host'un Erk belgesinin içine kendi GPU çizimini yapması (surface) ayrı:
+  M10.
 - [ ] GPU ve CPU kare sürelerinin ölçümü; altın görüntüler ve Chrome
   referansı CPU'da kalır.
 - [ ] p1-contract §8.2'nin açık sorusu (surface: host callback'i mi doku mu)
   bu adımın ölçümünden sonra yazılır.
 
-### M2.6: macOS CI ve kabul
+### M2.6: Metin düzenini sağlamlaştırma
+
+M1 sonunda metin ağırlıklı sayfaların piksel skoru düşük (paragraphs %48,27,
+inline-styles %48,60, vertical-align %68,11, inline-boxes %75,10) ve
+`css/css-text` %40,8. `paragraphs` ve `inline-styles`'ta elle bakılınca
+satırlar ve kelime kenarları Chrome'la 1 px içinde çıktı; ama metin ağırlıklı
+arayüzlerde görünür sorunlar kalmış olabilir. Bu adım farkları tek tek
+inceler, gerçek olanları düzeltir.
+
+- [ ] `inline-boxes`, `paragraphs`, `vertical-align` ve `inline-styles`
+  sayfalarında M2.0'ın metin geometrisi testinin bulduğu her fark: glif
+  çizimi mi (kabul, gerekçesiyle) yerleşim mi (düzeltilir).
+- [ ] **Satır içi kutu parçalanması** (M1.6'nın bilinen sınırı, kullanıcının
+  da gördüğü): satır sonuna sığmayıp alt satıra inen bir satır içi eleman
+  açılış dolgusunu ya da kenarlığını ve önündeki boşluğu önceki satırda
+  bırakıyor; arka planı orada ince bir dikey çizgi olarak görünüyor. Chrome
+  satır sonundaki boşluğu kırpar ve elemanın açılış kenarını metniyle aynı
+  satıra koyar. Test: arka planlı bir `<span>` satır sonunda kırılınca önceki
+  satırda span'ın hiçbir pikseli kalmıyor.
+- [ ] `white-space`: `css-text/white-space` 45/422 geçiyor. `nowrap`, `pre`,
+  `pre-wrap`, `pre-line` alt kümesinin bu adımda mı geleceği, testlerin
+  sınıflamasıyla kararlaştırılır ve gerekçesiyle yazılır.
+- [ ] Düzeltmelerin skoru ve WPT sonuçları commit gövdesinde.
+
+### M2.7: CSS Position analizi
+
+- [ ] `css/css-position` 48/251 geçiyor. Düşen 203 testin her biri
+  sınıflanır: desteklenmeyen ya da planlanmayan bir özellik (sticky, tablo,
+  yazı yönü, betik) mi, yoksa Erk'in desteklediği bir özellikte gerçek bir
+  hata mı. Sınıflama test adı başına bu planın yürütme notlarına yazılır.
+- [ ] Desteklenen özelliklerdeki hatalardan ucuz olanlar düzeltilir, kalanlar
+  gerekçesiyle açık kalır.
+
+### M2.8: macOS CI ve kabul
 
 - [ ] CI'a macOS job'ı (derleme ve testler; fontique CoreText yolu).
 - [ ] Kabul maddelerinin hepsi otomatik testle; tam yeniden hesaplamanın kare
@@ -166,6 +204,9 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
   değiştiği kareyi altın görüntüyle doğruluyor.
 - [ ] GPU yolu yoksa CPU'ya düşüyor (test).
 - [ ] Tam yeniden hesaplamanın kare süresi kaydedilmiş, M5'in tabanı olarak.
+- [ ] Metin geometrisi testi her referans sayfasında yeşil; satır içi kutu
+  parçalanması düzeltilmiş (test).
+- [ ] `css/css-position`'da düşen her test sınıflanmış.
 - [ ] macOS CI yeşil.
 - [ ] `roadmap.md`'de M2 "Bitti".
 

@@ -226,8 +226,10 @@ M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-intera
 | M2.2 | `:hover`, `:active`, `:focus`; odak ve klavyeyle gezinme | Yeni |
 | M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Yeni |
 | M2.4 | `SetText` ve `Query` (ilk `Mutation`), sayaç demosu ve altın görüntülü testi | Yeni |
-| M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm | Yeni |
-| M2.6 | macOS CI, kabul | Yeni |
+| M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm; host'a çizim için render hedefi (host'un penceresi) | Yeni |
+| M2.6 | Metin düzenini sağlamlaştırma: inline-boxes, paragraphs, vertical-align farkları, satır içi kutu parçalanması, `white-space` kararı | Yeni |
+| M2.7 | `css/css-position` analizi: düşen her test sınıflanır, desteklenen özelliklerdeki hatalar düzeltilir | Yeni |
+| M2.8 | macOS CI, kabul | Yeni |
 
 **Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
 (hover, kaydırma) tam yeniden stil, layout ve boyama ister. M2'nin kare süresi
@@ -270,6 +272,13 @@ döndürüyor (test). Her muhafız kasıtlı bir ihlalle denenmiş.
 - Olay dağıtımı: DOM'un capture/bubble alt kümesi; tıklama, girdi, değişiklik,
   gönderim, klavye, odak
 - `querySelector` ve `querySelectorAll` (selectors crate'i)
+- **Tasarımcının ilk aradıkları** (2026-10-05 kararı, "Later"dan öne
+  alındı): `linear-gradient` ve `radial-gradient` (vello'nun gradyan
+  fırçaları; display list'te gradyan öğesi, Chrome referans sayfasıyla) ve 2D
+  `transform` (`translate`, `scale`, `rotate`; boyama dönüşümü, hit-test
+  tersine dönüşümle). Gerekçe: modern düğme ve kartlar düz renk yerine hafif
+  gradyan kullanıyor; `:active`'te `scale(0.98)`, `:hover`'da birkaç piksel
+  kayma en temel "dokunma hissi"
 - `Mutation` dizileri fuzz'lanır (eski `NodeId`'ler dahil)
 - M2'nin sayaç demosu genel API'ye taşınır; TodoMVC eleman oluşturmayı,
   silmeyi ve listeyi uçtan uca sınar
@@ -312,6 +321,12 @@ bağımlı; düğüme bağlı veri yan tablolarda.
   sayfasıyla
 - Canlı CSS düzenleme için temel: bir düğümün satır içi stilini ya da bir
   kuralı değiştirip artımlı yeniden stille görmek
+- **Temel geçişler** (2026-10-05 kararı, M9'dan öne alındı): `transition`
+  ile `color`, `background-color`, `opacity` ve `transform` için doğrusal
+  enterpolasyon (lerp) ve standart zamanlama eğrileri; zaman host'un
+  `now_ns`'inden (p1-contract §7). Rengin "çat" diye değil 150 ms'de
+  yumuşakça değişmesi uygulamanın kalitesini belirliyor; tam animasyon
+  motoru (`@keyframes`, kompozitörde koşan animasyonlar) M9'da kalır
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
 hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. p2-incremental §4'ün
@@ -409,15 +424,20 @@ kapsam dışı, p1-embedded §4); ikili boyutu, bellek ve açılış süresi ayn
 
 ## M9 — Kompozitör ve performans
 
-- CSS animasyonları ve geçişleri (zaman host'un `now_ns`'inden)
+- CSS animasyonları (`@keyframes`) ve kompozitörde koşan geçişler (zaman
+  host'un `now_ns`'inden); temel geçişler M5'te
+- **`backdrop-filter: blur`** (buzlu cam; 2026-10-05 kararı, "Not planned"dan
+  alındı): kenar çubuğu ve diyalog arkalarında çok yaygın. Arkadaki içeriği
+  bulanıklaştırmak bir kompozitör katmanı istiyor; bu yüzden burada, katman
+  ağacıyla birlikte
 - Kaydırma katmanı başına tile cache, kompozitör iş parçacığında kaydırma
 - Ölçüm kapısı: bağımsız alt ağaçların layout'u ve erişilebilirlik eşitlemesi
   için bir iş grafiği (p2-incremental §3.9), ancak M5'in ölçümleri tek iş
   parçacıklı yolun kare bütçesini aştığını gösterirse
 
-**Açık soru (M5 sonrası):** geçişler masaüstü arayüzünde temel bir beklenti
-(hover'da renk geçişi). M5'in artımlı render ölçümü kare bütçesinin yettiğini
-gösterirse renk ve opaklık geçişleri M9'dan öne alınır.
+**Karar (2026-10-05):** temel geçişler (renk, opaklık, `transform`) M5'e
+alındı; M9'da `@keyframes` animasyonları ve kompozitör iş parçacığında koşan
+geçişler kalır.
 
 **Kabul:** Adlandırılmış bir sayfa kümesinde, adlandırılmış bir donanımda p95
 kare süresi hedefleri (sayılar bu taşın planında) tutuyor.

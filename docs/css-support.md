@@ -68,6 +68,7 @@ does not lay out or paint is not supported.
 | Feature | Status | Test / notes |
 |---|---|---|
 | `color`, `font-size`, `font-weight` (regular and bold) | Supported | `bold_uses_the_bold_face`, `headings_are_larger_than_paragraphs` |
+| `white-space: nowrap`, `pre`, `pre-wrap`, `pre-line`, `break-spaces` | M2 | Whitespace always collapses today; `css-text/white-space` passes 45 of 422. Which values come in M2.6 is decided from the tests |
 | Line breaking, whitespace collapsing, `line-height: normal`; every line at least the block's strut | Supported | `narrow_width_breaks_into_more_lines`, `whitespace_collapses_and_trims`, `a_paragraph_is_one_line_high`, `smaller_text_at_the_end_of_a_line_does_not_shorten_it` |
 | Turkish and other Latin text | Supported | `turkish_letters_all_have_glyphs` |
 | `text-align` (`start`, `end`, `left`, `right`, `center`, `justify`), `align` attribute | Supported | `text_align_moves_the_line_within_the_box`, `justified_lines_fill_the_box_except_the_last`, `the_align_attribute_aligns_text` |
@@ -95,16 +96,18 @@ does not lay out or paint is not supported.
 | `background-image: url()` with `background-size` (`cover`, `contain`, lengths, `auto`), `background-position`, `background-repeat`; several layers; clipped to the border box and its radii | Supported | `a_background_image_repeats_from_the_padding_box`, `background_position_and_no_repeat_place_one_copy`, `background_size_cover_fills_the_box`. The space and round keywords tile like repeat |
 | `background-origin`, `background-clip`, `background-attachment`, `object-fit`, `object-position` | Later | Origin is the padding box, clip the border box |
 | GIF, WebP, SVG images, `data:` URLs | Later | |
-| Gradients | Later | |
+| Gradients (`linear-gradient`, `radial-gradient`) | M4 | Brought forward from Later: modern buttons and cards use subtle gradients |
 
 ## Effects and animation
 
 | Feature | Status | Test / notes |
 |---|---|---|
 | `opacity` | Supported | `opacity_composites_an_element_as_one_group`. The element paints as one group, ordered like a positioned element with z-index 0 |
-| `transform` (2D) | Later | |
-| Transitions and animations | M9 | Driven by the host's clock |
-| `filter`, `backdrop-filter`, `mix-blend-mode` | Not planned | Costly compositing effects; revisit only with the compositor (M9) |
+| `transform` (2D: `translate`, `scale`, `rotate`) | M4 | Brought forward from Later: the press and hover feedback of modern UI; hit-testing follows the transform |
+| Transitions of `color`, `background-color`, `opacity`, `transform` | M5 | Brought forward from M9: linear interpolation with the standard timing functions, driven by the host's clock |
+| `@keyframes` animations, transitions run on the compositor | M9 | Driven by the host's clock |
+| `backdrop-filter: blur` (frosted glass) | M9 | Common behind sidebars and dialogs; blurring what lies behind needs the compositor's layers |
+| `filter`, other `backdrop-filter` functions, `mix-blend-mode` | Not planned | Costly compositing effects; revisit only with the compositor (M9) |
 | `shape-outside`, `clip-path` | Not planned | |
 
 ## Forms
