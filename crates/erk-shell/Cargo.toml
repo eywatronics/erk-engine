@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 # The only engine crate the shell may depend on directly; it must not reach
 # the DOM (checked in CI). The renderer is talked to through messages.
-erk-renderer = { path = "../erk-renderer" }
+erk-renderer = { path = "../erk-renderer", features = ["gpu"] }
 softbuffer = "=0.4.8"
 winit = "=0.30.13"
 # The system's fonts, scanned by the host (p1-contract §6.2): DirectWrite,

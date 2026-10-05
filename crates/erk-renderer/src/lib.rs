@@ -12,6 +12,8 @@ mod case;
 mod color;
 mod display;
 mod fonts;
+#[cfg(feature = "gpu")]
+mod gpu;
 mod layout;
 mod messages;
 mod page;
@@ -21,12 +23,16 @@ mod scroll;
 mod text;
 mod thread;
 
+#[cfg(feature = "gpu")]
+pub use gpu::Window;
 pub use messages::{
     Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key,
-    KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, ResourceKind,
+    KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, Raster, ResourceKind,
     ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer,
 };
 pub use thread::spawn;
+#[cfg(feature = "gpu")]
+pub use thread::spawn_on_window;
 
 use std::sync::Arc;
 
@@ -128,6 +134,43 @@ fn answer(
             None => resources.missing(request.id),
         }
     }
+}
+
+/// For the measurements (examples/measure.rs) only: lay out `html` once
+/// at `width` × `height` and paint its display list `runs` times, with
+/// vello_hybrid offscreen when `gpu`, else with vello_cpu, calling
+/// `frame_done` after each frame is finished (on the GPU, finished there).
+/// The core reads no clock; the caller times the calls. Returns what
+/// painted: the GPU adapter, or "vello_cpu".
+#[doc(hidden)]
+pub fn paint_repeatedly(
+    html: &str,
+    width: u16,
+    height: u16,
+    runs: usize,
+    gpu: bool,
+    frame_done: &mut dyn FnMut(),
+) -> Result<String, String> {
+    let mut page = Page::parse(html);
+    let (list, _) = page.prepare(width, height, 1.0, &mut Resources::default());
+    if gpu {
+        #[cfg(feature = "gpu")]
+        {
+            let mut gpu = gpu::Gpu::offscreen(wgpu::Backends::all())?;
+            for _ in 0..runs {
+                gpu.render(&list, width, height, 1.0)?;
+                frame_done();
+            }
+            return Ok(gpu.adapter.clone());
+        }
+        #[cfg(not(feature = "gpu"))]
+        return Err("built without the gpu feature".to_owned());
+    }
+    for _ in 0..runs {
+        std::hint::black_box(paint::paint(&list, width, height, 1.0));
+        frame_done();
+    }
+    Ok("vello_cpu".to_owned())
 }
 
 /// Parse, style, lay out and paint `html` with the resources that have

@@ -1,14 +1,114 @@
-//! Painting a display list with vello_cpu.
+//! Painting a display list: with vello_cpu into a pixmap (the reference,
+//! the source of golden images), or with vello_hybrid on the GPU (gpu.rs).
+//! Both take the same calls; [`Canvas`] is the part of them a display list
+//! needs.
+
+use std::sync::Arc;
 
 use vello_cpu::kurbo::{Affine, BezPath, Point, Rect};
-use vello_cpu::peniko::{Color, Extend, Fill, ImageQuality, ImageSampler};
+use vello_cpu::peniko::{Color, Extend, Fill};
 use vello_cpu::{
     Glyph, Image as VelloImage, ImageSource, Level, Pixmap, RenderContext, RenderSettings,
     Resources,
 };
 
 use crate::color::Rgba;
-use crate::display::{DisplayItem, DisplayList, Frame, Radii};
+use crate::display::{DisplayItem, DisplayList, Frame, GlyphRun, Radii};
+
+/// What painting a display list asks of a rasterizer.
+pub(crate) trait Canvas {
+    fn set_transform(&mut self, transform: Affine);
+    fn set_color(&mut self, color: Rgba);
+    /// Paint with `image`, repeated along an axis where `repeat` says so.
+    fn set_image(&mut self, image: &Arc<Pixmap>, repeat: (bool, bool));
+    fn set_paint_transform(&mut self, transform: Affine);
+    fn reset_paint_transform(&mut self);
+    fn set_fill_rule(&mut self, rule: Fill);
+    fn fill_rect(&mut self, rect: &Rect);
+    fn fill_path(&mut self, path: &BezPath);
+    fn fill_blurred_rounded_rect(&mut self, rect: &Rect, radius: f32, std_dev: f32);
+    fn push_clip_layer(&mut self, path: &BezPath);
+    fn push_opacity_layer(&mut self, opacity: f32);
+    fn pop_layer(&mut self);
+    fn glyphs(&mut self, run: &GlyphRun);
+}
+
+/// The image paint both rasterizers take, around a source each makes.
+pub(crate) fn image_paint(source: ImageSource, repeat: (bool, bool)) -> VelloImage {
+    use vello_cpu::peniko::{ImageQuality, ImageSampler};
+    let extend = |repeat: bool| if repeat { Extend::Repeat } else { Extend::Pad };
+    VelloImage {
+        image: source,
+        sampler: ImageSampler {
+            x_extend: extend(repeat.0),
+            y_extend: extend(repeat.1),
+            quality: ImageQuality::Medium,
+            alpha: 1.0,
+        },
+    }
+}
+
+pub(crate) fn glyphs(run: &GlyphRun) -> impl Iterator<Item = Glyph> + Clone + '_ {
+    run.glyphs.iter().map(|glyph| Glyph {
+        id: glyph.id,
+        x: glyph.x,
+        y: glyph.y,
+    })
+}
+
+/// vello_cpu, with the resources its glyph runs cache.
+struct Cpu {
+    ctx: RenderContext,
+    resources: Resources,
+}
+
+impl Canvas for Cpu {
+    fn set_transform(&mut self, transform: Affine) {
+        self.ctx.set_transform(transform);
+    }
+    fn set_color(&mut self, rgba: Rgba) {
+        self.ctx.set_paint(color(rgba));
+    }
+    fn set_image(&mut self, image: &Arc<Pixmap>, repeat: (bool, bool)) {
+        self.ctx
+            .set_paint(image_paint(ImageSource::Pixmap(image.clone()), repeat));
+    }
+    fn set_paint_transform(&mut self, transform: Affine) {
+        self.ctx.set_paint_transform(transform);
+    }
+    fn reset_paint_transform(&mut self) {
+        self.ctx.reset_paint_transform();
+    }
+    fn set_fill_rule(&mut self, rule: Fill) {
+        self.ctx.set_fill_rule(rule);
+    }
+    fn fill_rect(&mut self, rect: &Rect) {
+        self.ctx.fill_rect(rect);
+    }
+    fn fill_path(&mut self, path: &BezPath) {
+        self.ctx.fill_path(path);
+    }
+    fn fill_blurred_rounded_rect(&mut self, rect: &Rect, radius: f32, std_dev: f32) {
+        self.ctx
+            .fill_blurred_rounded_rect(rect, radius, std_dev, false);
+    }
+    fn push_clip_layer(&mut self, path: &BezPath) {
+        self.ctx.push_clip_layer(path);
+    }
+    fn push_opacity_layer(&mut self, opacity: f32) {
+        self.ctx.push_opacity_layer(opacity);
+    }
+    fn pop_layer(&mut self) {
+        self.ctx.pop_layer();
+    }
+    fn glyphs(&mut self, run: &GlyphRun) {
+        self.ctx
+            .glyph_run(&mut self.resources, &run.font)
+            .font_size(run.size)
+            .hint(true)
+            .fill_glyphs(glyphs(run));
+    }
+}
 
 /// Paint `list` into a new `width` × `height` pixmap.
 ///
@@ -24,9 +124,24 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
         level: Level::fallback(),
         num_threads: 0,
     };
-    let mut ctx = RenderContext::new_with(width, height, settings);
-    let mut resources = Resources::new();
+    let mut cpu = Cpu {
+        ctx: RenderContext::new_with(width, height, settings),
+        resources: Resources::new(),
+    };
+    paint_list(&mut cpu, list, width, height, scale);
+    let mut pixmap = Pixmap::new(width, height);
+    cpu.ctx.render(&mut pixmap, &mut cpu.resources);
+    pixmap
+}
 
+/// Paint `list` onto `ctx`, a `width` × `height` target of device pixels.
+pub(crate) fn paint_list(
+    ctx: &mut impl Canvas,
+    list: &DisplayList,
+    width: u16,
+    height: u16,
+    scale: f32,
+) {
     // The canvas colour is laid over white, as browsers do: a translucent
     // root background must not make the frame itself translucent.
     let scale = f64::from(scale);
@@ -38,9 +153,9 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
         f64::from(width) / scale,
         f64::from(height) / scale,
     );
-    ctx.set_paint(color([255, 255, 255, 255]));
+    ctx.set_color([255, 255, 255, 255]);
     ctx.fill_rect(&page);
-    ctx.set_paint(color(list.canvas));
+    ctx.set_color(list.canvas);
     ctx.fill_rect(&page);
 
     for item in &list.items {
@@ -52,7 +167,7 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
                 height,
                 color: fill,
             } => {
-                ctx.set_paint(color(*fill));
+                ctx.set_color(*fill);
                 let (x, y) = (f64::from(*x), f64::from(*y));
                 ctx.fill_rect(&Rect::new(
                     x,
@@ -66,7 +181,7 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
                 radii,
                 color: fill,
             } => {
-                ctx.set_paint(color(*fill));
+                ctx.set_color(*fill);
                 ctx.fill_path(&rounded_rect(*frame, radii));
             }
             DisplayItem::Border {
@@ -74,7 +189,7 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
                 widths,
                 colors,
                 radii,
-            } => border(&mut ctx, *frame, *widths, *colors, radii),
+            } => border(ctx, *frame, *widths, *colors, radii),
             DisplayItem::Shadow {
                 frame,
                 radius,
@@ -90,8 +205,8 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
                 ctx.set_fill_rule(Fill::EvenOdd);
                 ctx.push_clip_layer(&outside);
                 ctx.set_fill_rule(Fill::NonZero);
-                ctx.set_paint(color(*fill));
-                ctx.fill_blurred_rounded_rect(&rect(*frame), *radius, blur_parameter(*blur), false);
+                ctx.set_color(*fill);
+                ctx.fill_blurred_rounded_rect(&rect(*frame), *radius, blur_parameter(*blur));
                 ctx.pop_layer();
             }
             DisplayItem::Image {
@@ -106,16 +221,7 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
                 if rounded {
                     ctx.push_clip_layer(&rounded_rect(*clip, clip_radii));
                 }
-                let extend = |repeat: bool| if repeat { Extend::Repeat } else { Extend::Pad };
-                ctx.set_paint(VelloImage {
-                    image: ImageSource::Pixmap(image.clone()),
-                    sampler: ImageSampler {
-                        x_extend: extend(repeat.0),
-                        y_extend: extend(repeat.1),
-                        quality: ImageQuality::Medium,
-                        alpha: 1.0,
-                    },
-                });
+                ctx.set_image(image, *repeat);
                 // One copy of the image maps onto the tile.
                 ctx.set_paint_transform(
                     Affine::translate((f64::from(tile.x), f64::from(tile.y)))
@@ -142,38 +248,21 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
             }
             DisplayItem::Hit { .. } => {}
             DisplayItem::Highlight(frame) => {
-                ctx.set_paint(color(crate::display::HIGHLIGHT));
+                ctx.set_color(crate::display::HIGHLIGHT);
                 ctx.fill_rect(&rect(*frame));
             }
             DisplayItem::Glyphs(run) => {
-                ctx.set_paint(color(run.color));
-                ctx.glyph_run(&mut resources, &run.font)
-                    .font_size(run.size)
-                    .hint(true)
-                    .fill_glyphs(run.glyphs.iter().map(|glyph| Glyph {
-                        id: glyph.id,
-                        x: glyph.x,
-                        y: glyph.y,
-                    }));
+                ctx.set_color(run.color);
+                ctx.glyphs(run);
             }
         }
     }
-
-    let mut pixmap = Pixmap::new(width, height);
-    ctx.render(&mut pixmap, &mut resources);
-    pixmap
 }
 
 /// A solid border: the ring between the border box and the padding box.
 /// One colour fills the ring; several colours each fill their side's
 /// trapezoid, from the outer to the inner corner, inside the ring.
-fn border(
-    ctx: &mut RenderContext,
-    frame: Frame,
-    widths: [f32; 4],
-    colors: [Rgba; 4],
-    radii: &Radii,
-) {
+fn border(ctx: &mut impl Canvas, frame: Frame, widths: [f32; 4], colors: [Rgba; 4], radii: &Radii) {
     let [top, right, bottom, left] = widths;
     let inner = Frame {
         x: frame.x + left,
@@ -198,7 +287,7 @@ fn border(
     let single = shown.iter().all(|side| colors[*side] == colors[shown[0]]);
     ctx.set_fill_rule(Fill::EvenOdd);
     if single && shown.len() == 4 {
-        ctx.set_paint(color(colors[shown[0]]));
+        ctx.set_color(colors[shown[0]]);
         ctx.fill_path(&ring);
         ctx.set_fill_rule(Fill::NonZero);
         return;
@@ -223,7 +312,7 @@ fn border(
         path.line_to(c);
         path.line_to(d);
         path.close_path();
-        ctx.set_paint(color(colors[side]));
+        ctx.set_color(colors[side]);
         ctx.fill_path(&path);
     }
     ctx.pop_layer();
@@ -297,6 +386,6 @@ fn rect(frame: Frame) -> Rect {
     )
 }
 
-fn color([r, g, b, a]: Rgba) -> Color {
+pub(crate) fn color([r, g, b, a]: Rgba) -> Color {
     Color::from_rgba8(r, g, b, a)
 }

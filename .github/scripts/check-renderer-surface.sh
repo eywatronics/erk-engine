@@ -25,12 +25,15 @@ forbid() {
 #    here is a design change: update this list in the same pull request.
 #    Each public item is read whole, however rustfmt wraps it: a type added
 #    to a multi-line `pub use` list must show up here too.
-expected='pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer, };
+expected='pub use gpu::Window;
+pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer, };
 pub use thread::spawn;
+pub use thread::spawn_on_window;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
 pub fn render_html_with_resources( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
 pub fn render_html_at_scale( html: &str, width: u16, height: u16, scale: f32, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
+pub fn paint_repeatedly( html: &str, width: u16, height: u16, runs: usize, gpu: bool, frame_done: &mut dyn FnMut(), ) -> Result<String, String> {
 pub fn element_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<ElementBox> {
 pub fn text_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<TextBox> {'
 actual=$(awk '

@@ -143,17 +143,17 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.5: GPU yolu ve host'a çizim
 
-- [ ] `vello_hybrid` (wgpu) ile pencere yüzeyine çizim; yüzey ya da adaptör
+- [x] `vello_hybrid` (wgpu) ile pencere yüzeyine çizim; yüzey ya da adaptör
   yoksa `vello_cpu`'ya düşme (test: GPU kapalıyken kare yine geliyor).
   Bağımlılık ağacı büyük: indirme izni ve lisans kapısı bu adımda.
-- [ ] **Host'a çizim:** render hedefi bir soyutlama olur; ya kabuğun kendi
+- [x] **Host'a çizim:** render hedefi bir soyutlama olur; ya kabuğun kendi
   penceresi ya da host'un verdiği bir pencere (raw-window-handle,
   p1-contract §7'deki host'un döngüsü). M3'ün API'si bunun üstüne kurulur.
   Host'un Erk belgesinin içine kendi GPU çizimini yapması (surface) ayrı:
   M10.
-- [ ] GPU ve CPU kare sürelerinin ölçümü; altın görüntüler ve Chrome
+- [x] GPU ve CPU kare sürelerinin ölçümü; altın görüntüler ve Chrome
   referansı CPU'da kalır.
-- [ ] p1-contract §8.2'nin açık sorusu (surface: host callback'i mi doku mu)
+- [x] p1-contract §8.2'nin açık sorusu (surface: host callback'i mi doku mu)
   bu adımın ölçümünden sonra yazılır.
 
 ### M2.6: Metin düzenini sağlamlaştırma
@@ -192,6 +192,8 @@ inceler, gerçek olanları düzeltir.
   hata mı. Sınıflama test adı başına bu planın yürütme notlarına yazılır.
 - [ ] Desteklenen özelliklerdeki hatalardan ucuz olanlar düzeltilir, kalanlar
   gerekçesiyle açık kalır.
+- [ ] `overflow` kırpması `border-radius`'u izler: kırpma yolu dolgu kutusunun
+  yuvarlak köşeleri (M2.3'ün bilinen sınırı; `m2_interaction_review.md`).
 
 ### M2.8: macOS CI ve kabul
 
@@ -388,3 +390,43 @@ konumlu çocuk esnek metni bölmüyor. **Kaçan:** `<br>`'den önceki boşluğun
 silinmesi; asılan boşluk ekranda da satır geometrisinde de görünmüyor (sağa
 hizalı satırda bile, test eklendi); metin geri okununca (kopyalama, M5)
 görünecek, CSS Text §4.1.2 gereği duruyor.
+
+**M2.5 (2026-10-05).** GPU yolu ve host'a çizim.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| `vello_hybrid` (wgpu) ile pencere yüzeyine çizim | `erk-renderer`'a isteğe bağlı `gpu` özelliği: vello_hybrid 0.2.0 (vello_cpu'yla aynı sürüm) ve wgpu 29.0.3. Boyama artık iki rasterleştiricinin ortak çağrılarını tutan bir `Canvas` özelliği üzerinden; aynı display list ikisine de gidiyor. vello_hybrid bellekteki bir görüntüyü kabul etmiyor (`unimplemented!`): görüntüler atlasa yükleniyor, sayfada artık kullanılmayanlar siliniyor. Altın görüntüler, Chrome referansı ve WPT vello_cpu'da kalıyor |
+| Bağımlılık ağacı büyük: indirme izni ve lisans kapısı | İzin alındı. `gpu` özelliği renderer'ın ağacına ~70 crate ekledi (217 → 287); Windows'ta yayın ikilisi 16,4 MB'tan 23,1 MB'a çıktı. Lisans kapısı bir lisansı reddetti: naga'nın içindeki `hexf-parse` CC0-1.0. Kamu malı adanışı, yükümlülüğü yok; Unlicense ve 0BSD'den farkı patent hakkı vermediğini açıkça söylemesi; ondalık sayı okuyan küçük bir ayrıştırıcı için kabul edildi ve gerekçesiyle `deny.toml`'a yazıldı |
+| Host'a çizim: render hedefi bir soyutlama, raw-window-handle | `spawn_on_window(window)`: pencere raw-window-handle'ın iki özelliğini taşıyan her şey (winit'in penceresi de, host'un sarmalayıcısı da). p1-contract §1.1 raster'ı ayrı iş parçacığına koyduğu için cihaz ve yüzey renderer iş parçacığının; mesajlar düz veri kalıyor, pencere mesajla değil kurucuyla geçiyor. `erk-renderer` hâlâ winit'i bilmiyor (muhafız geçiyor) |
+| — | **Bulunan sınırlar ve karşılıkları:** (1) Windows'ta winit pencerenin tutamacını yalnızca olay döngüsünün iş parçacığında veriyor: yüzey çağıranın (UI) iş parçacığında yapılıp renderer'a taşınıyor. (2) wgpu ekran tutamacı olmayan bir pencerede hata döndürmek yerine paniğe düşüyordu ve renderer iş parçacığını öldürüyordu (yedeğe düşme testi buldu): tutamaçlar önceden denetleniyor, başlatmadaki her panik yedeğe düşmenin gerekçesi oluyor. (3) **Soğuk başlangıç saniyeler sürüyor:** örnek (instance) ve adaptör ile cihaz bu makinede (GTX 1650) soğukken 2-4 s. Örnek UI iş parçacığında yapıldığı için Windows'ta yalnızca DX12 kullanılıyor (örnek ~0,1 s; Vulkan'la birlikte 1,8 s'ti); adaptör ve cihaz ayrı bir iş parçacığında bulunurken renderer CPU'da çizmeye başlıyor, GPU hazır olunca geçiyor ve kabuk elindeki CPU karesini bırakıyor. İlk kare GPU'yu beklemiyor |
+| Yüzey ya da adaptör yoksa `vello_cpu`'ya düşme (test) | `FromRenderer::Raster`: `Gpu { adapter }` ya da `Cpu { reason }`; GPU yolu karede kaybolursa da CPU'ya dönüp söylüyor. GPU karesi `FromRenderer::Presented` ile bildiriliyor (gösterilecek kare yok, pencere zaten gösteriyor). Testler: tutamaç vermeyen bir pencerede renderer CPU'da olduğunu söyleyip kare gönderiyor; arka ucu olmayan bir örnekte adaptör yok; başlatmadaki bir panik bir hataya dönüyor. Kabuk: `erk --cpu` CPU'yu zorluyor, hangi yolda çizdiğini stderr'e yazıyor |
+| — | **Eşdeğerlik testi:** GPU'nun ekran dışı çizdiği kare vello_cpu'nunkiyle karşılaştırılıyor (arka planlar, çok renkli yuvarlak kenarlıklar, gölge, saydamlık, kırpma, metin, tekrarlanan ve tekrarlanmayan görüntü, iki ölçekte): 144 000 pikselin 14'ü farklı (ölçek 1), ölçek 2'de hiçbiri. Eşik %0,1. Glif atlası açılınca GPU biraz hızlandı (nodes-1000: 12,8 → 9,1 ms) ama farklı piksel %0,24'e çıktı; atlas kapalı. CI'da GPU yok: Linux'a Mesa'nın yazılım Vulkan'ı (lavapipe) kuruluyor, Windows'ta DirectX'in yazılım adaptörü WARP var; GPU testleri hiç atlanmıyor |
+| GPU ve CPU kare sürelerinin ölçümü | `measure --paint [--gpu]`: sayfa bir kez yerleşip yalnızca display list'i boyanıyor (GPU'da kare bitene kadar beklenerek), çekirdek saat okumadan. 800 × 600, 30 çağrının medyanı, GTX 1650 / DX12-Vulkan, vello_cpu tek iş parçacıklı ve skaler (golden için bilerek): |
+
+| Sayfa | vello_cpu | vello_hybrid (GPU) |
+|---|---|---|
+| `examples/counter.html` | 3,49 ms | 0,51 ms |
+| `examples/perf/long-page.html` | 18,56 ms | 10,71 ms |
+| `examples/perf/nodes-1000.html` | 19,03 ms | 12,79 ms |
+
+Küçük sayfada GPU yedi kat hızlı; içerik büyüdükçe fark daralıyor, çünkü
+vello_hybrid şerit üretimini hâlâ CPU'da yapıyor. nodes-1000'in tam karesi
+(stil, layout, boyama) bugün ~70-100 ms: boyamanın payı beşte bir. GPU'nun
+asıl kazancı M5'in artımlı layout'u gelince görünecek.
+
+| — | p1-contract §8.2'nin açık sorusu (surface: callback mi doku mu) ölçümden sonra yazıldı: yön doku (vello_hybrid kareyi tek geçişte çiziyor, dış dokuları zaten yerleştirebiliyor); kesin karar M10'da |
+| — | **Otomatik testsiz kalanlar:** gerçek bir pencere yüzeyi isteyen her şey: yüzey biçiminin seçimi (sRGB olmayan biçim, renkler iki kez kodlanmasın diye), kabuğun GPU'ya geçince CPU karesini bırakması, karede kaybolan yüzeyden CPU'ya dönüş. CI'da pencere yok; bunlar bu makinede elle denendi (`erk examples/counter.html`: "drawing on the GPU: NVIDIA GeForce GTX 1650 (Dx12)") |
+
+Mutasyonlar (7/7 yakalandı): GPU kırpmayı, saydamlığı, görüntüleri, ölçeği,
+gölgeleri yok sayıyor (eşdeğerlik testi); başlatmadaki panik renderer'ı
+bitiriyor (panik testi ilk hâlinde kaçtı: tutamaç denetimi paniği önlediği
+için; doğrudan sınayan test eklendi); yedeğe düşme söylenmiyor.
+
+**İnceleme raporu: `docs/reviews/m2_interaction_review.md` (M2.0–M2.6, 2026-10-05).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| Kalıcı belge, boyama sırasıyla hit-test, `react_to`, `scroll.rs`'in kapsamları, sayaç demosu, M2.6'nın kenar çözümü: başarılı | Tespit. Üç ifade düzeltilerek kayda geçiyor: (1) satır içi kutudan sonra kırmak Parley'nin hatası değil, belgelenmiş davranışı; sorun Erk'in eleman kenarlarını satır içi kutu olarak vermesindeydi. (2) Yeni sayfada "ID aralığı ilerletilmiyor": boşalan slotlar artan nesille yeniden kullanılıyor, eski id'ler nesilden ötürü eskiyor. (3) Sayaç olay kabarcıklanmasını (bubbling) kanıtlamıyor: renderer olayın yolunu bildiriyor, yakalama ve kabarcıklama aşamalarını kurmak host'un işi (M3, `erk-script`); demo yalnızca yolun düğmeden geçtiğine bakıyor |
+| Yuvarlak köşeli kutuda `overflow` kırpması dikdörtgen | Kabul. Ucuz (kırpma kapsamı iç yarıçapları da taşır, kırpma yolu yuvarlak dikdörtgen olur): M2.7'ye madde olarak eklendi |
+| RTL paragraf yönü `direction` yerine ilk güçlü harften | Biliniyor (M1'den, css-support'ta Later). Parley 0.11'de ayarı yok; Parley yükseltmesinde ya da kendi bidi sıralamasıyla. Takvim değişmiyor |
+| "Main branch'teki son durum kusursuz" | Doğru değil, bilinen açıklar var ve kayıtlı: glif rasterleştirmesi Chrome'dan farklı (metin sayfaları ~%48), `break-spaces`, `tab-size`, `word-spacing` ve ailesi yok, boşlukla başlayan `pre` parçasında kırılma fırsatı, `:disabled` eşleşmiyor, kırpma köşeleri, RTL yönü |
