@@ -42,7 +42,6 @@ use crate::color::{Rgba, srgb_bytes};
 use crate::layout::{Layouts, ShapedText};
 use crate::resources::{Resources, image_url};
 use crate::scroll::{Scrolling, VIEWPORT};
-use crate::text::InlineLayout;
 
 pub(crate) struct DisplayList {
     /// The canvas colour behind everything (CSS 2 §14.2).
@@ -113,8 +112,12 @@ pub(crate) enum DisplayItem {
     /// opacity, as one group.
     PushOpacity(f32),
     PopOpacity,
-    /// Everything until the matching `PopClip` is clipped to this box.
-    PushClip(Frame),
+    /// Everything until the matching `PopClip` is clipped to this box,
+    /// with these corner radii.
+    PushClip {
+        frame: Frame,
+        radii: Radii,
+    },
     PopClip,
     Glyphs(GlyphRun),
     /// Where `node` takes pointer input: an element's border box, or a line
@@ -339,12 +342,16 @@ impl DisplayList {
                 DisplayItem::PopOpacity => {
                     let _ = writeln!(out, "end opacity");
                 }
-                DisplayItem::PushClip(frame) => {
-                    let _ = writeln!(
+                DisplayItem::PushClip { frame, radii } => {
+                    let _ = write!(
                         out,
                         "clip {} {} {}x{}",
                         frame.x, frame.y, frame.width, frame.height
                     );
+                    if radii.iter().any(|(x, y)| *x > 0.0 || *y > 0.0) {
+                        let _ = write!(out, " {}", radii_text(radii));
+                    }
+                    let _ = writeln!(out);
                 }
                 DisplayItem::PopClip => {
                     let _ = writeln!(out, "end clip");
@@ -433,7 +440,7 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
         let mut current = scope;
         while let Some(index) = current {
             if let Some(clip) = scrolling.scopes[index].clip {
-                chain.push((index, clip));
+                chain.push((index, clip, scrolling.scopes[index].radii));
             }
             current = scrolling.scopes[index].parent;
         }
@@ -441,25 +448,29 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
         chain
     };
     let mut out = Vec::with_capacity(items.len());
-    let mut open: Vec<(usize, Frame)> = Vec::new();
+    let mut open: Vec<(usize, Frame, Radii)> = Vec::new();
     // How many clips each open opacity group started in.
     let mut floors: Vec<usize> = Vec::new();
-    let enter =
-        |open: &mut Vec<(usize, Frame)>, out: &mut Vec<DisplayItem>, wanted: &[(usize, Frame)]| {
-            let common = open
-                .iter()
-                .zip(wanted)
-                .take_while(|(a, b)| a.0 == b.0)
-                .count();
-            while open.len() > common {
-                open.pop();
-                out.push(DisplayItem::PopClip);
-            }
-            for clip in &wanted[common..] {
-                open.push(*clip);
-                out.push(DisplayItem::PushClip(clip.1));
-            }
-        };
+    let enter = |open: &mut Vec<(usize, Frame, Radii)>,
+                 out: &mut Vec<DisplayItem>,
+                 wanted: &[(usize, Frame, Radii)]| {
+        let common = open
+            .iter()
+            .zip(wanted)
+            .take_while(|(a, b)| a.0 == b.0)
+            .count();
+        while open.len() > common {
+            open.pop();
+            out.push(DisplayItem::PopClip);
+        }
+        for clip in &wanted[common..] {
+            open.push(*clip);
+            out.push(DisplayItem::PushClip {
+                frame: clip.1,
+                radii: clip.2,
+            });
+        }
+    };
     for (scope, item) in items {
         let floor = floors.last().copied().unwrap_or(0);
         let mut wanted = chain(scope);
@@ -690,6 +701,8 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
         .decorations
         .iter()
         .flat_map(|rect| {
+            let (dx, dy) = moved(shaped, rect.relative);
+            let origin = (origin.0 + dx, origin.1 + dy);
             let (left, top) = ((origin.0 + rect.x).round(), (origin.1 + rect.y).round());
             let right = (origin.0 + rect.x + rect.width).round();
             let bottom = (origin.1 + rect.y + rect.height).round();
@@ -719,8 +732,18 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
             items
         })
         .collect();
-    items.extend(glyph_runs(&shaped.text, &shaped.layout, origin));
+    items.extend(glyph_runs(shaped, origin));
     items
+}
+
+/// How far the relatively positioned inline element `relative` (as
+/// [`crate::text::TextBrush::relative`] counts them) moves what it holds.
+fn moved(shaped: &ShapedText, relative: u16) -> (f32, f32) {
+    usize::from(relative)
+        .checked_sub(1)
+        .and_then(|at| shaped.relative.get(at))
+        .copied()
+        .unwrap_or_default()
 }
 
 /// Whether an element with `style` is a target for pointer input: shown,
@@ -809,10 +832,19 @@ fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> 
                 });
             }
             if let Some((left, right, top, bottom)) = bounds {
+                // A text node lies in one inline element: its clusters are
+                // all moved alike.
+                let relative = clusters
+                    .iter()
+                    .find(|cluster| {
+                        cluster.text.start < range.end && range.start < cluster.text.end
+                    })
+                    .map_or(0, |cluster| cluster.relative);
+                let (dx, dy) = moved(shaped, relative);
                 fragments.push(TextFragment {
                     node: *node,
-                    x: origin.0 + left,
-                    y: origin.1 + shift + top,
+                    x: origin.0 + dx + left,
+                    y: origin.1 + dy + shift + top,
                     width: right - left,
                     height: bottom - top,
                 });
@@ -826,7 +858,8 @@ fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> 
 /// `origin`. Parley's positioned glyphs already include each line's offset
 /// and baseline; the line's shift moves them down past taller inline boxes
 /// above.
-fn glyph_runs(text: &str, shaped: &InlineLayout, origin: (f32, f32)) -> Vec<DisplayItem> {
+fn glyph_runs(paragraph: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
+    let (text, shaped) = (&paragraph.text, &paragraph.layout);
     let mut runs = Vec::new();
     for (index, line) in shaped.layout.lines().enumerate() {
         let shift = shaped.shifts.get(index).copied().unwrap_or(0.0);
@@ -836,14 +869,16 @@ fn glyph_runs(text: &str, shaped: &InlineLayout, origin: (f32, f32)) -> Vec<Disp
                 continue;
             };
             let range = ranges.next().unwrap_or_default();
-            // `vertical-align` moves the run off the line's baseline.
+            // `vertical-align` moves the run off the line's baseline, and a
+            // relatively positioned element around it moves it further.
             let raise = run.style().brush.raise;
+            let (dx, dy) = moved(paragraph, run.style().brush.relative);
             let glyphs = run
                 .positioned_glyphs()
                 .map(|glyph| PositionedGlyph {
                     id: glyph.id,
-                    x: origin.0 + glyph.x,
-                    y: origin.1 + shift + glyph.y - raise,
+                    x: origin.0 + dx + glyph.x,
+                    y: origin.1 + dy + shift + glyph.y - raise,
                 })
                 .collect();
             runs.push(DisplayItem::Glyphs(GlyphRun {
@@ -1062,6 +1097,20 @@ fn background_images(
 /// The corner radii of a box `width` × `height`: percentages of the box's
 /// size, then all scaled down together if adjacent radii would overlap
 /// along a side (CSS Backgrounds 3 §5.5).
+/// The radii of a box's padding box: what of its corner radii is left
+/// inside its border widths (top, right, bottom, left), as CSS rounds the
+/// inner edge of a border (CSS Backgrounds 3 §5.2).
+pub(crate) fn padding_radii(style: &ComputedValues, frame: Frame, widths: [f32; 4]) -> Radii {
+    let [top, right, bottom, left] = widths;
+    let [tl, tr, br, bl] = corner_radii(style, frame.width, frame.height);
+    [
+        ((tl.0 - left).max(0.0), (tl.1 - top).max(0.0)),
+        ((tr.0 - right).max(0.0), (tr.1 - top).max(0.0)),
+        ((br.0 - right).max(0.0), (br.1 - bottom).max(0.0)),
+        ((bl.0 - left).max(0.0), (bl.1 - bottom).max(0.0)),
+    ]
+}
+
 fn corner_radii(style: &ComputedValues, width: f32, height: f32) -> Radii {
     use erk_style::style::values::computed::Length;
     let border = style.get_border();

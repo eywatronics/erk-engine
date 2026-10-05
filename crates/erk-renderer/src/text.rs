@@ -41,13 +41,77 @@ const NOTO_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSans-Bold.ttf"
 const FAMILY: &str = "Noto Sans";
 
 /// What Parley carries with each piece of text: its colour, as straight
-/// (non-premultiplied) sRGB bytes, and how far `vertical-align` raises it
-/// above the line's baseline. Text whose raise differs gets glyph runs of
-/// its own.
+/// (non-premultiplied) sRGB bytes, how far `vertical-align` raises it
+/// above the line's baseline, and which relatively positioned inline
+/// element moves it (an index into [`Paragraph::relative`] plus one; 0 for
+/// none). Text whose raise or offset differs gets glyph runs of its own.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TextBrush {
     pub(crate) color: [u8; 4],
     pub(crate) raise: f32,
+    pub(crate) relative: u16,
+}
+
+/// How far a relatively positioned inline element, and those around it,
+/// move what it holds: fixed lengths, and fractions of the block's content
+/// box (`left: 50%` is half its width), resolved once the block is laid
+/// out. Moving it changes no line (CSS 2 §9.4.3).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct RelativeOffset {
+    px: (f32, f32),
+    percent: (f32, f32),
+}
+
+impl RelativeOffset {
+    /// The offset of an inline element styled `style`, if it is relatively
+    /// positioned: `left` over `right`, `top` over `bottom`.
+    fn of(style: &ComputedValues) -> Option<Self> {
+        use erk_style::style::computed_values::position::T as Position;
+        use erk_style::style::values::generics::position::GenericInset;
+        if style.clone_position() != Position::Relative {
+            return None;
+        }
+        let side = |inset: &GenericInset<_, _>| match inset {
+            GenericInset::LengthPercentage(length) => {
+                let length: &erk_style::style::values::computed::LengthPercentage = length;
+                Some(match length.to_percentage() {
+                    Some(percent) => (0.0, percent.0),
+                    None => (fixed(length), 0.0),
+                })
+            }
+            _ => None,
+        };
+        let position = style.get_position();
+        let flip = |(px, percent): (f32, f32)| (-px, -percent);
+        let x = side(&position.left)
+            .or_else(|| side(&position.right).map(flip))
+            .unwrap_or_default();
+        let y = side(&position.top)
+            .or_else(|| side(&position.bottom).map(flip))
+            .unwrap_or_default();
+        Some(Self {
+            px: (x.0, y.0),
+            percent: (x.1, y.1),
+        })
+    }
+
+    /// The offset in a content box `width` × `height`.
+    pub(crate) fn resolve(&self, width: f32, height: f32) -> (f32, f32) {
+        (
+            self.px.0 + self.percent.0 * width,
+            self.px.1 + self.percent.1 * height,
+        )
+    }
+
+    fn plus(self, other: Self) -> Self {
+        Self {
+            px: (self.px.0 + other.px.0, self.px.1 + other.px.1),
+            percent: (
+                self.percent.0 + other.percent.0,
+                self.percent.1 + other.percent.1,
+            ),
+        }
+    }
 }
 
 /// The text properties of one styled range.
@@ -85,6 +149,7 @@ impl TextStyle {
             color: TextBrush {
                 color: srgb_bytes(style.clone_color()),
                 raise: 0.0,
+                relative: 0,
             },
             wrap: style.get_inherited_text().clone_text_wrap_mode() != TextWrapModeCss::Nowrap,
         }
@@ -297,6 +362,8 @@ struct Decoration {
     /// font's ascent and descent, then padding and border.
     above: f32,
     below: f32,
+    /// The relatively positioned element that moves it, as in [`TextBrush`].
+    relative: u16,
     /// How far `vertical-align` raises the element.
     raise: f32,
     color: Rgba,
@@ -331,6 +398,8 @@ struct Raised {
 /// paragraph's content box.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DecorationRect {
+    /// The relatively positioned element that moves it, as in [`TextBrush`].
+    pub(crate) relative: u16,
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) width: f32,
@@ -369,10 +438,18 @@ pub(crate) struct Paragraph {
     /// and whether the pending space may: see `flush`.
     last_nowrap: bool,
     space_wraps: bool,
+    /// The offsets of the relatively positioned inline elements, each with
+    /// those of the ones around it added.
+    pub(crate) relative: Vec<RelativeOffset>,
+    /// The atoms such an element moves: arena index, and the element.
+    pub(crate) moved_atoms: Vec<(usize, u16)>,
 }
 
 /// An inline element being read, until its `Close`.
 struct OpenElement {
+    /// The relatively positioned element that moves what it holds, itself
+    /// or one around it, as in [`TextBrush`].
+    relative: u16,
     first_box: usize,
     text_start: usize,
     open: Option<(usize, f32)>,
@@ -412,6 +489,8 @@ impl Paragraph {
             preserved: Vec::new(),
             last_nowrap: false,
             space_wraps: true,
+            relative: Vec::new(),
+            moved_atoms: Vec::new(),
         };
         let mut open: Vec<OpenElement> = Vec::new();
         // The box an element or atom is aligned in: the innermost open
@@ -451,6 +530,7 @@ impl Paragraph {
                         style.language = fonts::language(&lang.to_string());
                     }
                     style.color.raise = open.last().map_or(0.0, |element| element.raise);
+                    style.color.relative = open.last().map_or(0, |element| element.relative);
                     // `white-space`: `pre-line` keeps newlines, `pre` and
                     // `pre-wrap` keep every space too (`break-spaces` is
                     // laid out as `pre-wrap`).
@@ -561,7 +641,23 @@ impl Paragraph {
                         });
                         (paragraph.items.len() - 1, sides.margin_start)
                     });
+                    // A relatively positioned element moves what it holds by
+                    // its offset and those of the elements around it.
+                    let around = open.last().map_or(0, |element| element.relative);
+                    let relative = match RelativeOffset::of(style) {
+                        Some(offset) => {
+                            let outer = around
+                                .checked_sub(1)
+                                .map_or_else(RelativeOffset::default, |at| {
+                                    paragraph.relative[usize::from(at)]
+                                });
+                            paragraph.relative.push(offset.plus(outer));
+                            u16::try_from(paragraph.relative.len()).unwrap_or(around)
+                        }
+                        None => around,
+                    };
                     open.push(OpenElement {
+                        relative,
                         first_box: open_box.map_or(paragraph.items.len(), |(index, _)| index),
                         text_start: paragraph.text.len(),
                         open: open_box,
@@ -610,6 +706,12 @@ impl Paragraph {
                     let line_height = TextStyle::of(style.as_ref()).line_height_px();
                     let align = VerticalAlign::of(style.as_ref(), line_height, &parent);
                     paragraph.push_item(InlineItemKind::Atom(*index, align, parent));
+                    // An atom inside a relatively positioned element moves
+                    // with it, and so does its own position.
+                    let relative = open.last().map_or(0, |element| element.relative);
+                    if relative != 0 {
+                        paragraph.moved_atoms.push((*index, relative));
+                    }
                     has_content = true;
                     last_was_space = false;
                 }
@@ -713,6 +815,7 @@ impl Paragraph {
                     boxes: element.first_box..self.items.len(),
                     open: element.open,
                     close,
+                    relative: element.relative,
                     above: look.above,
                     below: look.below,
                     raise: element.raise,
@@ -948,6 +1051,7 @@ impl InlineLayout {
                     // and last line only (box-decoration-break: slice).
                     let [top, right, bottom, left] = decoration.border;
                     rects.push(DecorationRect {
+                        relative: decoration.relative,
                         x: x0,
                         y: baseline - decoration.raise - decoration.above,
                         width: x1 - x0,
@@ -1236,6 +1340,8 @@ fn dangling_edge(
 /// the layout's coordinates; and whether it is white space.
 pub(crate) struct PlacedCluster {
     pub(crate) text: Range<usize>,
+    /// The relatively positioned element that moves it, as in [`TextBrush`].
+    pub(crate) relative: u16,
     pub(crate) left: f32,
     pub(crate) right: f32,
     pub(crate) top: f32,
@@ -1281,6 +1387,7 @@ pub(crate) fn placed_clusters(line: &parley::Line<'_, TextBrush>) -> (Vec<Placed
             let advance = cluster.advance();
             placed.push(PlacedCluster {
                 text: cluster.text_range(),
+                relative: glyph_run.style().brush.relative,
                 left: x,
                 right: x + advance,
                 top: baseline - metrics.ascent,
@@ -1782,6 +1889,8 @@ mod tests {
             preserved: Vec::new(),
             last_nowrap: false,
             space_wraps: true,
+            relative: Vec::new(),
+            moved_atoms: Vec::new(),
             sources: Vec::new(),
         }
     }

@@ -241,10 +241,8 @@ pub(crate) fn paint_list(
             }
             DisplayItem::PushOpacity(opacity) => ctx.push_opacity_layer(*opacity),
             DisplayItem::PopOpacity | DisplayItem::PopClip => ctx.pop_layer(),
-            DisplayItem::PushClip(frame) => {
-                let mut path = BezPath::new();
-                path.extend(vello_cpu::kurbo::Shape::path_elements(&rect(*frame), 0.1));
-                ctx.push_clip_layer(&path);
+            DisplayItem::PushClip { frame, radii } => {
+                ctx.push_clip_layer(&rounded_rect(*frame, radii));
             }
             DisplayItem::Hit { .. } => {}
             DisplayItem::Highlight(frame) => {

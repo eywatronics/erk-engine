@@ -415,3 +415,83 @@ fn a_nested_inline_background_is_painted_over_its_parents() {
         .count();
     assert!(green > 30, "the inner background is covered: {green}");
 }
+
+#[test]
+fn a_relatively_positioned_inline_element_moves_what_it_holds() {
+    let html = |position: &str, inner: &str| {
+        format!(
+            r#"<style>body {{ margin: 0; font-family: 'Noto Sans'; font-size: 16px }}</style>
+            <p style="margin: 0; width: 300px; height: 100px">Önce <span style="{position}; background: #ff0000">kayan <b style="{inner}">metin</b> <span style="display: inline-block; width: 10px; height: 10px; background: #0000ff"></span></span> sonra</p>"#
+        )
+    };
+    let still = html("position: static", "");
+    // The bold word moves with the span and by its own offset too.
+    let moved = html(
+        "position: relative; left: 10%; top: 10%",
+        "position: relative; top: 5px",
+    );
+    let boxes = |page: &str| erk_renderer::text_boxes(page, WIDTH, HEIGHT, &mut |_| None);
+    let (before, after) = (boxes(&still), boxes(&moved));
+    // "Önce" and "sonra" stay; the span's text moves 30px right (10% of
+    // the 300px block) and 10px (10% of its 100px) down: no line changes.
+    assert_eq!(before.len(), after.len());
+    for (a, b) in before.iter().zip(&after) {
+        let shift = match a.index {
+            0 | 3 => (0.0, 0.0),
+            2 => (30.0, 15.0),
+            _ => (30.0, 10.0),
+        };
+        assert!(
+            (b.x - a.x - shift.0).abs() < 0.01 && (b.y - a.y - shift.1).abs() < 0.01,
+            "{a:?} -> {b:?}"
+        );
+    }
+    // The background and the inline-block move with it.
+    let rect_at = |page: &str, colour: &str| {
+        let frame = render_html(page, WIDTH, HEIGHT);
+        frame
+            .display_list()
+            .lines()
+            .find(|line| line.starts_with("rect") && line.ends_with(colour))
+            .map(|line| {
+                let words: Vec<f32> = line
+                    .split(' ')
+                    .skip(1)
+                    .take(2)
+                    .map(|w| w.parse().unwrap())
+                    .collect();
+                (words[0], words[1])
+            })
+            .unwrap()
+    };
+    for colour in ["#ff0000ff", "#0000ffff"] {
+        let (a, b) = (rect_at(&still, colour), rect_at(&moved, colour));
+        assert_eq!((b.0 - a.0, b.1 - a.1), (30.0, 10.0), "{colour}");
+    }
+    // And so do the glyphs drawn: the run of the span's first word, against
+    // the same span positioned with no offset (its text a run of its own
+    // there too).
+    let unmoved = html("position: relative; left: 0; top: 0", "position: relative");
+    let glyphs_at = |page: &str| {
+        let frame = render_html(page, WIDTH, HEIGHT);
+        frame
+            .display_list()
+            .lines()
+            .find(|line| line.starts_with("glyphs") && line.contains("kayan"))
+            .map(|line| {
+                let words: Vec<f32> = line
+                    .split(' ')
+                    .skip(1)
+                    .take(2)
+                    .map(|w| w.parse().unwrap())
+                    .collect();
+                (words[0], words[1])
+            })
+            .unwrap()
+    };
+    let (a, b) = (glyphs_at(&unmoved), glyphs_at(&moved));
+    assert!(
+        (b.0 - a.0 - 30.0).abs() < 0.01 && (b.1 - a.1 - 10.0).abs() < 0.01,
+        "{a:?} -> {b:?}"
+    );
+}

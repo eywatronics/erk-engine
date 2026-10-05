@@ -86,6 +86,9 @@ pub(crate) struct ShapedText {
     pub(crate) text: String,
     /// Each text node and its range of `text`.
     pub(crate) sources: Vec<(NodeId, std::ops::Range<usize>)>,
+    /// How far each relatively positioned inline element moves what it
+    /// holds, as [`crate::text::TextBrush::relative`] counts them.
+    pub(crate) relative: Vec<(f32, f32)>,
     /// The spaces `white-space` keeps.
     pub(crate) preserved: Vec<std::ops::Range<usize>>,
     /// The ids of the inline boxes that are atomic inlines, not edges.
@@ -156,6 +159,7 @@ pub(crate) fn layout(
     let LayoutTree { mut nodes, .. } = tree;
     snap_locations(&mut nodes, usize::from(root));
     place_at_static_positions(doc, &mut nodes);
+    move_relative_atoms(&mut nodes);
     relative_to_dom(doc, &mut nodes);
     let mut text: Vec<Option<ShapedText>> = nodes
         .iter_mut()
@@ -163,6 +167,7 @@ pub(crate) fn layout(
             let paragraph = node.paragraph.as_ref().filter(|_| node.in_tree)?;
             let layout = node.shaped.take()?;
             Some(ShapedText {
+                relative: relative_offsets(paragraph, &node.layout),
                 text: paragraph.text.clone(),
                 sources: paragraph.sources.clone(),
                 preserved: paragraph.preserved.clone(),
@@ -279,7 +284,13 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
         };
         let static_point = match source {
             StaticPosition::Placeholder(placeholder) => absolute[placeholder],
-            StaticPosition::ContentStart(container) => content(container),
+            StaticPosition::ContentStart(container) => {
+                let mut point = content(container);
+                let (dx, dy) = sole_flex_item_offset(&nodes[container], &nodes[index]);
+                point.x += round(dx);
+                point.y += round(dy);
+                point
+            }
             StaticPosition::Line(paragraph) => {
                 let origin = content(paragraph);
                 let anchor = nodes[paragraph].shaped.as_ref().and_then(|shaped| {
@@ -317,6 +328,125 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
         if auto_y {
             location.y = static_point.y + layout.margin.top - parent.y;
         }
+    }
+}
+
+/// The offsets of `paragraph`'s relatively positioned inline elements, in
+/// the content box of the block laid out as `layout`.
+fn relative_offsets(paragraph: &Paragraph, layout: &Layout) -> Vec<(f32, f32)> {
+    let width = layout.size.width
+        - layout.border.left
+        - layout.border.right
+        - layout.padding.left
+        - layout.padding.right;
+    let height = layout.size.height
+        - layout.border.top
+        - layout.border.bottom
+        - layout.padding.top
+        - layout.padding.bottom;
+    paragraph
+        .relative
+        .iter()
+        .map(|offset| offset.resolve(width.max(0.0), height.max(0.0)))
+        .collect()
+}
+
+/// Move each atomic inline that a relatively positioned inline element
+/// holds by the element's offset: after line breaking, which it changes
+/// nothing of.
+fn move_relative_atoms(nodes: &mut [LayoutNode]) {
+    for index in 0..nodes.len() {
+        let Some(paragraph) = nodes[index]
+            .paragraph
+            .as_ref()
+            .filter(|_| nodes[index].in_tree)
+        else {
+            continue;
+        };
+        if paragraph.moved_atoms.is_empty() {
+            continue;
+        }
+        let offsets = relative_offsets(paragraph, &nodes[index].layout);
+        let moved = paragraph.moved_atoms.clone();
+        for (atom, relative) in moved {
+            let Some(&(dx, dy)) = usize::from(relative)
+                .checked_sub(1)
+                .and_then(|at| offsets.get(at))
+            else {
+                continue;
+            };
+            let location = &mut nodes[atom].layout.location;
+            location.x += dx;
+            location.y += dy;
+        }
+    }
+}
+
+/// Where an absolutely positioned child's static position lies in its flex
+/// container, from the content edge: where it would be as the container's
+/// only flex item (CSS Flexbox §4.1), by `justify-content` along the main
+/// axis and `align-self` (or the container's `align-items`) across it.
+/// Nothing for a grid container.
+fn sole_flex_item_offset(container: &LayoutNode, item: &LayoutNode) -> (f32, f32) {
+    use taffy::style::{AlignContentKeyword as Main, AlignItemsKeyword as Cross};
+    let style = &container.style;
+    if style.display != Display::Flex {
+        return (0.0, 0.0);
+    }
+    use taffy::FlexDirection;
+    let (row, reverse) = match style.flex_direction {
+        FlexDirection::Row => (true, false),
+        FlexDirection::RowReverse => (true, true),
+        FlexDirection::Column => (false, false),
+        FlexDirection::ColumnReverse => (false, true),
+    };
+    // The flex-relative start and end swap with a reversed direction.
+    let main = match style.justify_content.map(|justify| justify.keyword) {
+        Some(Main::Center | Main::SpaceAround | Main::SpaceEvenly) => 0.5,
+        Some(Main::End) => 1.0,
+        Some(Main::Start) => 0.0,
+        Some(Main::FlexEnd) => {
+            if reverse {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        None | Some(Main::FlexStart | Main::Stretch | Main::SpaceBetween) => {
+            if reverse {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    };
+    let cross = match item
+        .style
+        .align_self
+        .or(style.align_items)
+        .map(|align| align.keyword)
+    {
+        Some(Cross::Center) => 0.5,
+        Some(Cross::End | Cross::FlexEnd | Cross::SelfEnd) => 1.0,
+        _ => 0.0,
+    };
+    let (outer, inner) = (&container.layout, &item.layout);
+    let free_x = outer.size.width
+        - outer.border.left
+        - outer.border.right
+        - outer.padding.left
+        - outer.padding.right
+        - (inner.size.width + inner.margin.left + inner.margin.right);
+    let free_y = outer.size.height
+        - outer.border.top
+        - outer.border.bottom
+        - outer.padding.top
+        - outer.padding.bottom
+        - (inner.size.height + inner.margin.top + inner.margin.bottom);
+    if row {
+        (free_x * main, free_y * cross)
+    } else {
+        (free_x * cross, free_y * main)
     }
 }
 

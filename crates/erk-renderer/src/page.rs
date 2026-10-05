@@ -586,7 +586,9 @@ fn hits(items: &[DisplayItem]) -> Vec<(NodeId, Rect, bool)> {
     let mut hits = Vec::new();
     for item in items {
         match item {
-            DisplayItem::PushClip(frame) => {
+            // A rounded clip is taken as its rectangle: a point in a cut-off
+            // corner still finds what is under it.
+            DisplayItem::PushClip { frame, .. } => {
                 let clip = clips.last().map_or(*frame, |outer| intersect(outer, frame));
                 clips.push(clip);
             }
