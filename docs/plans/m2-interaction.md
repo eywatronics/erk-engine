@@ -70,17 +70,17 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.0: Kalıcı belge, metin geometrisi testi, ölçüm tabanı
 
-- [ ] Renderer iş parçacığı belgeyi `Load`'da bir kez ayrıştırır ve saklar;
+- [x] Renderer iş parçacığı belgeyi `Load`'da bir kez ayrıştırır ve saklar;
   kareler saklanan belgeden stil, layout ve boyama yapar. `NodeId`'ler kareler
   arasında aynı kalır (test). Görüntü ve font istekleri değişmez.
-- [ ] **Metin geometrisi testi** (M1'in açık bulgusu): kutu geometrisi testi
+- [x] **Metin geometrisi testi** (M1'in açık bulgusu): kutu geometrisi testi
   satır içi metni atlıyor; `paragraphs` ve `inline-styles`'ın düşük piksel
   skoru elle bakılınca yerleşim değil glif çizimi çıktı (satırlar ve kelime
   kenarları Chrome'la 1 px içinde). Referans testine kalıcı olarak eklenir:
   her sayfada metin satırlarının dikey bantları ve kelime kenarları Chrome
   görüntüsüyle karşılaştırılır; 1 px'ten büyük fark testi kırar. M2'nin
   yeniden stil yolları metni bozarsa piksel skoru değil bu test yakalar.
-- [ ] Ölçüm tabanı: `examples/perf/long-page.html` (kaydırılacak uzun sayfa)
+- [x] Ölçüm tabanı: `examples/perf/long-page.html` (kaydırılacak uzun sayfa)
   ve `measure`'a kalıcı belgeden kare süresi (ayrıştırmasız). M1'in 800 × 600
   ölçümü sabit maliyetin çoğunun piksel sayısıyla orantılı olduğunu gösterdi
   (zemini boyamak ve kareyi kopyalamak); bu da ayrıca ölçülür.
@@ -226,3 +226,37 @@ inceler, gerçek olanları düzeltir.
 
 *(Adımlar yürütüldükçe, planın yanlış çıkan varsayımları ve doğrulanan
 gerçeklerle doldurulur.)*
+
+**İnceleme raporu: `docs/reviews/fuzz_commit_review.md` (#26, 2026-10-02).**
+
+| Rapor ne diyordu | Karar |
+|---|---|
+| İki paralel fuzz job'ı, artifact ve önbellek adlarının ayrılması, kasıtlı panikle deneme | Tespit; yapılacak bir şey yok |
+| "`max_len`'in hızlı modda 4096 tutulması fuzzer'ın verimini artıracaktır"; ileride yeniden ayarlanabilir | **Ölçülenle uyuşmuyor:** `max_len`'i 65536'dan 4096'ya indirmek ASan job'ını yalnızca saniyede 9'dan 10 girdiye çıkardı; 7 katlık hız sanitizer'ı kaldırmaktan geldi. Yeniden ayarlama notu yerinde: girdiler ağırlaşırsa ölçülerek |
+
+**M2.0 (2026-10-05).** Kalıcı belge, metin geometrisi testi, ölçüm tabanı.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| Belge `Load`'da bir kez ayrıştırılır | `Page` (`page.rs`): belge `Load`'da ayrıştırılıyor, her kare ondan stil, layout ve boyama yapıyor. Test: aynı `Page`'in farklı boyut ve ölçeklerdeki kareleri, o boyutta baştan ayrıştırılmış bir sayfanınkiyle piksel piksel aynı |
+| Metin geometrisi testi | Chrome'un `Range.getClientRects()`'i her metin düğümünün satır satır dikdörtgenini veriyor; yakalama aracı bunları sayfa başına `{ad}.text.txt` olarak yazıyor (ekran görüntüsü ve kutu geometrisi değişmeden; yakalanmış sayfalar için yalnızca metin, aynı Chrome sürümüyle). Erk aynı dikdörtgenleri Parley satırlarından hesaplıyor (`text_boxes`): paragraf her metin düğümünün metninin hangi bayt aralığına gittiğini tutuyor, her satırın kümeleri yerleştirildikleri yerle eşleniyor. Metin düğümleri iki tarafta aynı numaralanıyor (gövdedeki, yalnızca boşluk olmayan, `script`/`style`/`template` dışındaki düğümler, belge sırasıyla). Tolerans 1 px |
+| — | **Ölçüm hatalarım:** daralan bir boşluğu, onu yazan metin düğümü yerine bir sonraki metnin başına sayıyordum; Chrome boşluğu yazıldığı düğümde sayar ("a " bir `<b>`'den önce, " dünya" bir `</b>`'den sonra). Farkların neredeyse hepsi tam bir boşluk genişliğiydi (16 px Noto Sans'ta 4,16 px). Ayrıca satır sonundaki boşluğu bir satır içi kutudan (inline-block) önce de atıyordum, ve gizli (`visibility: hidden`) metni ölçmüyordum; Chrome ikisini de ölçüyor |
+| — | **Sonuç: 17 sayfadaki 163 metin satırının 159'u Chrome'la 1 px içinde.** inline-boxes, inline-styles, vertical-align ve text-transform tamamen tutuyor: bu sayfaların düşük piksel skoru yerleşim değil glif çizimi. Kalan dört satır gerçek hata ve testte gerekçeli `KNOWN_TEXT_DIFFERENCES` listesinde; liste iki yönlü: başka bir fark testi kırar, listelenen bir fark kaybolursa da (liste eskimesin) |
+| — | **Bulunan iki gerçek hata:** (1) satır içi kutu parçalanması (`borders` sayfasında üç satır): kırılan kenarlıklı span 6 px'lik sol kenarlığını önceki satırda bırakıyor, metni yeni satırda o kadar solda başlıyor; M2.6'da. (2) Bir satır içi elemanın `position: relative`'i metnini kaydırmıyor (`settings` sayfasındaki rozetin `top: -1px`'i); M2.7'de |
+| Ölçüm tabanı | `examples/perf/long-page.html` (20 bölüm, ~3000 CSS pikseli) ve `measure --frames`: sayfa renderer iş parçacığına bir kez gidiyor, her kare tuttuğu belgenin yeniden boyanması. **Ayrıştırma ihmal edilebilir:** tam kare ile ayrıştırmalı `render_html` aynı çıkıyor (aşağıda); M2'de her durum değişikliğinin bedeli stil, layout ve boyama. M1'in ölçümüne göre 800 × 600'de sabit maliyetin çoğu piksel sayısıyla orantılı |
+
+| Sayfa (800 × 600) | `render_html`, 30 çağrının medyanı | Tutulan belgenin yeniden boyanması, medyan |
+|---|---|---|
+| `nodes-1000.html` | 71,16 ms | 72,11 ms |
+| `long-page.html` | 36,78 ms | 31,20 ms |
+| `settings.html` | 12,52 ms | 15,83 ms |
+
+İki yol arasındaki farklar gürültü ve iş parçacığı ile mesaj yükü: ayrıştırma
+kazancı ölçülemeyecek kadar küçük. Bu sayılar M5'in tabanı.
+
+Mutasyonlar (8/8 yakalandı): kelime aralığı 2 px kayıyor; `line-height:
+normal` 2 px büyüyor; bilinen bir fark listeden çıkıyor; eşleşen bir düğüm
+bilinen fark diye listeleniyor; gizli metin ölçülmüyor; satır içi kutudan
+önceki boşluk atılıyor; daralan boşluk onu yazan düğüme sayılmıyor; düğümün
+kendi boşlukları ayrı aralıklara bölünüyor (ilk ikisi yerleşim hatası, gerisi
+ölçümün ve listenin kendisi).

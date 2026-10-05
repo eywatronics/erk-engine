@@ -221,7 +221,7 @@ M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-intera
 
 | Adım | Kapsam | Durum |
 |---|---|---|
-| M2.0 | Kalıcı belge (bir kez ayrıştırılır, kareler arasında yaşar), metin geometrisi testi (M1'in bulgusu), kare süresi tabanı | Yeni |
+| M2.0 | Kalıcı belge (bir kez ayrıştırılır, kareler arasında yaşar), metin geometrisi testi (M1'in bulgusu), kare süresi tabanı | Bitti: 163 metin satırının 159'u Chrome'la 1 px içinde, iki gerçek hata bulundu; tam kare 1000 elemanda ~71 ms |
 | M2.1 | Girdi mesajları, hit-test, tıklama olayı ve yayılma yolu, `inspect_at` ve vurgu kaplaması | Yeni |
 | M2.2 | `:hover`, `:active`, `:focus`; odak ve klavyeyle gezinme | Yeni |
 | M2.3 | `overflow` kırpması, kaydırma kapları ve tekerlek, `cursor` | Yeni |

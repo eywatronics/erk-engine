@@ -25,13 +25,14 @@ forbid() {
 #    here is a design change: update this list in the same pull request.
 #    Each public item is read whole, however rustfmt wraps it: a type added
 #    to a multi-line `pub use` list must show up here too.
-expected='pub use messages::{ ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, ToRenderer, };
+expected='pub use messages::{ ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, TextBox, ToRenderer, };
 pub use thread::spawn;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
 pub fn render_html_with_resources( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
 pub fn render_html_at_scale( html: &str, width: u16, height: u16, scale: f32, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
-pub fn element_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<ElementBox> {'
+pub fn element_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<ElementBox> {
+pub fn text_boxes( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Vec<TextBox> {'
 actual=$(awk '
   /^[[:space:]]*pub[[:space:]]/ { item = ""; open = 1 }
   open {

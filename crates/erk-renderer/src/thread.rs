@@ -10,7 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 
 use crate::messages::{FromRenderer, ToRenderer};
-use crate::render_document;
+use crate::page::Page;
 use crate::resources::Resources;
 
 /// Layout recurses once per level of nesting, and the parser allows 512
@@ -31,7 +31,8 @@ pub fn spawn() -> (Sender<ToRenderer>, Receiver<FromRenderer>, JoinHandle<()>) {
 }
 
 fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
-    let mut html: Option<String> = None;
+    // Parsed once when loaded; every frame paints it again.
+    let mut page: Option<Page> = None;
     let mut size: Option<(u16, u16)> = None;
     let mut scale = 1.0;
     // The resources of the current document: asked for once, kept across
@@ -44,8 +45,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
         let mut message = Some(first);
         while let Some(current) = message {
             match current {
-                ToRenderer::Load { html: document } => {
-                    html = Some(document);
+                ToRenderer::Load { html } => {
+                    page = Some(Page::parse(&html));
                     resources.new_document();
                 }
                 ToRenderer::Resize { width, height } => size = Some((width, height)),
@@ -57,8 +58,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             }
             message = inbox.try_recv().ok();
         }
-        if let (Some(document), Some((width, height))) = (&html, size) {
-            let (frame, requests) = render_document(document, width, height, scale, &mut resources);
+        if let (Some(page), Some((width, height))) = (&page, size) {
+            let (frame, requests) = page.render(width, height, scale, &mut resources);
             // The requests first: a host that answers at once has its
             // answers queued before it sees the frame painted without them.
             if !requests.is_empty() && outbox.send(FromRenderer::Resources(requests)).is_err() {
