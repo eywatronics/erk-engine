@@ -191,3 +191,23 @@ fn a_box_escaping_a_clip_inside_a_translucent_box_stays_translucent() {
         "half red over white: {r} {g} {b}"
     );
 }
+
+#[test]
+fn a_rounded_box_clips_to_its_rounded_padding_box() {
+    let frame = page(
+        r#"<div style="overflow: hidden; width: 60px; height: 60px; border: 5px solid #0000ff; border-radius: 30px">
+            <div style="width: 200px; height: 200px; background: #ff0000"></div>
+        </div>"#,
+    );
+    assert_eq!(rgb(&frame, 35, 35), RED, "the middle");
+    // Just inside the padding box's corner, outside its rounded edge: the
+    // border's colour or white, never the red child.
+    for (x, y) in [(7, 7), (62, 7), (7, 62), (62, 62)] {
+        assert_ne!(rgb(&frame, x, y), RED, "{x}, {y}");
+    }
+    assert!(
+        frame.display_list().contains("clip 5 5 60x60 25"),
+        "{}",
+        frame.display_list()
+    );
+}

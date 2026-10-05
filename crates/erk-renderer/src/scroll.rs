@@ -40,6 +40,8 @@ pub(crate) struct Scope {
     /// The padding box everything in the scope is clipped to, where it is
     /// painted; `None` for the viewport, which the frame itself clips.
     pub(crate) clip: Option<Frame>,
+    /// The clip's corner radii: the padding box's, inside a rounded border.
+    pub(crate) radii: crate::display::Radii,
     /// The scroll offset, within `0..=max`.
     pub(crate) offset: (f32, f32),
     /// The furthest the content can scroll on each axis.
@@ -99,6 +101,7 @@ impl Scrolling {
                 node: doc.root(),
                 parent: None,
                 clip: None,
+                radii: [(0.0, 0.0); 4],
                 offset: (0.0, 0.0),
                 max: (0.0, 0.0),
                 user: !overflow
@@ -257,10 +260,23 @@ impl Walk<'_> {
                 width: (layout.size.width - layout.border.left - layout.border.right).max(0.0),
                 height: (layout.size.height - layout.border.top - layout.border.bottom).max(0.0),
             };
+            let border_box = Frame {
+                x,
+                y,
+                width: layout.size.width,
+                height: layout.size.height,
+            };
+            let widths = [
+                layout.border.top,
+                layout.border.right,
+                layout.border.bottom,
+                layout.border.left,
+            ];
             self.scrolling.scopes.push(Scope {
                 node: id,
                 parent: scope,
                 clip: Some(area),
+                radii: crate::display::padding_radii(style, border_box, widths),
                 offset: (0.0, 0.0),
                 max: (0.0, 0.0),
                 user,

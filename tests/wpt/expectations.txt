@@ -763,11 +763,11 @@ css/css-flexbox/abspos/flex-abspos-align-self-safe-outer-cb-003.tentative.html P
 css/css-flexbox/abspos/flex-abspos-staticpos-align-self-safe-001.html PASS
 css/css-flexbox/abspos/flex-abspos-staticpos-align-self-safe-002.html PASS
 css/css-flexbox/abspos/flex-abspos-staticpos-align-self-safe-003.html PASS
-css/css-flexbox/abspos/flex-abspos-staticpos-fallback-justify-content-001.html FAIL
+css/css-flexbox/abspos/flex-abspos-staticpos-fallback-justify-content-001.html PASS
 css/css-flexbox/abspos/flex-abspos-staticpos-justify-self-001.html PASS
 css/css-flexbox/abspos/flex-abspos-staticpos-margin-001.html PASS
-css/css-flexbox/abspos/flex-abspos-staticpos-margin-002.html FAIL
-css/css-flexbox/abspos/flex-abspos-staticpos-margin-003.html FAIL
+css/css-flexbox/abspos/flex-abspos-staticpos-margin-002.html PASS
+css/css-flexbox/abspos/flex-abspos-staticpos-margin-003.html PASS
 css/css-flexbox/abspos/flexbox-abspos-child-001a.html PASS
 css/css-flexbox/abspos/flexbox-abspos-child-001b.html PASS
 css/css-flexbox/abspos/flexbox-abspos-child-002.html PASS
@@ -1803,8 +1803,8 @@ css/css-position/overlay/overlay-transition-in-rendering.html FAIL
 css/css-position/overlay/overlay-transition-out-rendering.html FAIL
 css/css-position/position-absolute-center-001.html FAIL
 css/css-position/position-absolute-center-002.html FAIL
-css/css-position/position-absolute-center-003.html FAIL
-css/css-position/position-absolute-center-004.html FAIL
+css/css-position/position-absolute-center-003.html PASS
+css/css-position/position-absolute-center-004.html PASS
 css/css-position/position-absolute-center-006.html FAIL
 css/css-position/position-absolute-center-007.html FAIL
 css/css-position/position-absolute-dynamic-auto-overflow.html FAIL
@@ -1961,7 +1961,7 @@ css/css-position/sticky/position-sticky-flex-item-004.html FAIL
 css/css-position/sticky/position-sticky-flexbox.html FAIL
 css/css-position/sticky/position-sticky-fractional-offset.html FAIL
 css/css-position/sticky/position-sticky-grid.html FAIL
-css/css-position/sticky/position-sticky-hyperlink.html PASS
+css/css-position/sticky/position-sticky-hyperlink.html FAIL  # lowered: passed only because relative offsets on inline elements were ignored (M2.7 applies them): its reference moves the link 100px, the test needs position: sticky and a script that scrolls
 css/css-position/sticky/position-sticky-in-fixed-container.html FAIL
 css/css-position/sticky/position-sticky-inline.html FAIL
 css/css-position/sticky/position-sticky-large-top-2.tentative.html FAIL

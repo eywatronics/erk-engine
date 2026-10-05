@@ -927,3 +927,42 @@ fn an_absolutely_positioned_child_splits_a_flex_containers_text() {
     assert_eq!(height, 2.0 * one_line(), "two items, a line each");
     assert_eq!(layouts.anonymous(div).len(), 2);
 }
+
+#[test]
+fn an_absolutely_positioned_flex_child_starts_where_a_sole_item_would() {
+    // The containing block is the outer div, not the flex container: the
+    // static position follows the container's alignment (CSS Flexbox 4.1).
+    let place = |container: &str| {
+        let (doc, layouts) = lay_out(&format!(
+            r#"<div style="position: relative">
+                <div style="display: flex; width: 200px; height: 100px; padding: 10px; {container}">
+                    <div style="position: absolute; width: 40px; height: 20px; margin: 5px"></div>
+                </div>
+            </div>"#
+        ));
+        let abspos = all(&doc, &local_name!("div"))[2];
+        let location = layouts.get(abspos).unwrap().location;
+        (location.x, location.y)
+    };
+    // From the outer div's corner: the container's padding (10), then the
+    // free space (200 - 50 across, 100 - 30 down), then the margin (5).
+    assert_eq!(place(""), (15.0, 15.0), "flex-start");
+    assert_eq!(place("justify-content: center"), (90.0, 15.0));
+    assert_eq!(place("justify-content: flex-end"), (165.0, 15.0));
+    assert_eq!(place("align-items: center"), (15.0, 50.0));
+    assert_eq!(place("align-items: flex-end"), (15.0, 85.0));
+    assert_eq!(
+        place("flex-direction: row-reverse"),
+        (165.0, 15.0),
+        "reversed start"
+    );
+    assert_eq!(
+        place("flex-direction: column; justify-content: center; align-items: flex-end"),
+        (165.0, 50.0)
+    );
+    assert_eq!(
+        place("justify-content: space-around"),
+        (90.0, 15.0),
+        "a sole item"
+    );
+}

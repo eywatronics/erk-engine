@@ -142,11 +142,7 @@ const TEXT_TOLERANCE: f32 = 1.0;
 /// Text nodes known to lie elsewhere than in Chrome, each with its reason:
 /// (page, text node, reason). The test fails on any other difference, and
 /// on a listed one that has gone, so the list cannot go stale.
-const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[(
-    "settings",
-    4,
-    "position: relative on an inline element does not move its text (top: -1px; M2.7)",
-)];
+const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[];
 
 /// A copy of `html` that loads the embedded fonts and runs `script` before
 /// `</body>`. The fonts go inside `<head>`, after the doctype: anything
