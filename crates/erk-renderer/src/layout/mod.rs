@@ -84,8 +84,8 @@ pub(crate) struct AnonymousText {
 /// content box.
 pub(crate) struct ShapedText {
     pub(crate) text: String,
-    /// Each text node's arena index and its range of `text`.
-    pub(crate) sources: Vec<(usize, std::ops::Range<usize>)>,
+    /// Each text node and its range of `text`.
+    pub(crate) sources: Vec<(NodeId, std::ops::Range<usize>)>,
     pub(crate) layout: InlineLayout,
     pub(crate) decorations: Vec<DecorationRect>,
 }
@@ -538,7 +538,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                                 text.clone(),
                                 style.clone(),
                                 text_language(doc, parent),
-                                child.index() as usize,
+                                child,
                             )],
                             Vec::new(),
                         ));
@@ -969,7 +969,7 @@ fn inline_tokens(
                     content.clone(),
                     style.clone(),
                     text_language(doc, id),
-                    child.index() as usize,
+                    child,
                 ));
             }
             Some(NodeData::Element(_)) => {

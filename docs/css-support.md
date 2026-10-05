@@ -110,6 +110,15 @@ does not lay out or paint is not supported.
 | `filter`, other `backdrop-filter` functions, `mix-blend-mode` | Not planned | Costly compositing effects; revisit only with the compositor (M9) |
 | `shape-outside`, `clip-path` | Not planned | |
 
+## Interaction
+
+| Feature | Status | Test / notes |
+|---|---|---|
+| Hit-testing: the topmost box under the pointer in paint order (stacking, `z-index`), text targets its element, `pointer-events: none` passes through, `visibility: hidden` is no target | Supported | `a_click_reports_the_element_under_the_pointer_and_its_path`, `a_click_on_text_targets_the_element_the_text_is_in`, `the_topmost_target_wins_and_untargetable_boxes_are_passed_through`. A point in the viewport no box covers belongs to the root element, as in browsers |
+| Click events with the path from the target to the root element, for the host to capture and bubble | Supported | `a_press_and_a_release_on_different_elements_click_their_common_ancestor`, `only_a_press_and_release_of_the_primary_button_click`. A press and release on different elements click their deepest common ancestor |
+| Inspecting: the node at a point, a highlight drawn over a node's boxes | Supported | `inspect_at_answers_the_topmost_node_or_none`, `the_highlight_is_drawn_over_the_page_and_not_into_it` |
+| Other `pointer-events` values (SVG) | Not planned | Only `auto` and `none` apply to HTML boxes |
+
 ## Forms
 
 | Feature | Status | Test / notes |

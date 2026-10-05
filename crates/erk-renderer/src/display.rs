@@ -52,8 +52,7 @@ pub(crate) struct DisplayList {
 /// same rectangles for a text node with `Range.getClientRects()`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TextFragment {
-    /// The text node's arena index.
-    pub(crate) node: usize,
+    pub(crate) node: NodeId,
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) width: f32,
@@ -108,7 +107,21 @@ pub(crate) enum DisplayItem {
     PushOpacity(f32),
     PopOpacity,
     Glyphs(GlyphRun),
+    /// Where `node` takes pointer input: an element's border box, or a line
+    /// of text standing for its element. Not painted and not in the dump;
+    /// sitting in paint order, the last one under a point is the topmost.
+    Hit {
+        node: NodeId,
+        frame: Frame,
+    },
+    /// The developer tools' highlight of a selected node's boxes: drawn
+    /// over the page, not part of the document (p1-contract §8.1).
+    Highlight(Frame),
 }
+
+/// The colour of the highlight overlay, as browsers' developer tools tint a
+/// selected element's box.
+pub(crate) const HIGHLIGHT: Rgba = [111, 168, 220, 166];
 
 /// A box in absolute coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -294,6 +307,14 @@ impl DisplayList {
                 DisplayItem::PopOpacity => {
                     let _ = writeln!(out, "end opacity");
                 }
+                DisplayItem::Hit { .. } => {}
+                DisplayItem::Highlight(frame) => {
+                    let _ = writeln!(
+                        out,
+                        "highlight {} {} {}x{}",
+                        frame.x, frame.y, frame.width, frame.height
+                    );
+                }
                 DisplayItem::Glyphs(run) => {
                     let (x, y) = run.glyphs.first().map_or((0.0, 0.0), |g| (g.x, g.y));
                     let _ = writeln!(
@@ -430,6 +451,11 @@ fn add_box(
             walk.resources,
             &mut context.backgrounds,
         );
+        if takes_pointer(style) {
+            context
+                .backgrounds
+                .push(DisplayItem::Hit { node: id, frame });
+        }
         // A replaced element's image fills its content box.
         if let Some(image) = walk.layouts.image(id) {
             let content = Frame {
@@ -464,14 +490,14 @@ fn add_box(
     if let Some(shaped) = walk.layouts.text(id) {
         let content_x = x + layout.border.left + layout.padding.left;
         let content_y = y + layout.border.top + layout.padding.top;
+        let fragments = text_fragments(shaped, (content_x, content_y));
         if visible {
             context
                 .inline
                 .extend(inline_content(shaped, (content_x, content_y)));
         }
-        walk.text
-            .borrow_mut()
-            .extend(text_fragments(shaped, (content_x, content_y)));
+        text_hits(walk, &fragments, &mut context.inline);
+        walk.text.borrow_mut().extend(fragments);
     }
 
     // Anonymous boxes inherit their block's visibility and have no
@@ -481,14 +507,14 @@ fn add_box(
             x + anonymous.layout.location.x,
             y + anonymous.layout.location.y,
         );
+        let fragments = text_fragments(&anonymous.text, origin);
         if visible {
             context
                 .inline
                 .extend(inline_content(&anonymous.text, origin));
         }
-        walk.text
-            .borrow_mut()
-            .extend(text_fragments(&anonymous.text, origin));
+        text_hits(walk, &fragments, &mut context.inline);
+        walk.text.borrow_mut().extend(fragments);
     }
 
     for child in walk.doc.children(id) {
@@ -537,6 +563,38 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
         .collect();
     items.extend(glyph_runs(&shaped.text, &shaped.layout, origin));
     items
+}
+
+/// Whether an element with `style` is a target for pointer input: shown,
+/// and not `pointer-events: none`.
+fn takes_pointer(style: &ComputedValues) -> bool {
+    use erk_style::style::computed_values::pointer_events::T as PointerEvents;
+    style.clone_visibility() == Visibility::Visible
+        && style.clone_pointer_events() != PointerEvents::None
+}
+
+/// A line of text takes pointer input for the element it is in.
+fn text_hits(walk: &Walk<'_>, fragments: &[TextFragment], out: &mut Vec<DisplayItem>) {
+    for fragment in fragments {
+        let Some(element) = walk.doc.node(fragment.node).and_then(|node| node.parent()) else {
+            continue;
+        };
+        if walk
+            .styles
+            .computed(element)
+            .is_some_and(|style| takes_pointer(&style))
+        {
+            out.push(DisplayItem::Hit {
+                node: element,
+                frame: Frame {
+                    x: fragment.x,
+                    y: fragment.y,
+                    width: fragment.width,
+                    height: fragment.height,
+                },
+            });
+        }
+    }
 }
 
 /// Where each text node of a shaped paragraph whose content box starts at

@@ -21,8 +21,9 @@ mod text;
 mod thread;
 
 pub use messages::{
-    ElementBox, FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest,
-    ResourceResponse, ScriptFallback, TextBox, ToRenderer,
+    ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Modifiers,
+    PointerButton, PointerInput, PointerKind, ResourceKind, ResourceRequest, ResourceResponse,
+    ScriptFallback, TextBox, ToRenderer,
 };
 pub use thread::spawn;
 
@@ -232,7 +233,7 @@ pub fn text_boxes(
         .iter()
         .filter_map(|fragment| {
             Some(TextBox {
-                index: *order.get(&fragment.node)?,
+                index: *order.get(&(fragment.node.index() as usize))?,
                 x: fragment.x,
                 y: fragment.y,
                 width: fragment.width,

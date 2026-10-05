@@ -87,7 +87,7 @@ fn next_frame(from: &Receiver<FromRenderer>) -> Frame {
     loop {
         match from.recv_timeout(PATIENCE) {
             Ok(FromRenderer::Frame(frame)) => break frame,
-            Ok(FromRenderer::Resources(_)) => {}
+            Ok(_) => {}
             Err(error) => panic!("no frame: {error:?}"),
         }
     }

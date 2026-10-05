@@ -280,7 +280,7 @@ fn deep_nesting_does_not_overflow_the_renderer_thread() {
     .unwrap();
     match from.recv_timeout(Duration::from_secs(120)) {
         Ok(FromRenderer::Frame(frame)) => assert_eq!(frame.width(), WIDTH),
-        Ok(FromRenderer::Resources(_)) => panic!("the page names no resource"),
+        Ok(_) => panic!("the page names no resource and nothing was asked"),
         Err(RecvTimeoutError::Timeout) => panic!("no frame for a deeply nested page"),
         Err(RecvTimeoutError::Disconnected) => panic!("the renderer thread died"),
     }
