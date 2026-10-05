@@ -10,7 +10,8 @@
 #[derive(Debug)]
 pub enum ToRenderer {
     /// Show this document. The host reads files, not the renderer: the
-    /// engine core does no I/O (.github/scripts/check-core-io.sh).
+    /// engine core does no I/O (.github/scripts/check-core-io.sh). Every
+    /// node of the document before it is removed: their ids go stale.
     Load { html: String },
     /// The viewport is now `width` × `height` device pixels.
     Resize { width: u16, height: u16 },
@@ -38,10 +39,21 @@ pub enum ToRenderer {
     /// Draw the developer tools' highlight over `node`'s boxes, or remove it
     /// (`None`). It is drawn over the page, never added to the document.
     Highlight { node: Option<u64> },
-    /// The first element matching `selector`, answered with
-    /// `FromRenderer::QueryResult` (`erk_query`). Only `#id` for now; full
-    /// selectors come with the host's mutations (M2.4).
-    Query { request: u64, selector: String },
+    /// The first element inside `scope` (the whole document for `None`)
+    /// matching the CSS selector list `selector`, answered with
+    /// `FromRenderer::QueryResult` (`erk_query`).
+    Query {
+        request: u64,
+        scope: Option<u64>,
+        selector: String,
+    },
+    /// Set `node`'s text as the DOM's `textContent` does (`erk_node_set_text`,
+    /// the first of M4's mutations), answered with `FromRenderer::Done`.
+    SetText {
+        request: u64,
+        node: u64,
+        text: String,
+    },
     /// Stop the renderer thread.
     Shutdown,
 }
@@ -58,11 +70,28 @@ pub enum FromRenderer {
     Event(Event),
     /// The answer to `ToRenderer::InspectAt`: the topmost node there, if any.
     Inspected { request: u64, node: Option<u64> },
-    /// The answer to `ToRenderer::Query`.
-    QueryResult { request: u64, node: Option<u64> },
+    /// The answer to `ToRenderer::Query`: the node, if one matches.
+    QueryResult {
+        request: u64,
+        result: Result<Option<u64>, Status>,
+    },
+    /// The answer to a change of the document (`ToRenderer::SetText`).
+    Done {
+        request: u64,
+        result: Result<(), Status>,
+    },
     /// The pointer should now look like this (the `cursor` property of
     /// what it is over). Sent when it changes.
     Cursor(Cursor),
+}
+
+/// Why a request failed: p1-contract §9's status codes, numbered the same.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// No node (0), a selector that does not parse.
+    InvalidArgument = 1,
+    /// The node was removed, or belonged to a document since replaced.
+    StaleNode = 2,
 }
 
 /// The CSS `cursor` keywords (CSS UI 4 §5.1), and `None` for a hidden

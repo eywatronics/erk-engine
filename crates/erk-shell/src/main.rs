@@ -10,6 +10,7 @@
 //! thread, only ever receives the document's text. The engine core does no
 //! I/O of its own; resources, time and configuration come from the host.
 
+mod counter;
 mod fonts;
 mod resources;
 mod window;

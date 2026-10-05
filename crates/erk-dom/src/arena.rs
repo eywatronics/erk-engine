@@ -110,6 +110,22 @@ impl<T> Arena<T> {
         slot.value.as_mut()
     }
 
+    /// Remove every value but `keep`'s: each removed id goes stale, as
+    /// [`Arena::remove`] makes it.
+    pub fn remove_all_but(&mut self, keep: NodeId) {
+        for index in 0..self.slots.len() {
+            let slot = &self.slots[index];
+            if index as u32 == keep.index || slot.value.is_none() {
+                continue;
+            }
+            let id = NodeId {
+                index: index as u32,
+                generation: slot.generation,
+            };
+            self.remove(id);
+        }
+    }
+
     /// Number of slots ever allocated, live or not. Side tables indexed by
     /// [`NodeId::index`] need this many entries.
     pub fn capacity_hint(&self) -> usize {

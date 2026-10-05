@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 
 use erk_dom::NodeId;
 
-use crate::messages::{Cursor, FromRenderer, ToRenderer};
+use crate::messages::{Cursor, FromRenderer, Status, ToRenderer};
 use crate::page::Page;
 use crate::resources::Resources;
 
@@ -56,7 +56,11 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             let before = page.as_ref().map(Page::interaction);
             let reply = match current {
                 ToRenderer::Load { html } => {
-                    page = Some(Page::parse(&html));
+                    // The same arena: the old document's ids go stale.
+                    match page.as_mut() {
+                        Some(page) => page.load(&html),
+                        None => page = Some(Page::parse(&html)),
+                    }
                     resources.new_document();
                     changed = true;
                     Vec::new()
@@ -118,13 +122,28 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                     }
                     Vec::new()
                 }
-                ToRenderer::Query { request, selector } => vec![FromRenderer::QueryResult {
+                ToRenderer::Query {
                     request,
-                    node: page
-                        .as_ref()
-                        .and_then(|page| page.query(&selector))
-                        .map(NodeId::to_bits),
+                    scope,
+                    selector,
+                } => vec![FromRenderer::QueryResult {
+                    request,
+                    result: page.as_ref().map_or(Ok(None), |page| {
+                        page.query(scope, &selector)
+                            .map(|node| node.map(NodeId::to_bits))
+                    }),
                 }],
+                ToRenderer::SetText {
+                    request,
+                    node,
+                    text,
+                } => {
+                    let result = page
+                        .as_mut()
+                        .map_or(Err(Status::StaleNode), |page| page.set_text(node, &text));
+                    changed |= result.is_ok();
+                    vec![FromRenderer::Done { request, result }]
+                }
                 ToRenderer::Shutdown => return,
             };
             if let (Some(page), Some(before)) = (page.as_ref(), before.as_ref()) {

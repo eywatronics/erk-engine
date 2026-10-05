@@ -12,6 +12,16 @@ impl Document {
     pub fn parse_html(html: &str) -> Self {
         parse_document(Sink::default(), ParseOpts::default()).one(html)
     }
+
+    /// Replace this document with `html`, parsed into the same arena: every
+    /// node of the old one is removed first, so its ids are stale and none
+    /// names a node of the new one (p1-contract §2). The document node
+    /// stays.
+    pub fn load_html(&mut self, html: &str) {
+        self.clear();
+        let doc = RefCell::new(std::mem::take(self));
+        *self = parse_document(Sink { doc }, ParseOpts::default()).one(html);
+    }
 }
 
 // html5ever's TreeSink methods take &self, so the document sits behind a
