@@ -914,3 +914,16 @@ fn a_flex_container_places_its_absolute_children() {
     assert_eq!(d[1].location.x, 90.0);
     assert_eq!((d[3].location.x, d[3].location.y), (7.0, 7.0));
 }
+
+#[test]
+fn an_absolutely_positioned_child_splits_a_flex_containers_text() {
+    // "Two" and "lines" are two anonymous flex items, stacked in a column
+    // (CSS Flexbox §4: each contiguous run of text is one).
+    let (doc, layouts) = lay_out(
+        r#"<div style="display: flex; flex-direction: column">Two <span style="position: absolute"></span>lines</div>"#,
+    );
+    let div = all(&doc, &local_name!("div"))[0];
+    let height = layouts.get(div).unwrap().size.height;
+    assert_eq!(height, 2.0 * one_line(), "two items, a line each");
+    assert_eq!(layouts.anonymous(div).len(), 2);
+}

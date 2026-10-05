@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Satır sonları</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .duzen { display: flex; gap: 24px; padding: 20px; }
+  .sutun { width: 230px; }
+  .kutu { margin-bottom: 14px; padding: 6px 8px; border: 1px solid #cbd5e1; background: #f1f5f9; }
+  .etiket { padding: 2px 8px; border-left: 4px solid #2563eb; background: #dbeafe; }
+  .rozet { padding: 1px 6px; border: 2px solid #16a34a; background: #dcfce7; }
+  .orta { text-align: center; }
+  .sag { text-align: right; }
+</style>
+</head>
+<body>
+  <div class="duzen">
+    <div class="sutun">
+      <div class="kutu">Ad Soyad<br>Ayşe Yılmaz<br>İzmir, Türkiye</div>
+      <div class="kutu">Boş satır<br><br>iki satır aşağıda</div>
+      <div class="kutu">Sonda kırılma<br></div>
+      <div class="kutu"><br></div>
+      <div class="kutu">Boşluklar <br>  kırılmada   <br> silinir</div>
+      <div class="kutu"><b>Kalın<br>devam</b> ve düz</div>
+    </div>
+    <div class="sutun">
+      <div class="kutu">Uzun bir cümlenin içinde <span class="etiket">kenarlıklı etiket</span> satır sonuna sığmaz.</div>
+      <div class="kutu">Birkaç kelime ve ardından <span class="rozet">rozet</span> <span class="rozet">ikinci</span> <span class="rozet">üçüncü rozet</span> gelir.</div>
+      <div class="kutu orta">Ortalanmış metin içinde <span class="etiket">alt satıra inen</span> etiket.</div>
+      <div class="kutu sag">Sağa dayalı satırda <span class="rozet">kırılan rozet</span> var.</div>
+      <div class="kutu">İç içe <span class="etiket">dış <span class="rozet">iç kenarlık</span> öğe</span> sonu.</div>
+    </div>
+  </div>
+</body>
+</html>

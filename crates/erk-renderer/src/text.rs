@@ -11,6 +11,8 @@ use std::ops::Range;
 use erk_dom::NodeId;
 use std::sync::Arc;
 
+use erk_style::style::computed_values::text_wrap_mode::T as TextWrapModeCss;
+use erk_style::style::computed_values::white_space_collapse::T as WhiteSpaceCollapse;
 use erk_style::style::properties::style_structs::Font as FontStyle;
 use erk_style::style::values::computed::font::LineHeight as CssLineHeight;
 use erk_style::style::values::computed::font::{GenericFontFamily, QueryFontMetricsFlags};
@@ -60,6 +62,8 @@ struct TextStyle {
     /// The text's language, for language-specific fallback fonts.
     language: Option<Language>,
     color: TextBrush,
+    /// Whether lines may break between words (`text-wrap-mode`).
+    wrap: bool,
 }
 
 impl TextStyle {
@@ -82,6 +86,7 @@ impl TextStyle {
                 color: srgb_bytes(style.clone_color()),
                 raise: 0.0,
             },
+            wrap: style.get_inherited_text().clone_text_wrap_mode() != TextWrapModeCss::Nowrap,
         }
     }
 
@@ -239,6 +244,8 @@ pub(crate) enum InlineToken<S> {
     /// that takes no room, marking its static position (CSS 2 §10.3.7).
     /// The arena index.
     Anchor(usize),
+    /// A forced line break (`<br>`).
+    Break,
 }
 
 /// An inline box in a paragraph's text, in text order.
@@ -252,8 +259,9 @@ pub(crate) struct InlineItem {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum InlineItemKind {
     /// Horizontal space an inline element takes at its start or end: its
-    /// margin, border and padding on that side.
-    Spacer(f32),
+    /// margin, border and padding on that side. An opening one goes with
+    /// the element's first character: no line breaks between them.
+    Spacer { width: f32, opening: bool },
     /// An atomic inline, by arena index, with its `vertical-align` and the
     /// inline box it is aligned in.
     Atom(usize, VerticalAlign, ParentBox),
@@ -351,6 +359,16 @@ pub(crate) struct Paragraph {
     /// Where each text node's text went: the node and its range of
     /// `text`, in text order.
     pub(crate) sources: Vec<(NodeId, Range<usize>)>,
+    /// A forced line break (`<br>`) not yet written: it becomes a newline
+    /// only before more content, so that one ending the block adds no line.
+    pending_break: bool,
+    /// The spaces `white-space` keeps (`pre`, `pre-wrap`): at the end of a
+    /// line they hang, but they are text all the same.
+    pub(crate) preserved: Vec<Range<usize>>,
+    /// Whether the last character written may not wrap (`nowrap`, `pre`),
+    /// and whether the pending space may: see `flush`.
+    last_nowrap: bool,
+    space_wraps: bool,
 }
 
 /// An inline element being read, until its `Close`.
@@ -361,6 +379,9 @@ struct OpenElement {
     end_spacer: f32,
     end_margin: f32,
     decoration: Option<InlineLook>,
+    /// How many decorations there were when it opened: its own goes there,
+    /// before those of the elements inside it, which are painted over it.
+    decorations_before: usize,
     /// Its text style and how far it is raised: the parent box of what it
     /// contains.
     style: TextStyle,
@@ -387,6 +408,10 @@ impl Paragraph {
             decorations: Vec::new(),
             raised: Vec::new(),
             sources: Vec::new(),
+            pending_break: false,
+            preserved: Vec::new(),
+            last_nowrap: false,
+            space_wraps: true,
         };
         let mut open: Vec<OpenElement> = Vec::new();
         // The box an element or atom is aligned in: the innermost open
@@ -426,13 +451,49 @@ impl Paragraph {
                         style.language = fonts::language(&lang.to_string());
                     }
                     style.color.raise = open.last().map_or(0.0, |element| element.raise);
+                    // `white-space`: `pre-line` keeps newlines, `pre` and
+                    // `pre-wrap` keep every space too (`break-spaces` is
+                    // laid out as `pre-wrap`).
+                    let collapse = match token_collapse(token) {
+                        Some(collapse) => collapse,
+                        None => WhiteSpaceCollapse::Collapse,
+                    };
+                    let keeps_spaces = !matches!(
+                        collapse,
+                        WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::PreserveBreaks
+                    );
+                    let keeps_breaks = collapse != WhiteSpaceCollapse::Collapse;
                     let mut start = None;
                     for c in raw.chars() {
                         previous = Some(c);
-                        if is_document_whitespace(c) {
+                        if c == '\n' && keeps_breaks {
+                            // A forced break, as a `<br>`: white space
+                            // around it that collapses goes.
+                            pending_space = false;
+                            space_owner = None;
+                            paragraph.flush(
+                                &mut closes,
+                                &mut pending_space,
+                                &mut last_was_space,
+                                &mut space_owner,
+                            );
+                            paragraph.pending_break = true;
+                            has_content = true;
+                            last_was_space = true;
+                            continue;
+                        }
+                        // A kept space or tab is text (a tab is one space
+                        // wide: tab stops come with `tab-size`, M5).
+                        let c = if keeps_spaces && is_document_whitespace(c) {
+                            ' '
+                        } else {
+                            c
+                        };
+                        if is_document_whitespace(c) && !keeps_spaces {
                             if has_content && !last_was_space && !pending_space {
                                 pending_space = true;
                                 space_owner = Some(*node);
+                                paragraph.space_wraps = style.wrap;
                             }
                             continue;
                         }
@@ -454,8 +515,18 @@ impl Paragraph {
                             &mut space_owner,
                         );
                         start.get_or_insert(paragraph.text.len());
+                        let at = paragraph.text.len();
                         paragraph.text.push(c);
+                        paragraph.last_nowrap = !style.wrap;
+                        if keeps_spaces && c == ' ' {
+                            match paragraph.preserved.last_mut() {
+                                Some(last) if last.end == at => last.end = at + 1,
+                                _ => paragraph.preserved.push(at..at + 1),
+                            }
+                        }
                         has_content = true;
+                        // A kept space is not one that collapses: a
+                        // collapsible space after it stays.
                         last_was_space = false;
                     }
                     if let Some(start) = start {
@@ -484,7 +555,10 @@ impl Paragraph {
                         .unwrap_or(parent.raise);
                     let sides = InlineSides::of(style);
                     let open_box = (sides.start > 0.0).then(|| {
-                        paragraph.push_item(InlineItemKind::Spacer(sides.start));
+                        paragraph.push_item(InlineItemKind::Spacer {
+                            width: sides.start,
+                            opening: true,
+                        });
                         (paragraph.items.len() - 1, sides.margin_start)
                     });
                     open.push(OpenElement {
@@ -494,6 +568,7 @@ impl Paragraph {
                         end_spacer: sides.end,
                         end_margin: sides.margin_end,
                         decoration: decoration_of(style),
+                        decorations_before: paragraph.decorations.len(),
                         style: text_style,
                         raise,
                         extents,
@@ -502,6 +577,22 @@ impl Paragraph {
                 InlineToken::Anchor(index) => {
                     // Not content: it neither emits nor swallows a space.
                     paragraph.push_item(InlineItemKind::Anchor(*index));
+                }
+                InlineToken::Break => {
+                    // White space before a forced break is removed, and
+                    // after it collapses away at the start of the next line
+                    // (CSS Text 3 §4.1.2).
+                    pending_space = false;
+                    space_owner = None;
+                    paragraph.flush(
+                        &mut closes,
+                        &mut pending_space,
+                        &mut last_was_space,
+                        &mut space_owner,
+                    );
+                    paragraph.pending_break = true;
+                    has_content = true;
+                    last_was_space = true;
                 }
                 InlineToken::Close => {
                     if let Some(element) = open.pop() {
@@ -530,6 +621,11 @@ impl Paragraph {
             closes.push((element, false));
         }
         pending_space = false;
+        // A break that ends the block ends its last line; alone, it makes
+        // the block one empty line, which a zero-width space holds.
+        if std::mem::take(&mut paragraph.pending_break) && paragraph.text.is_empty() {
+            paragraph.text.push('\u{200B}');
+        }
         paragraph.flush(
             &mut closes,
             &mut pending_space,
@@ -549,12 +645,24 @@ impl Paragraph {
         last_was_space: &mut bool,
         space_owner: &mut Option<NodeId>,
     ) {
+        if std::mem::take(&mut self.pending_break) {
+            self.text.push('\n');
+        }
         let (after, before): (Vec<_>, Vec<_>) =
             closes.drain(..).partition(|(_, after_space)| *after_space);
         for (element, _) in before {
             self.close(element);
         }
         if std::mem::take(pending_space) {
+            // Parley decides whether a space may hang at a line's end by
+            // the character before it: after text that may not wrap, a
+            // space that may would stay on the line and push what is before
+            // the no-wrap text down. A zero-width space between them, which
+            // adds no break opportunity of its own (UAX #14 LB8), lends the
+            // space its wrapping.
+            if self.last_nowrap && self.space_wraps {
+                self.text.push('\u{200B}');
+            }
             let at = self.text.len();
             self.text.push(' ');
             *last_was_space = true;
@@ -582,7 +690,10 @@ impl Paragraph {
 
     fn close(&mut self, element: OpenElement) {
         let close = (element.end_spacer > 0.0).then(|| {
-            self.push_item(InlineItemKind::Spacer(element.end_spacer));
+            self.push_item(InlineItemKind::Spacer {
+                width: element.end_spacer,
+                opening: false,
+            });
             (self.items.len() - 1, element.end_margin)
         });
         let text = element.text_start..self.text.len();
@@ -595,18 +706,21 @@ impl Paragraph {
             });
         }
         if let Some(look) = element.decoration {
-            self.decorations.push(Decoration {
-                text,
-                boxes: element.first_box..self.items.len(),
-                open: element.open,
-                close,
-                above: look.above,
-                below: look.below,
-                raise: element.raise,
-                color: look.color,
-                border: look.border,
-                border_colors: look.border_colors,
-            });
+            self.decorations.insert(
+                element.decorations_before,
+                Decoration {
+                    text,
+                    boxes: element.first_box..self.items.len(),
+                    open: element.open,
+                    close,
+                    above: look.above,
+                    below: look.below,
+                    raise: element.raise,
+                    color: look.color,
+                    border: look.border,
+                    border_colors: look.border_colors,
+                },
+            );
         }
     }
 
@@ -638,7 +752,7 @@ impl Paragraph {
     pub(crate) fn atoms(&self) -> impl Iterator<Item = usize> + '_ {
         self.items.iter().filter_map(|item| match item.kind {
             InlineItemKind::Atom(index, ..) => Some(index),
-            InlineItemKind::Spacer(_) | InlineItemKind::Anchor(_) => None,
+            InlineItemKind::Spacer { .. } | InlineItemKind::Anchor(_) => None,
         })
     }
 
@@ -786,7 +900,8 @@ impl InlineLayout {
     }
 
     /// The backgrounds of the paragraph's inline elements, one rectangle per
-    /// line each element spans, in the order the elements end.
+    /// line each element spans, in tree order: an element under those inside
+    /// it, as browsers paint them.
     pub(crate) fn decorations(&self, paragraph: &Paragraph) -> Vec<DecorationRect> {
         let mut rects = Vec::new();
         if paragraph.decorations.is_empty() {
@@ -965,6 +1080,154 @@ pub(crate) fn glyph_run_ranges(line: &parley::Line<'_, TextBrush>) -> Vec<Range<
         ranges.push(range.unwrap_or(start..start));
     }
     ranges
+}
+
+fn wrap_mode(style: &TextStyle) -> parley::TextWrapMode {
+    if style.wrap {
+        parley::TextWrapMode::Wrap
+    } else {
+        parley::TextWrapMode::NoWrap
+    }
+}
+
+/// The `white-space-collapse` of a text token.
+fn token_collapse<S: AsRef<ComputedValues>>(token: &InlineToken<S>) -> Option<WhiteSpaceCollapse> {
+    match token {
+        InlineToken::Text(_, style, ..) => Some(
+            style
+                .as_ref()
+                .get_inherited_text()
+                .clone_white_space_collapse(),
+        ),
+        _ => None,
+    }
+}
+
+/// Break `layout`'s lines at `max_advance`, keeping each inline element's
+/// edges with its text, as browsers do. Erk's element edges (border,
+/// padding, margin) are inline boxes, and Parley breaks next to an inline
+/// box: after it, so that a line can end with an opening edge whose text
+/// starts the next line, leaving the edge behind as a sliver; and before
+/// it when it does not fit, so that a closing edge can start a line alone.
+/// Such a line is broken again, narrower: before the opening edge, or
+/// before the last word the closing edge belongs to. It keeps its full
+/// width for alignment.
+fn break_lines(layout: &mut Layout<TextBrush>, paragraph: &Paragraph, max_advance: Option<f32>) {
+    let Some(max) = max_advance else {
+        // Nothing wraps.
+        layout.break_all_lines(None);
+        return;
+    };
+    // Narrower limits for the lines found to end with an edge.
+    let mut limits: Vec<Option<f32>> = Vec::new();
+    loop {
+        let mut breaker = layout.break_lines();
+        breaker.state_mut().set_layout_max_advance(max);
+        let mut line = 0;
+        loop {
+            let limit = limits.get(line).copied().flatten();
+            breaker
+                .state_mut()
+                .set_line_max_advance(limit.unwrap_or(max));
+            if breaker.break_next().is_none() {
+                break;
+            }
+            if limit.is_some() {
+                breaker.set_prior_line_width(max);
+            }
+            line += 1;
+        }
+        breaker.finish();
+        match dangling_edge(layout, paragraph, max) {
+            Some((line, x)) if limits.get(line).copied().flatten().is_none() => {
+                if limits.len() <= line {
+                    limits.resize(line + 1, None);
+                }
+                limits[line] = Some(x);
+            }
+            _ => return,
+        }
+    }
+}
+
+/// The first line that an element's edge is cut off from its text at, and
+/// the width to break it at instead: a line (not the last) ending with
+/// opening edges breaks before the first of them; the line before one that
+/// starts with closing edges breaks before its content's end, which puts
+/// its last word on the next line. White space does not count as text. A
+/// line that begins with the opening edges, or holds nothing before the
+/// closing ones, is left: no earlier break would help.
+fn dangling_edge(
+    layout: &Layout<TextBrush>,
+    paragraph: &Paragraph,
+    max: f32,
+) -> Option<(usize, f32)> {
+    let edge_of = |id: u64| match paragraph.items.get(id as usize).map(|item| &item.kind) {
+        Some(InlineItemKind::Spacer { opening, .. }) => Some(*opening),
+        _ => None,
+    };
+    let is_text = |run: &parley::GlyphRun<'_, TextBrush>| {
+        !paragraph
+            .text
+            .get(run.run().text_range())
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+    };
+    let lines: Vec<_> = layout.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        // Opening edges at the end, and where the content before them ends.
+        let mut opening: Option<f32> = None;
+        let mut content_end = 0.0_f32;
+        for item in line.items() {
+            match item {
+                PositionedLayoutItem::InlineBox(inline_box) => {
+                    if edge_of(inline_box.id) == Some(true) {
+                        opening.get_or_insert(inline_box.x);
+                    } else {
+                        opening = None;
+                    }
+                    content_end = content_end.max(inline_box.x + inline_box.width);
+                }
+                PositionedLayoutItem::GlyphRun(run) => {
+                    if is_text(&run) {
+                        opening = None;
+                        content_end = content_end.max(run.offset() + run.advance());
+                    }
+                }
+            }
+        }
+        let Some(next) = lines.get(index + 1) else {
+            break;
+        };
+        // A narrower width helps only if it is narrower than the line's.
+        let useful = |x: &f32| *x > 0.0 && *x < max;
+        if let Some(x) = opening.filter(useful) {
+            return Some((index, x));
+        }
+        // Closing edges before any text on the next line.
+        let mut starts_closed = false;
+        for item in next.items() {
+            match item {
+                PositionedLayoutItem::InlineBox(inline_box) => {
+                    if edge_of(inline_box.id) == Some(false) {
+                        starts_closed = true;
+                    } else {
+                        break;
+                    }
+                }
+                PositionedLayoutItem::GlyphRun(run) => {
+                    if is_text(&run) {
+                        break;
+                    }
+                }
+            }
+        }
+        if starts_closed && useful(&(content_end - 0.5)) {
+            return Some((index, content_end - 0.5));
+        }
+    }
+    None
 }
 
 /// One cluster of a line as it was placed: its range of the paragraph's
@@ -1296,7 +1559,7 @@ impl TextEngine {
                         align,
                         parent,
                     )),
-                    InlineItemKind::Spacer(_) | InlineItemKind::Anchor(_) => None,
+                    InlineItemKind::Spacer { .. } | InlineItemKind::Anchor(_) => None,
                 })
                 .collect();
             let (strut_above, strut_below) = paragraph.strut();
@@ -1427,6 +1690,7 @@ impl TextEngine {
         builder.push_default(StyleProperty::LineHeight(base.line_height));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(base.weight)));
         builder.push_default(StyleProperty::Brush(base.color));
+        builder.push_default(StyleProperty::TextWrapMode(wrap_mode(base)));
         for ((range, style), locale) in paragraph.spans.iter().zip(locales) {
             builder.push(
                 StyleProperty::FontFamily(Self::family_list(style)),
@@ -1446,11 +1710,12 @@ impl TextEngine {
                 range.clone(),
             );
             builder.push(StyleProperty::Brush(style.color), range.clone());
+            builder.push(StyleProperty::TextWrapMode(wrap_mode(style)), range.clone());
         }
         let mut atoms = atoms.iter();
         for (id, item) in paragraph.items.iter().enumerate() {
             let width = match item.kind {
-                InlineItemKind::Spacer(width) => width,
+                InlineItemKind::Spacer { width, .. } => width,
                 InlineItemKind::Anchor(_) => 0.0,
                 InlineItemKind::Atom(..) => atoms.next().map_or(0.0, |atom| atom.width),
             };
@@ -1463,7 +1728,7 @@ impl TextEngine {
             });
         }
         let mut layout = builder.build(&paragraph.text);
-        layout.break_all_lines(max_advance);
+        break_lines(&mut layout, paragraph, max_advance);
         layout
     }
 
@@ -1506,12 +1771,17 @@ mod tests {
                 families: Arc::new([]),
                 language: None,
                 color: TextBrush::default(),
+                wrap: true,
             },
             spans: Vec::new(),
             align: Alignment::Start,
             items: Vec::new(),
             decorations: Vec::new(),
             raised: Vec::new(),
+            pending_break: false,
+            preserved: Vec::new(),
+            last_nowrap: false,
+            space_wraps: true,
             sources: Vec::new(),
         }
     }

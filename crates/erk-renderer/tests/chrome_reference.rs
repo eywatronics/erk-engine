@@ -142,28 +142,11 @@ const TEXT_TOLERANCE: f32 = 1.0;
 /// Text nodes known to lie elsewhere than in Chrome, each with its reason:
 /// (page, text node, reason). The test fails on any other difference, and
 /// on a listed one that has gone, so the list cannot go stale.
-const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[
-    (
-        "borders",
-        2,
-        "the wrapped inline element's opening edge stays on this line, so the space before it is not at the line's end (M2.6)",
-    ),
-    (
-        "borders",
-        3,
-        "an inline element that wraps leaves its 6px left border on the previous line (M2.6)",
-    ),
-    (
-        "borders",
-        4,
-        "on the line of the wrapped inline element above, so 6px to the left too (M2.6)",
-    ),
-    (
-        "settings",
-        4,
-        "position: relative on an inline element does not move its text (top: -1px; M2.7)",
-    ),
-];
+const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[(
+    "settings",
+    4,
+    "position: relative on an inline element does not move its text (top: -1px; M2.7)",
+)];
 
 /// A copy of `html` that loads the embedded fonts and runs `script` before
 /// `</body>`. The fonts go inside `<head>`, after the doctype: anything
@@ -872,6 +855,25 @@ fn erk_text_matches_chrome() {
                 [fields[0], fields[1], fields[2], fields[3], fields[4]]
             })
             .collect();
+        // Chrome gives a line of one text node several rectangles where
+        // white space it keeps hangs or leads: one line, their union.
+        let chrome = chrome
+            .into_iter()
+            .fold(Vec::<[f32; 5]>::new(), |mut lines, rect| {
+                match lines.last_mut() {
+                    Some(last)
+                        if last[0] == rect[0]
+                            && (last[2] - rect[2]).abs() < 0.5
+                            && (last[4] - rect[4]).abs() < 0.5 =>
+                    {
+                        let right = (last[1] + last[3]).max(rect[1] + rect[3]);
+                        last[1] = last[1].min(rect[1]);
+                        last[3] = right - last[1];
+                    }
+                    _ => lines.push(rect),
+                }
+                lines
+            });
         let nodes = chrome
             .iter()
             .map(|line| line[0] as usize)

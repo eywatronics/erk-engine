@@ -5,13 +5,14 @@
 #   name score  # lowered: reason
 # Rules: the project rules file, section "Referans testi".
 blocks 100.00
-borders 92.30
+borders 94.88
 canvas-alpha 97.81
 flex-form 97.21
 hidpi 96.19
 images 98.12
 inline-boxes 75.10
 inline-styles 48.60
+line-breaks 94.94
 merhaba 91.26
 mixed-content 98.33
 overflow 93.35
@@ -23,3 +24,4 @@ states 96.39
 text-align 93.48
 text-transform 95.74
 vertical-align 68.11
+white-space 92.35

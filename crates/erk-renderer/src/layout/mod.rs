@@ -86,6 +86,10 @@ pub(crate) struct ShapedText {
     pub(crate) text: String,
     /// Each text node and its range of `text`.
     pub(crate) sources: Vec<(NodeId, std::ops::Range<usize>)>,
+    /// The spaces `white-space` keeps.
+    pub(crate) preserved: Vec<std::ops::Range<usize>>,
+    /// The ids of the inline boxes that are atomic inlines, not edges.
+    pub(crate) atom_boxes: Vec<u64>,
     pub(crate) layout: InlineLayout,
     pub(crate) decorations: Vec<DecorationRect>,
 }
@@ -161,6 +165,14 @@ pub(crate) fn layout(
             Some(ShapedText {
                 text: paragraph.text.clone(),
                 sources: paragraph.sources.clone(),
+                preserved: paragraph.preserved.clone(),
+                atom_boxes: paragraph
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| matches!(item.kind, crate::text::InlineItemKind::Atom(..)))
+                    .map(|(id, _)| id as u64)
+                    .collect(),
                 decorations: layout.decorations(paragraph),
                 layout,
             })
@@ -622,6 +634,18 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                 Entry::OutOfFlow(child) => {
                     let index = child.index() as usize;
                     if !block_container {
+                        // It ends the text run before it: the text on each
+                        // side is an anonymous item of its own (CSS Flexbox
+                        // §4: "contiguous" runs).
+                        run.close(
+                            &mut nodes,
+                            &mut calcs,
+                            &mut stack,
+                            &mut children,
+                            parent,
+                            &parent_style,
+                            container,
+                        );
                         // A placeholder would be a flex or grid item of its
                         // own. When the container is also the containing
                         // block, Taffy places the element as if it were the
@@ -857,7 +881,7 @@ impl Run {
     fn has_content(&self) -> bool {
         self.tokens.iter().any(|token| match token {
             InlineToken::Text(text, ..) => text.chars().any(|c| !c.is_ascii_whitespace()),
-            InlineToken::Atom(..) | InlineToken::Anchor(_) => true,
+            InlineToken::Atom(..) | InlineToken::Anchor(_) | InlineToken::Break => true,
             InlineToken::Open(_) | InlineToken::Close => false,
         })
     }
@@ -961,6 +985,15 @@ fn inline_tokens(
     atoms: &mut Atoms,
     out_of_flow: &mut OutOfFlow,
 ) {
+    // `<br>` is a forced line break, not an element with content.
+    if doc
+        .node(id)
+        .and_then(|node| node.as_element())
+        .is_some_and(|element| element.name.local == erk_dom::local_name!("br"))
+    {
+        tokens.push(InlineToken::Break);
+        return;
+    }
     tokens.push(InlineToken::Open(style.clone()));
     for child in doc.children(id) {
         match doc.node(child).map(|node| &node.data) {
