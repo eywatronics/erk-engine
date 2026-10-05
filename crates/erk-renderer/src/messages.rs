@@ -27,6 +27,8 @@ pub enum ToRenderer {
     ResourceMissing { id: u64 },
     /// Pointer input over the page.
     Pointer(PointerInput),
+    /// A key went down or up while the page has the keyboard.
+    Key(KeyInput),
     /// Which node is under the point `x`, `y` (CSS pixels)? Answered with
     /// `FromRenderer::Inspected` (p1-contract §8.1, `erk_inspect_at`).
     InspectAt { request: u64, x: f32, y: f32 },
@@ -48,7 +50,8 @@ pub enum FromRenderer {
     /// The document names resources the host has not been asked for yet.
     /// Sent before the frame that is painted without them.
     Resources(Vec<ResourceRequest>),
-    /// Something happened on the page the host may answer (a click).
+    /// Something happened on the page the host may answer (a click, a
+    /// change of focus).
     Event(Event),
     /// The answer to `ToRenderer::InspectAt`: the topmost node there, if any.
     Inspected { request: u64, node: Option<u64> },
@@ -94,6 +97,32 @@ pub struct Modifiers {
     pub meta: bool,
 }
 
+/// One key action. Only the keys the engine acts on are told apart; the
+/// rest arrive as `Other` and are ignored until text input (M5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyInput {
+    pub key: Key,
+    pub state: KeyState,
+    pub modifiers: Modifiers,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Key {
+    Tab,
+    Enter,
+    Space,
+    Escape,
+    /// A key that types `text`.
+    Character(String),
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyState {
+    Down,
+    Up,
+}
+
 /// An event on the page, as p1-contract's `ErkEvent` describes it: its
 /// kind, the node it happened to, and the path from that node up to the
 /// root element, from which the host dispatches the capture, target and
@@ -113,6 +142,10 @@ pub struct Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     Click = 1,
+    /// `target` received the focus.
+    Focus = 7,
+    /// `target` lost the focus.
+    Blur = 8,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

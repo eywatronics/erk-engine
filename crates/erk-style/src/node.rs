@@ -335,12 +335,12 @@ impl Element for ErkNode<'_> {
             NonTSPseudoClass::Disabled => state.contains(ElementState::DISABLED),
             NonTSPseudoClass::Enabled => state.contains(ElementState::ENABLED),
             NonTSPseudoClass::Focus => state.contains(ElementState::FOCUS),
+            NonTSPseudoClass::FocusWithin => state.contains(ElementState::FOCUS_WITHIN),
             NonTSPseudoClass::Hover => state.contains(ElementState::HOVER),
             NonTSPseudoClass::Link => state.contains(ElementState::UNVISITED),
             NonTSPseudoClass::Valid
             | NonTSPseudoClass::Invalid
             | NonTSPseudoClass::Defined
-            | NonTSPseudoClass::FocusWithin
             | NonTSPseudoClass::FocusVisible
             | NonTSPseudoClass::Fullscreen
             | NonTSPseudoClass::Indeterminate

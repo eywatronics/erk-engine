@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Durumlar</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .arac { display: flex; gap: 12px; padding: 16px 20px; background: #f1f5f9; }
+  .dugme { padding: 8px 16px; background: #e2e8f0; color: #1f2933; border: 2px solid #94a3b8; text-decoration: none; }
+  .dugme:hover { background: #bfdbfe; border-color: #3b82f6; }
+  .dugme:active { background: #1d4ed8; color: #ffffff; }
+  .dugme:focus { border-color: #f59e0b; }
+  .birincil { background: #2563eb; color: #ffffff; border-color: #1e40af; }
+  .birincil:hover { background: #1d4ed8; }
+  .form { margin: 20px; padding: 16px; width: 360px; border: 2px solid #cbd5e1; }
+  .form:focus-within { border-color: #22c55e; background: #f0fdf4; }
+  .alan { margin-top: 8px; padding: 6px 10px; height: 20px; background: #ffffff; border: 1px solid #94a3b8; }
+  .alan:focus { border-color: #22c55e; }
+  .liste { margin: 0 20px; width: 364px; border: 1px solid #cbd5e1; }
+  .oge { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }
+  .oge:hover { background: #f1f5f9; }
+  .oge:hover .not { color: #1d4ed8; }
+  .not { color: #64748b; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="arac">
+    <a class="dugme" id="kaydet" href="#kaydet">Kaydet</a>
+    <div class="dugme" id="vazgec" tabindex="0">Vazgeç</div>
+    <div class="dugme birincil" id="gonder" tabindex="0">Gönder</div>
+  </div>
+  <div class="form" id="form">
+    <div>Ad</div>
+    <div class="alan" id="ad" tabindex="0">Ayşe</div>
+    <div style="margin-top: 12px">Şehir</div>
+    <div class="alan" id="sehir" tabindex="0">İzmir</div>
+  </div>
+  <div class="liste">
+    <div class="oge" id="oge1">Birinci öğe <span class="not">bugün</span></div>
+    <div class="oge" id="oge2">İkinci öğe <span class="not">dün</span></div>
+    <div class="oge" id="oge3">Üçüncü öğe <span class="not">geçen hafta</span></div>
+  </div>
+</body>
+</html>

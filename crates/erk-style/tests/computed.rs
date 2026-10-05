@@ -1,7 +1,7 @@
 use erk_dom::{Document, LocalName, NodeId};
 use erk_style::style::values::computed::Display;
 use erk_style::style::values::generics::length::GenericMargin;
-use erk_style::{ComputedValues, StyleEngine, Styles};
+use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
 
 fn style(html: &str) -> (Document, Styles) {
     let doc = Document::parse_html(html);
@@ -159,4 +159,124 @@ fn the_viewport_stays_in_css_pixels_at_any_scale() {
         .with_device_scale(2.0)
         .style(&doc);
     assert_eq!(rgb(&computed(&doc, &styles, "p")), [1.0, 0.0, 0.0]);
+}
+
+const STATES: &str = "<style>
+    section:hover, section:active, section:focus-within { color: rgb(0, 0, 255) }
+    p:hover { color: rgb(255, 0, 0) }
+    p:active { color: rgb(0, 255, 0) }
+    p:focus { color: rgb(255, 255, 0) }
+    </style><section><article><p>x</p></article><aside>y</aside></section>";
+
+fn style_with(interaction: impl Fn(&Document) -> Interaction) -> (Document, Styles) {
+    let doc = Document::parse_html(STATES);
+    let styles = StyleEngine::new(800.0, 600.0).style_with(&doc, &interaction(&doc));
+    (doc, styles)
+}
+
+#[test]
+fn hover_active_and_focus_match_the_element_the_user_points_at() {
+    let black = [0.0, 0.0, 0.0];
+    let (doc, styles) = style_with(|_| Interaction::default());
+    assert_eq!(rgb(&computed(&doc, &styles, "p")), black);
+    assert_eq!(rgb(&computed(&doc, &styles, "section")), black);
+
+    for (state, colour) in [
+        ("hover", [1.0, 0.0, 0.0]),
+        ("active", [0.0, 1.0, 0.0]),
+        ("focus", [1.0, 1.0, 0.0]),
+    ] {
+        let (doc, styles) = style_with(|doc| {
+            let p = Some(find(doc, "p"));
+            match state {
+                "hover" => Interaction {
+                    hover: p,
+                    ..Default::default()
+                },
+                "active" => Interaction {
+                    active: p,
+                    ..Default::default()
+                },
+                _ => Interaction {
+                    focus: p,
+                    ..Default::default()
+                },
+            }
+        });
+        assert_eq!(rgb(&computed(&doc, &styles, "p")), colour, "{state}");
+        // The state reaches the ancestors (`:focus-within` for the focus)...
+        assert_eq!(
+            rgb(&computed(&doc, &styles, "section")),
+            [0.0, 0.0, 1.0],
+            "{state}"
+        );
+        // ...and not a sibling.
+        assert_eq!(
+            rgb(&computed(&doc, &styles, "aside")),
+            [0.0, 0.0, 1.0],
+            "{state}: inherits from section"
+        );
+    }
+
+    // The sibling under the pointer: its parent hovers, the paragraph does not.
+    let (doc, styles) = style_with(|doc| Interaction {
+        hover: Some(find(doc, "aside")),
+        ..Default::default()
+    });
+    assert_eq!(rgb(&computed(&doc, &styles, "section")), [0.0, 0.0, 1.0]);
+    assert_eq!(
+        rgb(&computed(&doc, &styles, "p")),
+        [0.0, 0.0, 1.0],
+        "inherits; not :hover"
+    );
+}
+
+#[test]
+fn a_node_that_is_not_in_the_document_puts_no_element_in_a_state() {
+    // The paragraph's slot one generation on: a node removed and replaced.
+    let stale = |doc: &Document| NodeId::from_bits(find(doc, "p").to_bits() + (1 << 32));
+    let (doc, styles) = style_with(|doc| Interaction {
+        hover: stale(doc),
+        active: stale(doc),
+        focus: stale(doc),
+    });
+    for tag in ["section", "article", "p", "aside"] {
+        assert_eq!(rgb(&computed(&doc, &styles, tag)), [0.0, 0.0, 0.0], "{tag}");
+    }
+}
+
+#[test]
+fn styles_say_which_states_their_selectors_depend_on() {
+    let doc = Document::parse_html(STATES);
+    let p = Some(find(&doc, "p"));
+    let none = Interaction::default();
+    let styles = StyleEngine::new(800.0, 600.0).style(&doc);
+    for changed in [
+        Interaction { hover: p, ..none },
+        Interaction { active: p, ..none },
+        Interaction { focus: p, ..none },
+    ] {
+        assert!(styles.react_to(&none, &changed), "{changed:?}");
+        assert!(!styles.react_to(&changed, &changed), "{changed:?}");
+    }
+
+    let doc = Document::parse_html("<style>p:hover { color: red }</style><p>x</p>");
+    let p = Some(find(&doc, "p"));
+    let styles = StyleEngine::new(800.0, 600.0).style(&doc);
+    assert!(styles.react_to(&none, &Interaction { hover: p, ..none }));
+    assert!(!styles.react_to(&none, &Interaction { active: p, ..none }));
+    assert!(!styles.react_to(&none, &Interaction { focus: p, ..none }));
+
+    let doc = Document::parse_html("<p>x</p>");
+    let p = Some(find(&doc, "p"));
+    let styles = StyleEngine::new(800.0, 600.0).style(&doc);
+    let all = Interaction {
+        hover: p,
+        active: p,
+        focus: p,
+    };
+    assert!(
+        !styles.react_to(&none, &all),
+        "the UA stylesheet has no state rules"
+    );
 }
