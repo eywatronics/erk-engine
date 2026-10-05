@@ -27,6 +27,11 @@ allow = [
     # Public-domain-like, no obligations.
     "Unlicense",
     "0BSD",
+    # A public-domain dedication, no obligations: hexf-parse, a hex float
+    # parser in naga (wgpu's shader compiler, the GPU path, M2.5). Unlike the
+    # two above it says outright that it grants no patent licence; for a
+    # parser of float literals that was judged acceptable (2026-10-05).
+    "CC0-1.0",
     # Stylo and its servo crates. File-level copyleft: modified MPL files stay
     # open, the application around them does not. Erk does not patch them.
     "MPL-2.0",

@@ -83,6 +83,21 @@ pub enum FromRenderer {
     /// The pointer should now look like this (the `cursor` property of
     /// what it is over). Sent when it changes.
     Cursor(Cursor),
+    /// How a renderer started on a window draws: first thing, and again if
+    /// the GPU path is lost and it falls back.
+    Raster(Raster),
+    /// A frame went to the window on the GPU, `width` × `height` device
+    /// pixels: there is no `Frame` to show, the window already shows it.
+    Presented { width: u16, height: u16 },
+}
+
+/// How the renderer draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Raster {
+    /// With vello_hybrid on this GPU adapter, into the window.
+    Gpu { adapter: String },
+    /// With vello_cpu, into frames the host shows, and why not on the GPU.
+    Cpu { reason: String },
 }
 
 /// Why a request failed: p1-contract §9's status codes, numbered the same.

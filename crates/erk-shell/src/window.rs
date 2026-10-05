@@ -1,19 +1,21 @@
-//! The window: winit for events, softbuffer to put the renderer's frames on
-//! screen.
+//! The window: winit for events; the renderer draws into it on the GPU, or
+//! sends frames that softbuffer puts on screen.
 //!
-//! Frames arrive on the renderer's channel, which the event loop cannot wait
-//! on, so a small forwarding thread turns each one into a winit user event.
-//! The renderer never sees winit.
+//! The renderer starts once the window exists, on the window: its GPU path
+//! draws into the window's surface (M2.5). Frames, when it falls back to the
+//! CPU, arrive on its channel, which the event loop cannot wait on, so a
+//! small forwarding thread turns each message into a winit user event. The
+//! renderer never sees winit: it takes the window as a raw window handle.
 
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
+use std::thread::JoinHandle;
 
 use erk_renderer::{
-    Cursor, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
-    PointerKind, ToRenderer,
+    Cursor, FontCatalog, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton,
+    PointerInput, PointerKind, Raster, ToRenderer,
 };
 use softbuffer::{Context, Surface};
 
@@ -23,7 +25,7 @@ use crate::resources::Provider;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
@@ -33,71 +35,38 @@ const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(800.0, 600.0);
 enum UserEvent {
     Frame(Frame),
     Cursor(Cursor),
+    Raster(Raster),
     /// The renderer's channel closed while the window was open: the
     /// renderer has stopped, and the window would only show a stale frame.
     RendererGone,
 }
 
+/// What the renderer starts with, once the window exists.
+struct Startup {
+    html: String,
+    fonts: FontCatalog,
+    provider: Provider,
+    /// Whether to try the GPU path.
+    gpu: bool,
+}
+
+/// The running renderer and the thread that forwards what it says.
+struct Running {
+    to: Sender<ToRenderer>,
+    thread: JoinHandle<()>,
+    forwarder: JoinHandle<()>,
+}
+
 /// Open `page` (already read as `html`) in a window and run until it closes.
-pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
+pub(crate) fn run(page: &Path, html: String, gpu: bool) -> Result<(), String> {
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| e.to_string())?;
-
-    let (to_renderer, from_renderer, renderer) = erk_renderer::spawn();
-    let proxy = event_loop.create_proxy();
-    // The forwarder also answers the renderer's resource requests: the host
-    // reads files, the renderer never does.
     // The system's fonts: the catalogue goes to the renderer before the
     // page, the files are read when it asks for them.
     let fonts = Arc::new(SystemFonts::scan());
-    let _ = to_renderer.send(ToRenderer::Fonts(fonts.catalogue().clone()));
+    let catalogue = fonts.catalogue().clone();
     let provider = Provider::for_page(page).with_fonts(fonts);
-    let answers = to_renderer.clone();
-    // The demo host: the counter, on pages that have one.
-    let (mut counter, questions) = Counter::start();
-    let forwarder = std::thread::Builder::new()
-        .name("erk-frames".to_owned())
-        .spawn(move || {
-            for message in from_renderer {
-                for answer in counter.on(&message) {
-                    let _ = answers.send(answer);
-                }
-                match message {
-                    FromRenderer::Frame(frame) => {
-                        if proxy.send_event(UserEvent::Frame(frame)).is_err() {
-                            return; // the event loop has exited
-                        }
-                    }
-                    FromRenderer::Resources(requests) => {
-                        for request in &requests {
-                            let _ = answers.send(provider.answer(request));
-                        }
-                    }
-                    FromRenderer::Cursor(cursor) => {
-                        if proxy.send_event(UserEvent::Cursor(cursor)).is_err() {
-                            return;
-                        }
-                    }
-                    // Events, answers and changes are the demo host's.
-                    FromRenderer::Event(_)
-                    | FromRenderer::Inspected { .. }
-                    | FromRenderer::QueryResult { .. }
-                    | FromRenderer::Done { .. } => {}
-                }
-            }
-            // Fails harmlessly when the event loop has already exited, as it
-            // has after a normal shutdown.
-            let _ = proxy.send_event(UserEvent::RendererGone);
-        })
-        .expect("the frame forwarding thread starts");
-
-    // A send only fails if the renderer is gone, which the forwarder and
-    // `finish` below report.
-    let _ = to_renderer.send(ToRenderer::Load { html });
-    for question in questions {
-        let _ = to_renderer.send(question);
-    }
     let title = format!(
         "Erk — {}",
         page.file_name().map_or_else(
@@ -107,7 +76,14 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
     );
     let mut app = App {
         title,
-        to_renderer,
+        proxy: event_loop.create_proxy(),
+        startup: Some(Startup {
+            html,
+            fonts: catalogue,
+            provider,
+            gpu,
+        }),
+        renderer: None,
         window: None,
         frame: None,
         pointer: (0.0, 0.0),
@@ -115,10 +91,65 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
     };
     let result = event_loop.run_app(&mut app);
 
-    let _ = app.to_renderer.send(ToRenderer::Shutdown);
-    let renderer = renderer.join();
-    let _ = forwarder.join();
+    let renderer = match app.renderer.take() {
+        Some(running) => {
+            let _ = running.to.send(ToRenderer::Shutdown);
+            let joined = running.thread.join();
+            let _ = running.forwarder.join();
+            joined
+        }
+        None => Ok(()),
+    };
     finish(result, renderer)
+}
+
+/// Forward what the renderer says to the event loop, answering its
+/// resource requests and running the demo host on the way: the host reads
+/// files, the renderer never does. Returns the thread and the questions
+/// the demo host asks the page, to send after it.
+fn forward(
+    from: Receiver<FromRenderer>,
+    answers: Sender<ToRenderer>,
+    provider: Provider,
+    proxy: EventLoopProxy<UserEvent>,
+) -> (JoinHandle<()>, Vec<ToRenderer>) {
+    // The demo host: the counter, on pages that have one.
+    let (mut counter, questions) = Counter::start();
+    let thread = std::thread::Builder::new()
+        .name("erk-frames".to_owned())
+        .spawn(move || {
+            for message in from {
+                for answer in counter.on(&message) {
+                    let _ = answers.send(answer);
+                }
+                let event = match message {
+                    FromRenderer::Frame(frame) => UserEvent::Frame(frame),
+                    FromRenderer::Cursor(cursor) => UserEvent::Cursor(cursor),
+                    FromRenderer::Raster(raster) => UserEvent::Raster(raster),
+                    FromRenderer::Resources(requests) => {
+                        for request in &requests {
+                            let _ = answers.send(provider.answer(request));
+                        }
+                        continue;
+                    }
+                    // Drawn into the window already; events, answers and
+                    // changes are the demo host's.
+                    FromRenderer::Presented { .. }
+                    | FromRenderer::Event(_)
+                    | FromRenderer::Inspected { .. }
+                    | FromRenderer::QueryResult { .. }
+                    | FromRenderer::Done { .. } => continue,
+                };
+                if proxy.send_event(event).is_err() {
+                    return; // the event loop has exited
+                }
+            }
+            // Fails harmlessly when the event loop has already exited, as it
+            // has after a normal shutdown.
+            let _ = proxy.send_event(UserEvent::RendererGone);
+        })
+        .expect("the frame forwarding thread starts");
+    (thread, questions)
 }
 
 /// The window's outcome. A renderer that panicked is an error even though
@@ -134,13 +165,18 @@ fn finish(
 }
 
 struct WindowState {
-    window: Rc<Window>,
-    surface: Surface<Rc<Window>, Rc<Window>>,
+    window: Arc<Window>,
+    /// softbuffer's surface, made when the first CPU frame arrives: on the
+    /// GPU path the renderer draws into the window itself.
+    surface: Option<Surface<Arc<Window>, Arc<Window>>>,
 }
 
 struct App {
     title: String,
-    to_renderer: Sender<ToRenderer>,
+    proxy: EventLoopProxy<UserEvent>,
+    /// Until the window exists.
+    startup: Option<Startup>,
+    renderer: Option<Running>,
     window: Option<WindowState>,
     /// The latest frame from the renderer, kept for redraws.
     frame: Option<Frame>,
@@ -151,17 +187,49 @@ struct App {
 }
 
 impl App {
+    fn send(&self, message: ToRenderer) {
+        // A send only fails if the renderer is gone, which the forwarder
+        // and `finish` report.
+        if let Some(running) = &self.renderer {
+            let _ = running.to.send(message);
+        }
+    }
+
+    /// Start the renderer on `window`.
+    fn start_renderer(&mut self, window: &Arc<Window>) {
+        let Some(startup) = self.startup.take() else {
+            return;
+        };
+        let (to, from, thread) = if startup.gpu {
+            erk_renderer::spawn_on_window(window.clone())
+        } else {
+            erk_renderer::spawn()
+        };
+        let (forwarder, questions) =
+            forward(from, to.clone(), startup.provider, self.proxy.clone());
+        self.renderer = Some(Running {
+            to,
+            thread,
+            forwarder,
+        });
+        self.send(ToRenderer::Fonts(startup.fonts));
+        self.send(ToRenderer::Load { html: startup.html });
+        for question in questions {
+            self.send(question);
+        }
+    }
+
     /// The renderer paints at the window's scale (device pixels per CSS
     /// pixel): a page laid out for 800 CSS pixels fills an 800-point window
     /// on any screen, sharply.
     fn send_scale(&self, window: &Window) {
-        let _ = self.to_renderer.send(ToRenderer::Scale {
+        self.send(ToRenderer::Scale {
             factor: window.scale_factor() as f32,
         });
     }
 
     fn send_pointer(&self, kind: PointerKind, button: PointerButton) {
-        let _ = self.to_renderer.send(ToRenderer::Pointer(PointerInput {
+        self.send(ToRenderer::Pointer(PointerInput {
             kind,
             x: self.pointer.0,
             y: self.pointer.1,
@@ -173,14 +241,29 @@ impl App {
     /// The viewport is the window's size in device pixels.
     fn request_frame(&self, size: PhysicalSize<u32>) {
         let clamp = |v: u32| u16::try_from(v).unwrap_or(u16::MAX);
-        let _ = self.to_renderer.send(ToRenderer::Resize {
+        self.send(ToRenderer::Resize {
             width: clamp(size.width),
             height: clamp(size.height),
         });
     }
 
     fn redraw(&mut self) {
-        let Some(state) = &mut self.window else {
+        // Only frames the CPU painted are this window's to show.
+        let (Some(state), Some(frame)) = (&mut self.window, &self.frame) else {
+            return;
+        };
+        if state.surface.is_none() {
+            let surface = Context::new(state.window.clone())
+                .and_then(|context| Surface::new(&context, state.window.clone()));
+            match surface {
+                Ok(surface) => state.surface = Some(surface),
+                Err(error) => {
+                    eprintln!("erk: cannot draw into the window: {error}");
+                    return;
+                }
+            }
+        }
+        let Some(surface) = state.surface.as_mut() else {
             return;
         };
         let size = state.window.inner_size();
@@ -189,18 +272,16 @@ impl App {
         else {
             return; // minimised
         };
-        if state.surface.resize(width, height).is_err() {
+        if surface.resize(width, height).is_err() {
             return;
         }
-        let Ok(mut buffer) = state.surface.buffer_mut() else {
+        let Ok(mut buffer) = surface.buffer_mut() else {
             return;
         };
         let (width, height) = (size.width as usize, size.height as usize);
         // White until the renderer has caught up with the window's size.
         buffer.fill(0x00ff_ffff);
-        if let Some(frame) = &self.frame {
-            blit(frame, &mut buffer, width, height);
-        }
+        blit(frame, &mut buffer, width, height);
         let _ = buffer.present();
     }
 }
@@ -245,26 +326,20 @@ impl ApplicationHandler<UserEvent> for App {
             .with_title(&self.title)
             .with_inner_size(INITIAL_SIZE);
         let window = match event_loop.create_window(attributes) {
-            Ok(window) => Rc::new(window),
+            Ok(window) => Arc::new(window),
             Err(error) => {
                 eprintln!("erk: cannot create a window: {error}");
                 event_loop.exit();
                 return;
             }
         };
-        let surface =
-            Context::new(window.clone()).and_then(|context| Surface::new(&context, window.clone()));
-        let surface = match surface {
-            Ok(surface) => surface,
-            Err(error) => {
-                eprintln!("erk: cannot draw into the window: {error}");
-                event_loop.exit();
-                return;
-            }
-        };
+        self.start_renderer(&window);
         self.send_scale(&window);
         self.request_frame(window.inner_size());
-        self.window = Some(WindowState { window, surface });
+        self.window = Some(WindowState {
+            window,
+            surface: None,
+        });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -298,7 +373,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .as_ref()
                     .map_or(1.0, |state| state.window.scale_factor());
                 let (dx, dy) = wheel_delta(delta, scale);
-                let _ = self.to_renderer.send(ToRenderer::Wheel {
+                self.send(ToRenderer::Wheel {
                     dx,
                     dy,
                     x: self.pointer.0,
@@ -328,7 +403,7 @@ impl ApplicationHandler<UserEvent> for App {
                 is_synthetic: false,
                 ..
             } => {
-                let _ = self.to_renderer.send(ToRenderer::Key(KeyInput {
+                self.send(ToRenderer::Key(KeyInput {
                     key: key(&event.logical_key),
                     state: match event.state {
                         ElementState::Pressed => KeyState::Down,
@@ -369,6 +444,18 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
             }
+            UserEvent::Raster(raster) => match raster {
+                Raster::Gpu { adapter } => {
+                    eprintln!("erk: drawing on the GPU: {adapter}");
+                    // The renderer draws into the window from now on: a
+                    // CPU frame kept from before would be blitted over it.
+                    self.frame = None;
+                    if let Some(state) = &mut self.window {
+                        state.surface = None;
+                    }
+                }
+                Raster::Cpu { reason } => eprintln!("erk: drawing on the CPU: {reason}"),
+            },
             UserEvent::RendererGone => event_loop.exit(),
         }
     }

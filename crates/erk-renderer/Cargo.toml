@@ -44,6 +44,17 @@ zune-jpeg = "0.5"
 icu_casemap = "2.3.0"
 icu_locale_core = "2.3.0"
 icu_properties = "2.3.0"
+# The GPU path (M2.5): vello_hybrid paints the same display list through
+# wgpu, into a window's surface. Optional: golden images, the Chrome
+# reference and the WPT runner stay on vello_cpu. wgpu is the version
+# vello_hybrid uses; it is needed directly for the surface.
+vello_hybrid = { version = "=0.2.0", optional = true }
+wgpu = { version = "=29.0.3", optional = true }
+# For the image ids vello_hybrid hands out; the version both vellos use.
+vello_common = { version = "=0.2.0", optional = true }
+
+[features]
+gpu = ["dep:vello_hybrid", "dep:wgpu", "dep:vello_common"]
 
 [lints]
 workspace = true

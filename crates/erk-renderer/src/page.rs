@@ -99,6 +99,27 @@ impl Page {
         scale: f32,
         resources: &mut Resources,
     ) -> (Frame, Vec<ResourceRequest>) {
+        let (list, requests) = self.prepare(width, height, scale, resources);
+        let scale = crate::device_scale(scale);
+        let pixmap = paint::paint(&list, width, height, scale);
+        let frame = Frame::new(
+            width,
+            height,
+            pixmap.data_as_u8_slice().to_vec(),
+            list.dump(),
+        );
+        (frame, requests)
+    }
+
+    /// Style and lay out the page for a `width` × `height` frame of device
+    /// pixels and build its display list, as [`Page::render`] paints it.
+    pub(crate) fn prepare(
+        &mut self,
+        width: u16,
+        height: u16,
+        scale: f32,
+        resources: &mut Resources,
+    ) -> (DisplayList, Vec<ResourceRequest>) {
         let scale = crate::device_scale(scale);
         // The viewport in CSS pixels.
         let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
@@ -139,15 +160,8 @@ impl Page {
                     .map(|(_, frame, _)| DisplayItem::Highlight(*frame)),
             );
         }
-        let pixmap = paint::paint(&list, width, height, scale);
-        let frame = Frame::new(
-            width,
-            height,
-            pixmap.data_as_u8_slice().to_vec(),
-            list.dump(),
-        );
         self.styles = styles;
-        (frame, requests)
+        (list, requests)
     }
 
     /// Whether what the user is doing now looks different from `before`

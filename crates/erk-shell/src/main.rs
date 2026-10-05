@@ -2,7 +2,7 @@
 //! PNG without one.
 //!
 //! ```text
-//! erk <file.html>
+//! erk [--cpu] <file.html>
 //! erk --screenshot <out.png> <file.html>
 //! ```
 //!
@@ -28,8 +28,15 @@ const SCREENSHOT_WIDTH: u16 = 800;
 const SCREENSHOT_HEIGHT: u16 = 600;
 
 enum Command {
-    Window { page: PathBuf },
-    Screenshot { out: PathBuf, page: PathBuf },
+    /// `gpu`: draw on the GPU when the machine can (`--cpu` turns it off).
+    Window {
+        page: PathBuf,
+        gpu: bool,
+    },
+    Screenshot {
+        out: PathBuf,
+        page: PathBuf,
+    },
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -40,12 +47,20 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String>
                 page: page.into(),
             })
         }
-        (Some(page), None, None, None) if !page.starts_with("--") => {
-            Ok(Command::Window { page: page.into() })
+        (Some(page), None, None, None) if !page.starts_with("--") => Ok(Command::Window {
+            page: page.into(),
+            gpu: true,
+        }),
+        (Some(flag), Some(page), None, None) if flag == "--cpu" && !page.starts_with("--") => {
+            Ok(Command::Window {
+                page: page.into(),
+                gpu: false,
+            })
         }
-        _ => {
-            Err("usage: erk <file.html>\n       erk --screenshot <out.png> <file.html>".to_owned())
-        }
+        _ => Err(
+            "usage: erk [--cpu] <file.html>\n       erk --screenshot <out.png> <file.html>"
+                .to_owned(),
+        ),
     }
 }
 
@@ -58,7 +73,9 @@ fn main() -> ExitCode {
         }
     };
     let result = match command {
-        Command::Window { page } => read_page(&page).and_then(|html| window::run(&page, html)),
+        Command::Window { page, gpu } => {
+            read_page(&page).and_then(|html| window::run(&page, html, gpu))
+        }
         Command::Screenshot { out, page } => {
             read_page(&page).and_then(|html| screenshot(&page, html, &out))
         }
@@ -126,7 +143,16 @@ mod tests {
 
     #[test]
     fn a_single_path_opens_a_window() {
-        assert!(matches!(parse(&["sayfa.html"]), Ok(Command::Window { .. })));
+        assert!(matches!(
+            parse(&["sayfa.html"]),
+            Ok(Command::Window { gpu: true, .. })
+        ));
+        assert!(matches!(
+            parse(&["--cpu", "sayfa.html"]),
+            Ok(Command::Window { gpu: false, .. })
+        ));
+        assert!(parse(&["--cpu"]).is_err());
+        assert!(parse(&["--gpu", "sayfa.html"]).is_err());
     }
 
     #[test]

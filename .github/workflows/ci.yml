@@ -40,6 +40,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The GPU path's tests (M2.5) need an adapter and the hosted runners
+      # have no GPU: Linux gets Mesa's software Vulkan (lavapipe); Windows
+      # has WARP, DirectX's software adapter, built in.
+      - name: Software GPU (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

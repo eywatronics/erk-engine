@@ -304,10 +304,18 @@ Host'un belgenin içindeki bir bölgeye kendi GPU çizimini yapması. Bugün
 sabitlenen tek kural: **bir pencere yüzeyinin tek çizicisi vardır, Erk.**
 Host aynı yüzeye kendi başına yazmaz; Erk kareyi kurarken surface bölgesi için
 ya host'un çizim callback'ini (paylaşılan wgpu cihazı ve komut kodlayıcı)
-çağırır ya da host'un dokusunu bölgeye yerleştirir. Hangisi olacağı M2'nin GPU
-yolu ve M3'ün API'si oturduktan sonra ölçülerek seçilir. Bölgeyi host bir
-düğümle kaydeder (`erk_surface_create(node)`); konumu, kaydırması ve kırpması
+çağırır ya da host'un dokusunu bölgeye yerleştirir. Bölgeyi host bir düğümle
+kaydeder (`erk_surface_create(node)`); konumu, kaydırması ve kırpması
 layout'tan gelir.
+
+**M2.5'in ölçümünden sonra yön: doku.** vello_hybrid bir kareyi tek bir
+`render` çağrısıyla, tek geçişte çiziyor; araya host'un çizimini sokacak bir
+yer yok, callback ancak kareyi bölüp birkaç geçişe ayırmakla olur. Buna karşın
+dışarıdan bir dokuyu bir bölgeye yerleştirmeyi zaten biliyor
+(`TextureBindings`, `draw_texture_rects`): host kendi dokusuna, Erk'in
+cihazında, kendi zamanında çizer; Erk onu display list'teki yerinde,
+kırpması ve opaklığıyla, sırası bozulmadan çizer. Kesin karar M10'da, M3'ün
+API'si oturunca; bu yön onu bağlamaz.
 
 ## 9. Sürümleme
 
