@@ -19,17 +19,21 @@ use erk_style::{Interaction, StyleEngine, Styles};
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput,
-    PointerKind, ResourceRequest,
+    Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton,
+    PointerInput, PointerKind, ResourceRequest,
 };
 use crate::paint;
 use crate::resources::Resources;
+use crate::scroll::{Offsets, Scrolling};
 use crate::text::{EmbeddedFontMetrics, TextEngine};
 
 pub(crate) struct Page {
     doc: Document,
-    /// The last frame's hit regions, in paint order.
-    hits: Vec<(NodeId, Rect)>,
+    /// The last frame's hit regions, in paint order, and whether each is a
+    /// line of text.
+    hits: Vec<(NodeId, Rect, bool)>,
+    /// Where the pointer is, while it is over the page.
+    pointer_at: Option<(f32, f32)>,
     /// The last frame's styles: which elements are shown, for the focus.
     styles: Styles,
     /// The node under the pointer.
@@ -42,6 +46,17 @@ pub(crate) struct Page {
     highlight: Option<NodeId>,
     /// The last frame's viewport, in CSS pixels.
     viewport: (f32, f32),
+    /// How far the user has scrolled each scroll container.
+    offsets: Offsets,
+    /// The last frame's scroll containers the user can scroll, innermost
+    /// last, with how far each can go.
+    scrollers: Vec<Scroller>,
+}
+
+/// A scroll container of the last frame.
+struct Scroller {
+    node: NodeId,
+    max: (f32, f32),
 }
 
 impl Page {
@@ -49,12 +64,15 @@ impl Page {
         Self {
             doc: Document::parse_html(html),
             hits: Vec::new(),
+            pointer_at: None,
             styles: Styles::default(),
             hover: None,
             pressed: None,
             focus: None,
             highlight: None,
             viewport: (0.0, 0.0),
+            offsets: Offsets::new(),
+            scrollers: Vec::new(),
         }
     }
 
@@ -80,21 +98,32 @@ impl Page {
         let requests = resources.requests(doc, &styles);
         let mut text = TextEngine::with_fonts(resources.fonts());
         let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
-        let mut list = DisplayList::build(doc, &styles, &layouts, resources);
-        self.hits = list
-            .items
+        let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+        let bars = self.bars(self.hover);
+        let mut list = DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
+        // What the user scrolled, as far as it still goes.
+        self.offsets = scrolling
+            .scopes
             .iter()
-            .filter_map(|item| match item {
-                DisplayItem::Hit { node, frame } => Some((*node, *frame)),
-                _ => None,
+            .filter(|scope| scope.offset != (0.0, 0.0))
+            .map(|scope| (scope.node, scope.offset))
+            .collect();
+        self.scrollers = scrolling
+            .scopes
+            .iter()
+            .filter(|scope| scope.user && (scope.max.0 > 0.0 || scope.max.1 > 0.0))
+            .map(|scope| Scroller {
+                node: scope.node,
+                max: scope.max,
             })
             .collect();
+        self.hits = hits(&list.items);
         if let Some(node) = self.highlight {
             list.items.extend(
                 self.hits
                     .iter()
-                    .filter(|(hit, _)| *hit == node)
-                    .map(|(_, frame)| DisplayItem::Highlight(*frame)),
+                    .filter(|(hit, _, _)| *hit == node)
+                    .map(|(_, frame, _)| DisplayItem::Highlight(*frame)),
             );
         }
         let pixmap = paint::paint(&list, width, height, scale);
@@ -109,9 +138,58 @@ impl Page {
     }
 
     /// Whether what the user is doing now looks different from `before`
-    /// under the last frame's styles.
+    /// under the last frame's styles, or shows other scroll bars.
     pub(crate) fn shows_change_from(&self, before: &Interaction) -> bool {
         self.styles.react_to(before, &self.interaction())
+            || self.bars(before.hover) != self.bars(self.hover)
+    }
+
+    /// The scroll containers whose scroll bars show while the pointer is
+    /// over `hover`: those it is in, the document's among them.
+    fn bars(&self, hover: Option<NodeId>) -> Vec<NodeId> {
+        let Some(hover) = hover else {
+            return Vec::new();
+        };
+        let mut path = self.element_path(hover);
+        path.push(self.doc.root());
+        self.scrollers
+            .iter()
+            .map(|scroller| scroller.node)
+            .filter(|node| path.contains(node))
+            .collect()
+    }
+
+    /// The wheel turned by `dx`, `dy` CSS pixels (positive: towards the
+    /// end) at `x`, `y`: the innermost scroll container there that can move
+    /// that way scrolls, and what it cannot take goes to the one around it,
+    /// up to the document. Whether anything scrolled.
+    pub(crate) fn wheel(&mut self, (dx, dy): (f32, f32), (x, y): (f32, f32)) -> bool {
+        let mut path = self
+            .hit_test(x, y)
+            .map(|target| self.element_path(target))
+            .unwrap_or_default();
+        path.push(self.doc.root());
+        let mut left = (dx, dy);
+        let mut moved = false;
+        for node in path {
+            let Some(scroller) = self.scrollers.iter().find(|s| s.node == node) else {
+                continue;
+            };
+            let offset = self.offsets.get(&node).copied().unwrap_or_default();
+            let next = (
+                (offset.0 + left.0).clamp(0.0, scroller.max.0),
+                (offset.1 + left.1).clamp(0.0, scroller.max.1),
+            );
+            left = (left.0 - (next.0 - offset.0), left.1 - (next.1 - offset.1));
+            if next != offset {
+                moved = true;
+                self.offsets.insert(node, next);
+            }
+            if left == (0.0, 0.0) {
+                break;
+            }
+        }
+        moved
     }
 
     /// What the user is doing with the page, as the next frame styles it.
@@ -127,17 +205,22 @@ impl Page {
     /// the last frame. A point in the viewport that no box covers is the
     /// root element's, as in browsers: the canvas belongs to it.
     pub(crate) fn hit_test(&self, x: f32, y: f32) -> Option<NodeId> {
+        self.hit(x, y).map(|(node, _)| node)
+    }
+
+    /// Like [`Page::hit_test`], and whether the point is on a line of text.
+    fn hit(&self, x: f32, y: f32) -> Option<(NodeId, bool)> {
         let hit = self
             .hits
             .iter()
             .rev()
-            .find(|(_, frame)| {
+            .find(|(_, frame, _)| {
                 x >= frame.x
                     && y >= frame.y
                     && x < frame.x + frame.width
                     && y < frame.y + frame.height
             })
-            .map(|(node, _)| *node);
+            .map(|(node, _, text)| (*node, *text));
         let in_viewport = x >= 0.0 && y >= 0.0 && x < self.viewport.0 && y < self.viewport.1;
         hit.or_else(|| {
             in_viewport
@@ -149,7 +232,58 @@ impl Page {
                     })
                 })
                 .flatten()
+                .map(|root| (root, false))
         })
+    }
+
+    /// How the pointer should look where it is: the `cursor` of what it is
+    /// over; `auto` is a text cursor over text and the arrow elsewhere.
+    pub(crate) fn cursor(&self) -> Cursor {
+        use erk_style::style::values::specified::ui::CursorKind as Kind;
+        let Some((node, text)) = self.pointer_at.and_then(|(x, y)| self.hit(x, y)) else {
+            return Cursor::Default;
+        };
+        let Some(style) = self.styles.computed(node) else {
+            return Cursor::Default;
+        };
+        match style.get_inherited_ui().cursor.keyword {
+            Kind::Auto if text => Cursor::Text,
+            Kind::Auto | Kind::Default => Cursor::Default,
+            Kind::None => Cursor::None,
+            Kind::ContextMenu => Cursor::ContextMenu,
+            Kind::Help => Cursor::Help,
+            Kind::Pointer => Cursor::Pointer,
+            Kind::Progress => Cursor::Progress,
+            Kind::Wait => Cursor::Wait,
+            Kind::Cell => Cursor::CellSelect,
+            Kind::Crosshair => Cursor::Crosshair,
+            Kind::Text => Cursor::Text,
+            Kind::VerticalText => Cursor::VerticalText,
+            Kind::Alias => Cursor::Alias,
+            Kind::Copy => Cursor::Copy,
+            Kind::Move => Cursor::Move,
+            Kind::NoDrop => Cursor::NoDrop,
+            Kind::NotAllowed => Cursor::NotAllowed,
+            Kind::Grab => Cursor::Grab,
+            Kind::Grabbing => Cursor::Grabbing,
+            Kind::EResize => Cursor::EResize,
+            Kind::NResize => Cursor::NResize,
+            Kind::NeResize => Cursor::NeResize,
+            Kind::NwResize => Cursor::NwResize,
+            Kind::SResize => Cursor::SResize,
+            Kind::SeResize => Cursor::SeResize,
+            Kind::SwResize => Cursor::SwResize,
+            Kind::WResize => Cursor::WResize,
+            Kind::EwResize => Cursor::EwResize,
+            Kind::NsResize => Cursor::NsResize,
+            Kind::NeswResize => Cursor::NeswResize,
+            Kind::NwseResize => Cursor::NwseResize,
+            Kind::ColResize => Cursor::ColResize,
+            Kind::RowResize => Cursor::RowResize,
+            Kind::AllScroll => Cursor::AllScroll,
+            Kind::ZoomIn => Cursor::ZoomIn,
+            Kind::ZoomOut => Cursor::ZoomOut,
+        }
     }
 
     /// Pointer input: the node under the pointer hovers; a press of the
@@ -161,6 +295,10 @@ impl Page {
         self.hover = match input.kind {
             PointerKind::Leave => None,
             _ => target,
+        };
+        self.pointer_at = match input.kind {
+            PointerKind::Leave => None,
+            _ => Some((input.x, input.y)),
         };
         match (input.kind, input.button) {
             (PointerKind::Down, PointerButton::Primary) => {
@@ -407,6 +545,44 @@ impl Page {
             stack.extend(children);
         }
         None
+    }
+}
+
+/// The hit regions of `items` in paint order, each cut to the clips around
+/// it; a region clipped away entirely is gone.
+fn hits(items: &[DisplayItem]) -> Vec<(NodeId, Rect, bool)> {
+    let mut clips: Vec<Rect> = Vec::new();
+    let mut hits = Vec::new();
+    for item in items {
+        match item {
+            DisplayItem::PushClip(frame) => {
+                let clip = clips.last().map_or(*frame, |outer| intersect(outer, frame));
+                clips.push(clip);
+            }
+            DisplayItem::PopClip => {
+                clips.pop();
+            }
+            DisplayItem::Hit { node, frame, text } => {
+                let frame = clips.last().map_or(*frame, |clip| intersect(clip, frame));
+                if frame.width > 0.0 && frame.height > 0.0 {
+                    hits.push((*node, frame, *text));
+                }
+            }
+            _ => {}
+        }
+    }
+    hits
+}
+
+fn intersect(a: &Rect, b: &Rect) -> Rect {
+    let (left, top) = (a.x.max(b.x), a.y.max(b.y));
+    let right = (a.x + a.width).min(b.x + b.width);
+    let bottom = (a.y + a.height).min(b.y + b.height);
+    Rect {
+        x: left,
+        y: top,
+        width: (right - left).max(0.0),
+        height: (bottom - top).max(0.0),
     }
 }
 

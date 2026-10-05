@@ -17,13 +17,14 @@ mod messages;
 mod page;
 mod paint;
 mod resources;
+mod scroll;
 mod text;
 mod thread;
 
 pub use messages::{
-    ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput,
-    KeyState, Modifiers, PointerButton, PointerInput, PointerKind, ResourceKind, ResourceRequest,
-    ResourceResponse, ScriptFallback, TextBox, ToRenderer,
+    Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key,
+    KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, ResourceKind,
+    ResourceRequest, ResourceResponse, ScriptFallback, TextBox, ToRenderer,
 };
 pub use thread::spawn;
 
@@ -204,7 +205,9 @@ pub fn text_boxes(
         w,
         h,
     );
-    let list = display::DisplayList::build(&doc, &styles, &layouts, &resources);
+    let scrolling =
+        scroll::Scrolling::new(&doc, &styles, &layouts, (w, h), &scroll::Offsets::new());
+    let list = display::DisplayList::build(&doc, &styles, &layouts, &resources, &scrolling, &[]);
     // Each counted text node's position in document order, by arena index.
     let mut order = std::collections::HashMap::new();
     let mut stack = vec![(doc.root(), false)];

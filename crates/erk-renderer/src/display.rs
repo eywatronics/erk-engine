@@ -20,6 +20,12 @@
 //! inline's own background is painted with the block backgrounds, before
 //! the text of its line; Appendix E paints it in line order, which differs
 //! only where they overlap.
+//!
+//! Clipping (scroll.rs) does not follow these phases: one clipping box's
+//! content lands in several of them, and an absolutely positioned box may
+//! escape a clip its parent is in. So every item is built tagged with the
+//! scope it is painted in, and a last pass brackets runs of items in the
+//! clips of their scopes.
 
 use std::fmt::Write as _;
 
@@ -35,6 +41,7 @@ use vello_cpu::Pixmap;
 use crate::color::{Rgba, srgb_bytes};
 use crate::layout::{Layouts, ShapedText};
 use crate::resources::{Resources, image_url};
+use crate::scroll::{Scrolling, VIEWPORT};
 use crate::text::InlineLayout;
 
 pub(crate) struct DisplayList {
@@ -106,13 +113,18 @@ pub(crate) enum DisplayItem {
     /// opacity, as one group.
     PushOpacity(f32),
     PopOpacity,
+    /// Everything until the matching `PopClip` is clipped to this box.
+    PushClip(Frame),
+    PopClip,
     Glyphs(GlyphRun),
     /// Where `node` takes pointer input: an element's border box, or a line
-    /// of text standing for its element. Not painted and not in the dump;
-    /// sitting in paint order, the last one under a point is the topmost.
+    /// of text standing for its element (`text`). Not painted and not in
+    /// the dump; sitting in paint order, the last one under a point is the
+    /// topmost.
     Hit {
         node: NodeId,
         frame: Frame,
+        text: bool,
     },
     /// The developer tools' highlight of a selected node's boxes: drawn
     /// over the page, not part of the document (p1-contract §8.1).
@@ -122,6 +134,14 @@ pub(crate) enum DisplayItem {
 /// The colour of the highlight overlay, as browsers' developer tools tint a
 /// selected element's box.
 pub(crate) const HIGHLIGHT: Rgba = [111, 168, 220, 166];
+
+/// An overlay scroll bar's thumb, shown while the pointer is over its
+/// scroll container: its thickness, its gap to the edge, its shortest length.
+const THUMB: (f32, f32, f32) = (6.0, 2.0, 20.0);
+const THUMB_COLOR: Rgba = [0, 0, 0, 102];
+
+/// An item and the scope it is painted in (`None`: unclipped).
+type Tagged = (Option<usize>, DisplayItem);
 
 /// A box in absolute coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -160,6 +180,9 @@ struct Walk<'a> {
     styles: &'a Styles,
     layouts: &'a Layouts,
     resources: &'a Resources,
+    scrolling: &'a Scrolling,
+    /// The scroll containers whose scroll bars are shown.
+    bars: &'a [NodeId],
     /// The element whose background became the canvas colour.
     canvas_source: Option<NodeId>,
     /// The text fragments met so far.
@@ -172,6 +195,8 @@ impl DisplayList {
         styles: &Styles,
         layouts: &Layouts,
         resources: &Resources,
+        scrolling: &Scrolling,
+        bars: &[NodeId],
     ) -> Self {
         let mut list = Self {
             canvas: WHITE,
@@ -183,10 +208,17 @@ impl DisplayList {
             styles,
             layouts,
             resources,
+            scrolling,
+            bars,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
             text: std::cell::RefCell::new(Vec::new()),
         };
-        list.items = stacking_context(&walk, doc.root(), (0.0, 0.0));
+        let mut items = stacking_context(&walk, doc.root());
+        // The document's scroll bars are over everything.
+        if bars.contains(&doc.root()) {
+            items.extend(scroll_bars(scrolling, VIEWPORT).map(|item| (None, item)));
+        }
+        list.items = clipped(items, scrolling);
         list.text = walk.text.into_inner();
         list
     }
@@ -307,6 +339,16 @@ impl DisplayList {
                 DisplayItem::PopOpacity => {
                     let _ = writeln!(out, "end opacity");
                 }
+                DisplayItem::PushClip(frame) => {
+                    let _ = writeln!(
+                        out,
+                        "clip {} {} {}x{}",
+                        frame.x, frame.y, frame.width, frame.height
+                    );
+                }
+                DisplayItem::PopClip => {
+                    let _ = writeln!(out, "end clip");
+                }
                 DisplayItem::Hit { .. } => {}
                 DisplayItem::Highlight(frame) => {
                     let _ = writeln!(
@@ -335,8 +377,8 @@ impl DisplayList {
 /// Appendix E.
 #[derive(Default)]
 struct Context {
-    backgrounds: Vec<DisplayItem>,
-    inline: Vec<DisplayItem>,
+    backgrounds: Vec<Tagged>,
+    inline: Vec<Tagged>,
     /// Positioned descendants, each painted later as a unit.
     layers: Vec<Layer>,
 }
@@ -345,13 +387,12 @@ struct Context {
 struct Layer {
     z: i32,
     id: NodeId,
-    parent_origin: (f32, f32),
 }
 
 /// The items of the stacking context rooted at `id`, in paint order.
-fn stacking_context(walk: &Walk<'_>, id: NodeId, parent_origin: (f32, f32)) -> Vec<DisplayItem> {
+fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
     let mut context = Context::default();
-    add_box(walk, id, parent_origin, &mut context, true);
+    add_box(walk, id, &mut context, true);
     // Stable: equal `z-index` keeps tree order.
     context.layers.sort_by_key(|layer| layer.z);
     let (below, above): (Vec<Layer>, Vec<Layer>) =
@@ -361,40 +402,143 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId, parent_origin: (f32, f32)) -> V
         .styles
         .computed(id)
         .map_or(1.0, |style| style.get_effects().opacity);
+    let scope = walk.scrolling.scope(id);
     let mut items = Vec::new();
     if opacity < 1.0 {
-        items.push(DisplayItem::PushOpacity(opacity.max(0.0)));
+        items.push((scope, DisplayItem::PushOpacity(opacity.max(0.0))));
     }
     for layer in below {
-        items.extend(stacking_context(walk, layer.id, layer.parent_origin));
+        items.extend(stacking_context(walk, layer.id));
     }
     items.append(&mut context.backgrounds);
     items.append(&mut context.inline);
     for layer in above {
-        items.extend(stacking_context(walk, layer.id, layer.parent_origin));
+        items.extend(stacking_context(walk, layer.id));
     }
     if opacity < 1.0 {
-        items.push(DisplayItem::PopOpacity);
+        items.push((scope, DisplayItem::PopOpacity));
     }
     items
+}
+
+/// The items with each run in the clips of its scope: a clip is pushed
+/// where a scope starts and popped where it ends, nested as the scopes
+/// are. An opacity group keeps the clips it starts in until it ends; an
+/// item inside it that escapes them (an absolutely positioned box whose
+/// containing block is outside a clip, inside a translucent box) stays
+/// clipped.
+fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
+    let chain = |scope: Option<usize>| {
+        let mut chain = Vec::new();
+        let mut current = scope;
+        while let Some(index) = current {
+            if let Some(clip) = scrolling.scopes[index].clip {
+                chain.push((index, clip));
+            }
+            current = scrolling.scopes[index].parent;
+        }
+        chain.reverse();
+        chain
+    };
+    let mut out = Vec::with_capacity(items.len());
+    let mut open: Vec<(usize, Frame)> = Vec::new();
+    // How many clips each open opacity group started in.
+    let mut floors: Vec<usize> = Vec::new();
+    let enter =
+        |open: &mut Vec<(usize, Frame)>, out: &mut Vec<DisplayItem>, wanted: &[(usize, Frame)]| {
+            let common = open
+                .iter()
+                .zip(wanted)
+                .take_while(|(a, b)| a.0 == b.0)
+                .count();
+            while open.len() > common {
+                open.pop();
+                out.push(DisplayItem::PopClip);
+            }
+            for clip in &wanted[common..] {
+                open.push(*clip);
+                out.push(DisplayItem::PushClip(clip.1));
+            }
+        };
+    for (scope, item) in items {
+        let floor = floors.last().copied().unwrap_or(0);
+        let mut wanted = chain(scope);
+        if matches!(item, DisplayItem::PopOpacity) || !wanted.starts_with(&open[..floor]) {
+            wanted = open[..floor].to_vec();
+        }
+        enter(&mut open, &mut out, &wanted);
+        match item {
+            DisplayItem::PushOpacity(_) => {
+                out.push(item);
+                floors.push(open.len());
+            }
+            DisplayItem::PopOpacity => {
+                out.push(item);
+                floors.pop();
+            }
+            _ => out.push(item),
+        }
+    }
+    enter(&mut open, &mut out, &[]);
+    out
+}
+
+/// The thumbs of scope `index`'s overlay scroll bars, along its padding
+/// box's right and bottom edges, where it can scroll.
+fn scroll_bars(scrolling: &Scrolling, index: usize) -> impl Iterator<Item = DisplayItem> {
+    let scope = &scrolling.scopes[index];
+    let area = scope.clip.unwrap_or_else(|| scrolling.viewport());
+    let (thickness, gap, shortest) = THUMB;
+    let radius = thickness / 2.0;
+    let thumb = |length: f32, max: f32, offset: f32| {
+        let size = (length * length / (length + max)).max(shortest).min(length);
+        let start = if max > 0.0 {
+            offset / max * (length - size)
+        } else {
+            0.0
+        };
+        (start, size)
+    };
+    let mut items = Vec::new();
+    if scope.user && scope.max.1 > 0.0 {
+        let (start, size) = thumb(area.height - 2.0 * gap, scope.max.1, scope.offset.1);
+        items.push(DisplayItem::RoundedRect {
+            frame: Frame {
+                x: area.x + area.width - gap - thickness,
+                y: area.y + gap + start,
+                width: thickness,
+                height: size,
+            },
+            radii: [(radius, radius); 4],
+            color: THUMB_COLOR,
+        });
+    }
+    if scope.user && scope.max.0 > 0.0 {
+        let (start, size) = thumb(area.width - 2.0 * gap, scope.max.0, scope.offset.0);
+        items.push(DisplayItem::RoundedRect {
+            frame: Frame {
+                x: area.x + gap + start,
+                y: area.y + area.height - gap - thickness,
+                width: size,
+                height: thickness,
+            },
+            radii: [(radius, radius); 4],
+            color: THUMB_COLOR,
+        });
+    }
+    items.into_iter()
 }
 
 /// Add `id`'s background and inline content to `context`, then its
 /// children's. A positioned element other than the context's own root
 /// becomes a layer instead.
-fn add_box(
-    walk: &Walk<'_>,
-    id: NodeId,
-    parent_origin: (f32, f32),
-    context: &mut Context,
-    context_root: bool,
-) {
+fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: bool) {
     let Some(layout) = walk.layouts.get(id) else {
         // An element without a box (an inline element) can contain one
         // that has a box (an atomic inline), positioned relative to the
         // block around them.
         for child in walk.doc.children(id) {
-            add_box(walk, child, parent_origin, context, false);
+            add_box(walk, child, context, false);
         }
         return;
     };
@@ -411,15 +555,15 @@ fn add_box(
         } else {
             0
         };
-        context.layers.push(Layer {
-            z,
-            id,
-            parent_origin,
-        });
+        context.layers.push(Layer { z, id });
         return;
     }
-    let x = parent_origin.0 + layout.location.x;
-    let y = parent_origin.1 + layout.location.y;
+    let (x, y) = walk.scrolling.position(id).unwrap_or_default();
+    // Where the box's own content is: moved by its scroll offset, in its
+    // own clip, if it scrolls.
+    let (cx, cy) = walk.scrolling.content_origin(id).unwrap_or((x, y));
+    let (scope, inner) = (walk.scrolling.scope(id), walk.scrolling.inner_scope(id));
+    let tag = |items: Vec<DisplayItem>, scope| items.into_iter().map(move |item| (scope, item));
     // `visibility: hidden` keeps the box but paints nothing of it; its
     // descendants may still be visible, so the walk continues.
     let visible = style
@@ -443,18 +587,21 @@ fn add_box(
         ];
         // The canvas already shows the root's (or body's) background.
         let paint_background = Some(id) != walk.canvas_source;
+        let mut decoration = Vec::new();
         box_decoration(
             style,
             frame,
             widths,
             paint_background,
             walk.resources,
-            &mut context.backgrounds,
+            &mut decoration,
         );
         if takes_pointer(style) {
-            context
-                .backgrounds
-                .push(DisplayItem::Hit { node: id, frame });
+            decoration.push(DisplayItem::Hit {
+                node: id,
+                frame,
+                text: false,
+            });
         }
         // A replaced element's image fills its content box.
         if let Some(image) = walk.layouts.image(id) {
@@ -473,7 +620,7 @@ fn add_box(
                     - layout.padding.bottom,
             };
             if content.width > 0.0 && content.height > 0.0 {
-                context.backgrounds.push(DisplayItem::Image {
+                decoration.push(DisplayItem::Image {
                     image: image.pixmap.clone(),
                     tile: content,
                     repeat: (false, false),
@@ -483,20 +630,21 @@ fn add_box(
                 });
             }
         }
+        context.backgrounds.extend(tag(decoration, scope));
     }
 
     // Hidden text is laid out all the same: its fragments are kept, only
     // its painting is skipped.
     if let Some(shaped) = walk.layouts.text(id) {
-        let content_x = x + layout.border.left + layout.padding.left;
-        let content_y = y + layout.border.top + layout.padding.top;
+        let content_x = cx + layout.border.left + layout.padding.left;
+        let content_y = cy + layout.border.top + layout.padding.top;
         let fragments = text_fragments(shaped, (content_x, content_y));
+        let mut items = Vec::new();
         if visible {
-            context
-                .inline
-                .extend(inline_content(shaped, (content_x, content_y)));
+            items.extend(inline_content(shaped, (content_x, content_y)));
         }
-        text_hits(walk, &fragments, &mut context.inline);
+        text_hits(walk, &fragments, &mut items);
+        context.inline.extend(tag(items, inner));
         walk.text.borrow_mut().extend(fragments);
     }
 
@@ -504,21 +652,31 @@ fn add_box(
     // border or padding of their own.
     for anonymous in walk.layouts.anonymous(id) {
         let origin = (
-            x + anonymous.layout.location.x,
-            y + anonymous.layout.location.y,
+            cx + anonymous.layout.location.x,
+            cy + anonymous.layout.location.y,
         );
         let fragments = text_fragments(&anonymous.text, origin);
+        let mut items = Vec::new();
         if visible {
-            context
-                .inline
-                .extend(inline_content(&anonymous.text, origin));
+            items.extend(inline_content(&anonymous.text, origin));
         }
-        text_hits(walk, &fragments, &mut context.inline);
+        text_hits(walk, &fragments, &mut items);
+        context.inline.extend(tag(items, inner));
         walk.text.borrow_mut().extend(fragments);
     }
 
     for child in walk.doc.children(id) {
-        add_box(walk, child, (x, y), context, false);
+        add_box(walk, child, context, false);
+    }
+
+    // A shown scroll bar is over the content it scrolls, in its clip.
+    if inner != scope
+        && walk.bars.contains(&id)
+        && let Some(index) = inner
+    {
+        context
+            .inline
+            .extend(scroll_bars(walk.scrolling, index).map(|item| (inner, item)));
     }
 }
 
@@ -592,6 +750,7 @@ fn text_hits(walk: &Walk<'_>, fragments: &[TextFragment], out: &mut Vec<DisplayI
                     width: fragment.width,
                     height: fragment.height,
                 },
+                text: true,
             });
         }
     }

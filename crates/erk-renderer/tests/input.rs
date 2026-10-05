@@ -1,15 +1,16 @@
 //! Input through the renderer's messages: hit-testing in paint order,
 //! clicks with their propagation path, the developer tools' inspection and
 //! highlight, and `#id` queries (M2.1); hover, press and focus state, the
-//! focus order and keyboard activation (M2.2).
+//! focus order and keyboard activation (M2.2); the wheel, scrolling and
+//! scroll bars (M2.3).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use erk_renderer::{
-    Event, EventKind, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers, PointerButton,
-    PointerInput, PointerKind, ToRenderer, spawn,
+    Cursor, Event, EventKind, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers,
+    PointerButton, PointerInput, PointerKind, ToRenderer, spawn,
 };
 
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -725,4 +726,358 @@ fn the_states_reference_page_follows_the_pointer_and_the_focus() {
     ));
     assert_eq!(at(&over_item, item_fill), rgb(0xf1f5f9), "list item :hover");
     assert!(same_outside(&over_item, &in_form, &[item]));
+}
+
+/// A scroll container (`auto`), one that only clips (`hidden`), and a
+/// document taller than the viewport: 50 + 10 + 50 + 400 = 510 pixels in a
+/// 150 pixel viewport.
+const SCROLLING: &str = r#"<body id="body" style="margin: 0">
+  <div id="scroller" style="overflow: auto; width: 100px; height: 50px">
+    <div id="s1" style="height: 50px; background: rgb(255, 0, 0)"></div>
+    <div id="s2" style="height: 50px; background: rgb(0, 255, 0)"></div>
+    <div id="s3" style="height: 50px; background: rgb(0, 0, 255)"></div>
+  </div>
+  <div id="hidden" style="overflow: hidden; width: 100px; height: 50px; margin-top: 10px">
+    <div style="height: 50px; background: rgb(255, 255, 0)"></div>
+    <div style="height: 50px; background: rgb(0, 255, 255)"></div>
+  </div>
+  <div id="tall" style="height: 400px; background: rgb(204, 204, 204)"></div>
+</body>"#;
+
+fn wheel(dy: f32, x: f32, y: f32) -> ToRenderer {
+    ToRenderer::Wheel { dx: 0.0, dy, x, y }
+}
+
+fn nothing_comes(page: &Session) {
+    match page.from.recv_timeout(QUIET) {
+        Err(RecvTimeoutError::Timeout) => {}
+        other => panic!("expected nothing, got {:?}", other.map(|_| "a message")),
+    }
+}
+
+#[test]
+fn the_wheel_scrolls_the_innermost_container_then_the_ones_around_it() {
+    let (page, plain) = Session::open(SCROLLING);
+    let (red, green, blue) = ([255, 0, 0], [0, 255, 0], [0, 0, 255]);
+    let (yellow, cyan) = ([255, 255, 0], [0, 255, 255]);
+    assert_eq!(pixel(&plain, 50, 30), red);
+
+    let step = |input: ToRenderer| {
+        page.send(input);
+        page.frame()
+    };
+    // 30 pixels into the container.
+    let frame = step(wheel(30.0, 50.0, 25.0));
+    assert_eq!(pixel(&frame, 50, 10), red);
+    assert_eq!(pixel(&frame, 50, 30), green);
+    assert_eq!(pixel(&frame, 50, 80), yellow, "the document did not move");
+
+    // The container takes 70 more, to its end; the document the other 30.
+    let frame = step(wheel(100.0, 50.0, 25.0));
+    assert_eq!(
+        pixel(&frame, 50, 10),
+        blue,
+        "the container's end, 30 pixels up"
+    );
+    assert_eq!(
+        pixel(&frame, 50, 40),
+        yellow,
+        "the clipping box, 30 pixels up"
+    );
+
+    // A box that only clips does not scroll: the document does.
+    let frame = step(wheel(20.0, 50.0, 40.0));
+    assert_eq!(pixel(&frame, 50, 15), yellow, "50 pixels up");
+    assert_ne!(
+        pixel(&frame, 50, 55),
+        cyan,
+        "its hidden content stays hidden"
+    );
+
+    // Back to the top of the document; the container keeps its offset.
+    let frame = step(wheel(-1000.0, 150.0, 100.0));
+    assert_eq!(pixel(&frame, 50, 10), blue);
+    assert_eq!(pixel(&frame, 50, 80), yellow);
+
+    // Nothing can move further up: no frame.
+    page.send(wheel(-10.0, 150.0, 100.0));
+    nothing_comes(&page);
+}
+
+#[test]
+fn hit_regions_move_with_the_content_and_are_clipped_with_it() {
+    let (mut page, _) = Session::open(SCROLLING);
+    let ids = names(&mut page, &["body", "s1", "s2", "s3", "scroller"]);
+    let at = |page: &mut Session, x, y| {
+        let node = page.inspect(x, y).expect("a node");
+        ids.iter()
+            .find(|(_, id)| *id == node)
+            .map_or("other", |(name, _)| *name)
+    };
+    // Below the container its second block is clipped away: the body is
+    // there.
+    assert_eq!(at(&mut page, 50.0, 55.0), "body");
+    assert_eq!(at(&mut page, 50.0, 10.0), "s1");
+
+    page.send(wheel(100.0, 50.0, 25.0));
+    page.frame();
+    assert_eq!(at(&mut page, 50.0, 10.0), "s3");
+    assert_eq!(at(&mut page, 50.0, 55.0), "body");
+    let click = page.click(50.0, 10.0);
+    assert_eq!(click.target, ids[3].1, "s3");
+}
+
+#[test]
+fn scroll_bars_show_while_the_pointer_is_over_what_they_scroll() {
+    let (page, plain) = Session::open(SCROLLING);
+    // The container's thumb along its right edge, the document's along the
+    // viewport's.
+    let (thumb, page_thumb) = ((95, 10), (195, 10));
+    assert_eq!(pixel(&plain, thumb.0, thumb.1), [255, 0, 0]);
+    assert_eq!(pixel(&plain, page_thumb.0, page_thumb.1), [255, 255, 255]);
+
+    page.send(pointer(PointerKind::Move, PointerButton::None, 50.0, 25.0));
+    let over = page.frame();
+    assert!(
+        pixel(&over, thumb.0, thumb.1)[0] < 200,
+        "the container's thumb"
+    );
+    assert!(
+        pixel(&over, page_thumb.0, page_thumb.1)[0] < 180,
+        "the document's thumb"
+    );
+
+    // Over the document only: the container's thumb goes.
+    page.send(pointer(
+        PointerKind::Move,
+        PointerButton::None,
+        150.0,
+        100.0,
+    ));
+    let elsewhere = page.frame();
+    assert_eq!(pixel(&elsewhere, thumb.0, thumb.1), [255, 0, 0]);
+    assert!(pixel(&elsewhere, page_thumb.0, page_thumb.1)[0] < 180);
+
+    page.send(pointer(PointerKind::Leave, PointerButton::None, 0.0, 0.0));
+    let left = page.frame();
+    assert!(
+        left.rgba() == plain.rgba(),
+        "no thumbs once the pointer has left"
+    );
+}
+
+#[test]
+fn a_larger_viewport_takes_back_what_the_document_no_longer_scrolls() {
+    let (page, _) = Session::open(SCROLLING);
+    page.send(wheel(1000.0, 150.0, 100.0));
+    let scrolled = page.frame();
+    assert_eq!(
+        pixel(&scrolled, 50, 10),
+        [204, 204, 204],
+        "scrolled to the end"
+    );
+    page.send(ToRenderer::Resize {
+        width: 200,
+        height: 600,
+    });
+    let frame = page.frame();
+    assert_eq!(pixel(&frame, 50, 10), [255, 0, 0], "back at the top");
+}
+
+/// The acceptance item: a long page scrolls with the wheel and shows other
+/// content.
+#[test]
+fn a_long_page_scrolls_with_the_wheel() {
+    let html = include_str!("../../../examples/perf/long-page.html");
+    let (page, top) = Session::open_sized(html, 800, 600);
+    // Each glyph run's position and text.
+    let runs = |frame: &Frame| -> Vec<(f32, f32, String)> {
+        frame
+            .display_list()
+            .lines()
+            .filter_map(|line| {
+                let mut words = line.strip_prefix("glyphs ")?.splitn(3, ' ');
+                let x = words.next()?.parse().ok()?;
+                let y = words.next()?.parse().ok()?;
+                Some((x, y, words.next()?.to_owned()))
+            })
+            .collect()
+    };
+    page.send(wheel(1500.0, 400.0, 300.0));
+    let down = page.frame();
+    assert!(down.rgba() != top.rgba(), "other content shows");
+    let (before, after) = (runs(&top), runs(&down));
+    assert!(before.len() > 50, "{}", before.len());
+    assert_eq!(before.len(), after.len());
+    for ((x, y, text), (x2, y2, text2)) in before.iter().zip(&after) {
+        assert_eq!((x, text), (x2, text2));
+        assert!((y - 1500.0 - y2).abs() < 0.01, "{text}: {y} -> {y2}");
+    }
+    page.send(wheel(-1500.0, 400.0, 300.0));
+    let back = page.frame();
+    assert!(back.rgba() == top.rgba(), "back at the top, as it was");
+}
+
+#[test]
+fn the_cursor_follows_what_the_pointer_is_over() {
+    let html = r#"<style>.h:hover { cursor: pointer }</style>
+    <body style="margin: 0; font-family: 'Noto Sans'; font-size: 16px">
+      <div style="height: 30px"></div>
+      <div style="height: 30px">Metin burada</div>
+      <a href="x" style="display: block; height: 30px">bağlantı</a>
+      <div style="cursor: move; height: 30px"><span style="cursor: auto">yazı</span> boş</div>
+      <div style="cursor: none; height: 30px"></div>
+      <div class="h" style="height: 30px"></div>
+    </body>"#;
+    let (page, _) = Session::open_sized(html, 200, 200);
+    // The cursor the renderer tells after `input`, if it changes.
+    let after = |input: ToRenderer| {
+        page.send(input);
+        loop {
+            match page.from.recv_timeout(QUIET) {
+                Ok(FromRenderer::Cursor(cursor)) => break Some(cursor),
+                Ok(_) => {}
+                Err(RecvTimeoutError::Timeout) => break None,
+                Err(error) => panic!("{error:?}"),
+            }
+        }
+    };
+    let over = |x, y| pointer(PointerKind::Move, PointerButton::None, x, y);
+    assert_eq!(after(over(50.0, 15.0)), None, "the arrow, as before");
+    assert_eq!(
+        after(over(10.0, 45.0)),
+        Some(Cursor::Text),
+        "auto over text"
+    );
+    assert_eq!(
+        after(over(150.0, 45.0)),
+        Some(Cursor::Default),
+        "auto beside it"
+    );
+    assert_eq!(after(over(10.0, 75.0)), Some(Cursor::Pointer), "a link");
+    assert_eq!(
+        after(over(5.0, 105.0)),
+        Some(Cursor::Text),
+        "auto inside move"
+    );
+    assert_eq!(after(over(150.0, 105.0)), Some(Cursor::Move));
+    assert_eq!(after(over(50.0, 135.0)), Some(Cursor::None));
+    assert_eq!(
+        after(over(50.0, 165.0)),
+        Some(Cursor::Pointer),
+        "set by :hover"
+    );
+    let leave = pointer(PointerKind::Leave, PointerButton::None, 0.0, 0.0);
+    assert_eq!(after(leave), Some(Cursor::Default), "off the page");
+}
+
+/// The `overflow` reference page, whose unscrolled look Chrome's screenshot
+/// checks, scrolled: only the scroll container under the wheel changes.
+#[test]
+fn the_overflow_reference_page_scrolls_inside_its_clips() {
+    let html = include_str!("reference/pages/overflow.html");
+    let (page, plain) = Session::open_sized(html, 800, 600);
+    // The list's and the wide row's border boxes, from Chrome's geometry.
+    let (list, row) = ((20, 20, 222, 262), (262, 326, 300, 50));
+
+    page.send(ToRenderer::Wheel {
+        dx: 0.0,
+        dy: 100.0,
+        x: 130.0,
+        y: 150.0,
+    });
+    let down = page.frame();
+    assert!(down.rgba() != plain.rgba());
+    assert!(same_outside(&down, &plain, &[list]));
+
+    // Sideways in the wide row; the document has nothing to scroll, so
+    // turning further down there changes nothing.
+    page.send(ToRenderer::Wheel {
+        dx: 100.0,
+        dy: 0.0,
+        x: 400.0,
+        y: 350.0,
+    });
+    let across = page.frame();
+    assert!(same_outside(&across, &down, &[row]));
+    assert!(across.rgba() != down.rgba());
+    page.send(ToRenderer::Wheel {
+        dx: 0.0,
+        dy: 100.0,
+        x: 400.0,
+        y: 350.0,
+    });
+    nothing_comes(&page);
+}
+
+#[test]
+fn text_directly_in_a_scroll_container_scrolls_with_it() {
+    // A paragraph of its own, and text beside a block (anonymous boxes).
+    for content in [
+        "bir iki üç dört beş",
+        "bir<div>iki</div>üç<div>dört</div>beş",
+    ] {
+        // Nothing else scrolls: the container must take the wheel itself.
+        let html = format!(
+            r#"<body style="margin: 0; font-family: 'Noto Sans'; font-size: 16px">
+            <div style="overflow: auto; width: 40px; height: 40px">{content}</div></body>"#
+        );
+        let (page, top) = Session::open(&html);
+        page.send(wheel(30.0, 20.0, 20.0));
+        let down = page.frame();
+        let ys = |frame: &Frame| -> Vec<f32> {
+            frame
+                .display_list()
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("glyphs ")?
+                        .split(' ')
+                        .nth(1)?
+                        .parse()
+                        .ok()
+                })
+                .collect()
+        };
+        let (before, after) = (ys(&top), ys(&down));
+        assert!(before.len() >= 3, "{content}: {before:?}");
+        assert_eq!(before.len(), after.len(), "{content}");
+        for (y, y2) in before.iter().zip(&after) {
+            assert!((y - 30.0 - y2).abs() < 0.01, "{content}: {y} -> {y2}");
+        }
+        // To the end: the lowest line's baseline is inside the 40 pixel box,
+        // in its lower half.
+        page.send(wheel(1000.0, 20.0, 20.0));
+        let end = page.frame();
+        let last = ys(&end).into_iter().fold(f32::MIN, f32::max);
+        assert!((20.0..40.0).contains(&last), "{content}: {last}");
+    }
+}
+
+#[test]
+fn a_wider_viewport_takes_back_what_the_document_no_longer_scrolls_sideways() {
+    let html = r#"<body style="margin: 0"><div style="display: flex; width: 600px; height: 50px">
+        <div style="flex: 1; background: rgb(255, 0, 0)"></div>
+        <div style="flex: 1; background: rgb(0, 0, 255)"></div></div></body>"#;
+    let (page, _) = Session::open(html);
+    page.send(ToRenderer::Wheel {
+        dx: 1000.0,
+        dy: 0.0,
+        x: 100.0,
+        y: 25.0,
+    });
+    let scrolled = page.frame();
+    assert_eq!(
+        pixel(&scrolled, 10, 25),
+        [0, 0, 255],
+        "scrolled to the right end"
+    );
+    page.send(ToRenderer::Resize {
+        width: 800,
+        height: 150,
+    });
+    assert_eq!(
+        pixel(&page.frame(), 10, 25),
+        [255, 0, 0],
+        "back at the left"
+    );
 }

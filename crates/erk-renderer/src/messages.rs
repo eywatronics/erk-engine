@@ -29,6 +29,9 @@ pub enum ToRenderer {
     Pointer(PointerInput),
     /// A key went down or up while the page has the keyboard.
     Key(KeyInput),
+    /// The wheel (or a touchpad) scrolled by `dx`, `dy` CSS pixels at `x`,
+    /// `y`; positive values scroll towards the end of the page.
+    Wheel { dx: f32, dy: f32, x: f32, y: f32 },
     /// Which node is under the point `x`, `y` (CSS pixels)? Answered with
     /// `FromRenderer::Inspected` (p1-contract §8.1, `erk_inspect_at`).
     InspectAt { request: u64, x: f32, y: f32 },
@@ -57,6 +60,52 @@ pub enum FromRenderer {
     Inspected { request: u64, node: Option<u64> },
     /// The answer to `ToRenderer::Query`.
     QueryResult { request: u64, node: Option<u64> },
+    /// The pointer should now look like this (the `cursor` property of
+    /// what it is over). Sent when it changes.
+    Cursor(Cursor),
+}
+
+/// The CSS `cursor` keywords (CSS UI 4 §5.1), and `None` for a hidden
+/// pointer. Cursor images are not loaded: their fallback keyword is used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cursor {
+    #[default]
+    Default,
+    None,
+    ContextMenu,
+    Help,
+    Pointer,
+    Progress,
+    Wait,
+    /// `cell`.
+    CellSelect,
+    Crosshair,
+    Text,
+    VerticalText,
+    Alias,
+    Copy,
+    Move,
+    NoDrop,
+    NotAllowed,
+    Grab,
+    Grabbing,
+    EResize,
+    NResize,
+    NeResize,
+    NwResize,
+    SResize,
+    SeResize,
+    SwResize,
+    WResize,
+    EwResize,
+    NsResize,
+    NeswResize,
+    NwseResize,
+    ColResize,
+    RowResize,
+    AllScroll,
+    ZoomIn,
+    ZoomOut,
 }
 
 /// One pointer action at `x`, `y`, in CSS pixels of the viewport (a window

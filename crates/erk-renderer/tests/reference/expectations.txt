@@ -14,6 +14,7 @@ inline-boxes 75.10
 inline-styles 48.60
 merhaba 91.26
 mixed-content 98.33
+overflow 93.35
 paint-order 98.61
 paragraphs 48.27  # lowered: metric tightened (tolerance 24 to 12), not a rendering change
 positioning 97.39
