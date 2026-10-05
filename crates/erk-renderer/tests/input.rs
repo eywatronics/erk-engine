@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use erk_renderer::{
     Cursor, Event, EventKind, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers,
-    PointerButton, PointerInput, PointerKind, ToRenderer, spawn,
+    PointerButton, PointerInput, PointerKind, Status, ToRenderer, spawn,
 };
 
 const PATIENCE: Duration = Duration::from_secs(60);
@@ -78,19 +78,45 @@ impl Session {
     }
 
     fn query(&mut self, id: &str) -> u64 {
+        self.select(None, &format!("#{id}"))
+            .unwrap_or_else(|status| panic!("#{id}: {status:?}"))
+            .unwrap_or_else(|| panic!("no #{id}"))
+    }
+
+    /// The answer to a query for `selector` inside `scope`.
+    fn select(&mut self, scope: Option<u64>, selector: &str) -> Result<Option<u64>, Status> {
         self.request += 1;
         let request = self.request;
         self.send(ToRenderer::Query {
             request,
-            selector: format!("#{id}"),
+            scope,
+            selector: selector.to_owned(),
         });
         loop {
             match self.from.recv_timeout(PATIENCE) {
-                Ok(FromRenderer::QueryResult { request: r, node }) if r == request => {
-                    break node.unwrap_or_else(|| panic!("no #{id}"));
+                Ok(FromRenderer::QueryResult { request: r, result }) if r == request => {
+                    break result;
                 }
                 Ok(_) => {}
                 Err(error) => panic!("no answer to the query: {error:?}"),
+            }
+        }
+    }
+
+    /// The answer to setting `node`'s text.
+    fn set_text(&mut self, node: u64, text: &str) -> Result<(), Status> {
+        self.request += 1;
+        let request = self.request;
+        self.send(ToRenderer::SetText {
+            request,
+            node,
+            text: text.to_owned(),
+        });
+        loop {
+            match self.from.recv_timeout(PATIENCE) {
+                Ok(FromRenderer::Done { request: r, result }) if r == request => break result,
+                Ok(_) => {}
+                Err(error) => panic!("no answer to the change: {error:?}"),
             }
         }
     }
@@ -334,26 +360,88 @@ fn the_highlight_is_drawn_over_the_page_and_not_into_it() {
 }
 
 #[test]
-fn a_query_understands_ids_only_for_now() {
+fn a_query_finds_the_first_match_or_says_what_is_wrong() {
     let (mut page, _) = Session::new();
-    for selector in ["#missing", "div", "#", ""] {
-        page.request += 1;
-        let request = page.request;
-        page.send(ToRenderer::Query {
-            request,
-            selector: selector.to_owned(),
-        });
-        loop {
-            match page.from.recv_timeout(PATIENCE) {
-                Ok(FromRenderer::QueryResult { request: r, node }) if r == request => {
-                    assert_eq!(node, None, "{selector:?}");
-                    break;
-                }
-                Ok(_) => {}
-                Err(error) => panic!("{error:?}"),
-            }
-        }
+    let (a, outer, inner) = (page.query("a"), page.query("outer"), page.query("inner"));
+    assert_eq!(
+        page.select(None, "div"),
+        Ok(Some(a)),
+        "the first in document order"
+    );
+    assert_eq!(page.select(None, "div > div"), Ok(Some(inner)));
+    assert_eq!(page.select(None, "p span, #outer"), Ok(Some(outer)));
+    assert_eq!(page.select(None, "#missing"), Ok(None));
+    // Inside a scope, which is not itself a match.
+    assert_eq!(page.select(Some(outer), "div"), Ok(Some(inner)));
+    assert_eq!(page.select(Some(inner), "div"), Ok(None));
+    assert_eq!(page.select(Some(outer), ":scope > div"), Ok(Some(inner)));
+    // What is wrong.
+    for selector in ["", "#", "div >", "!!"] {
+        assert_eq!(
+            page.select(None, selector),
+            Err(Status::InvalidArgument),
+            "{selector:?}"
+        );
     }
+    assert_eq!(
+        page.select(Some(0), "div"),
+        Err(Status::InvalidArgument),
+        "no node"
+    );
+    assert_eq!(
+        page.select(Some(outer + (1 << 32)), "div"),
+        Err(Status::StaleNode),
+        "another generation"
+    );
+}
+
+#[test]
+fn set_text_changes_the_page_and_a_stale_node_is_an_error() {
+    let (mut page, plain) = Session::new();
+    let (para, word) = (page.query("para"), page.query("word"));
+    // The word was inside the paragraph; the new text replaces it.
+    assert_eq!(page.set_text(para, "Yeni metin"), Ok(()));
+    let frame = page.frame();
+    assert!(
+        frame.display_list().contains("\"Yeni metin\""),
+        "{}",
+        frame.display_list()
+    );
+    assert!(!frame.display_list().contains("kelime"));
+    assert!(frame.rgba() != plain.rgba());
+    assert_eq!(
+        page.set_text(word, "x"),
+        Err(Status::StaleNode),
+        "the word is gone"
+    );
+    assert_eq!(page.select(Some(word), "*"), Err(Status::StaleNode));
+    assert_eq!(page.set_text(0, "x"), Err(Status::InvalidArgument));
+    // A failed change paints nothing.
+    nothing_comes(&page);
+    // The same text again: a frame all the same, and the same pixels.
+    assert_eq!(page.set_text(para, "Yeni metin"), Ok(()));
+    assert!(page.frame().rgba() == frame.rgba());
+}
+
+#[test]
+fn loading_a_page_makes_the_old_pages_ids_stale() {
+    let (mut page, _) = Session::new();
+    let ids: Vec<u64> = ["a", "outer", "inner", "para", "word"]
+        .into_iter()
+        .map(|id| page.query(id))
+        .collect();
+    // The same page again: its elements get new ids.
+    page.send(ToRenderer::Load {
+        html: PAGE.to_owned(),
+    });
+    page.frame();
+    for old in &ids {
+        assert_eq!(page.set_text(*old, "x"), Err(Status::StaleNode), "{old:#x}");
+        assert_eq!(page.select(Some(*old), "*"), Err(Status::StaleNode));
+    }
+    let new = page.query("a");
+    assert!(!ids.contains(&new));
+    assert_eq!(page.set_text(new, "yeni"), Ok(()));
 }
 
 /// Elements whose look follows the user's state, and a focus order with

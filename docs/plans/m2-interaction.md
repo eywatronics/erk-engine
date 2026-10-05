@@ -132,11 +132,11 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.4: İlk değişiklik ve sayaç demosu
 
-- [ ] M4'ün `Mutation` API'sinin ilk parçası: `ToRenderer::SetText { node,
+- [x] M4'ün `Mutation` API'sinin ilk parçası: `ToRenderer::SetText { node,
   text }` (`erk_node_set_text`) ve `ToRenderer::Query { request, selector }`
   → `FromRenderer::QueryResult { request, node }` (`erk_query`, CSS seçici).
   Eski bir `NodeId` hata olarak döner, çökmez (test).
-- [ ] Sayaç demosu: `examples/counter.html` ve demo host (Rust, kabukta):
+- [x] Sayaç demosu: `examples/counter.html` ve demo host (Rust, kabukta):
   düğmeye basılır, host'un sayacı artar, sayının metni değişir, kare yeniden
   çizilir. Otomatik test: tıklama gönderilir, sayının değiştiği kare altın
   görüntüyle doğrulanır (kabulün maddesi).
@@ -341,3 +341,24 @@ kırpılmıyor; tekerlek zincirlenmiyor; çubuk değişimi çizilmiyor; kabın y
 belgenin çubuğu hiç gösterilmiyor; metin üstünde `auto` ok; bağlantıda el
 yok; imleç hiç gönderilmiyor; opaklık grubu kırpmalarını tutmuyor (yarı
 saydam kutunun içinden kaçan kutunun saydam kaldığını sınayan test eklendi).
+
+**M2.4 (2026-10-05).** İlk değişiklik ve sayaç demosu.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| `SetText { node, text }` ve `Query { request, selector }` → `QueryResult { request, node }` | `Query` `erk_query`'deki gibi bir `scope` da alıyor (`None`: belge). Yanıtlar `Result`: p1-contract §9'un durum kodları aynı numaralarla (`Status::InvalidArgument = 1`, `StaleNode = 2`). `SetText { request, node, text }` `FromRenderer::Done { request, result }` ile yanıtlanıyor; yalnızca başarılı bir değişiklik kare çiziyor |
+| Eski bir `NodeId` hata olarak döner, çökmez | 0 ve hiçbir id'nin biçimi olmayan sayılar `InvalidArgument`, düğümü gitmiş id `StaleNode`. Denetim kaldırılınca renderer iş parçacığı eski id'de paniğe düşüyor (mutasyon): denetim tam olarak bunu önlüyor |
+| — | **Sözleşmeye aykırılık bulundu ve düzeltildi:** her `Load` yeni bir arena kuruyordu; iki belgede de nesiller 1'den başladığı için önceki sayfanın bir id'si yeni sayfanın bir düğümünü gösterebiliyordu (p1-contract §2: "`erk_load_html` yeni bir arena kurmaz"). `Document::load_html` aynı arenaya ayrıştırıyor: eski düğümler önce siliniyor, nesilleri artıyor |
+| `erk_node_set_text` | erk-dom'a ilk değişiklikler: `remove` (alt ağaç ve `<template>` içeriği birlikte; id'ler eskiyor, boşalan slotlar yeni nesille yeniden kullanılıyor), `set_text` (DOM'un `textContent`'i: metin ve yorum düğümünün verisi yerinde, elemanın çocukları tek bir metin düğümüyle, boş metinde hiçbiriyle değişiyor; belge düğümünde bir şey olmuyor) |
+| `erk_query`, CSS seçici | `erk_style::query`: Stylo'nun seçici ayrıştırıcısı ve eşleştiricisi, belge sırasıyla, kapsamın kendisi hariç; `:scope` kapsam; `:hover` ve `:focus` gibi durumlar kullanıcının durumuna göre. **Bulunan sınır:** `:disabled` eşleşmiyor: form durumları erk-style'da yok (M5, css-support'ta öyle) |
+| Sayaç demosu ve demo host (Rust, kabukta) | `examples/counter.html` ve `erk-shell/src/counter.rs`: host mesajlar üzerinde küçük bir durum makinesi; sayfa yüklenince `#count`, `#increment`, `#decrement`'i sorguluyor, yolu bir düğmeden geçen tıklamada sayacı değiştirip `#count`'un metnini ayarlıyor. Bu düğmeleri olmayan sayfalara dokunmuyor. Pencerede: `erk examples/counter.html`; düğmeler `<button>` olduğu için Tab, Enter ve Space de sayıyor |
+| Otomatik test: tıklama gönderilir, kare altın görüntüyle doğrulanır | `clicks_count_and_the_page_shows_the_number`: üç kez artır, bir kez azalt; her değişikliğin yanıtı ve ardından karesi bekleniyor; imleç sayfadan çıkınca kare `tests/golden/counter-2.png` ile piksel piksel aynı (son tıklanan düğmenin odak halkası görüntünün parçası). Düğmelerin yeri sayfanın kendi düzeninden (`element_boxes`). **İlk hâli yarışlıydı** (tam test koşusunda bir kez 60 saniyede takıldı): sorguların yanıtı, ilk karenin çizildiği toplu işlem sırasında geliyor; test hemen tıklayınca tıklama aynı toplu işleme, ilk kareden önce düşüp boş isabet listesine çarpıyor ve kayboluyordu. Test artık ilk kareyi de bekliyor. Motorun davranışı yerinde: henüz çizilmemiş bir sayfada tıklanacak bir şey yok |
+
+Mutasyonlar (16/16 yakalandı): `remove` çocukları ya da `<template>`
+içeriğini bırakıyor; belge düğümü silinebiliyor; `set_text` çocukları
+silmeden ayırıyor; boş metne boş bir metin düğümü ekleniyor; yükleme eski
+düğümleri bırakıyor; her sayfaya yeni arena; değişiklik kare çizmiyor;
+başarısız değişiklik kare çiziyor; eski id geçiyor (renderer paniğe düşüyor);
+0 eski sayılıyor; bozuk seçici boş sonuç veriyor; ilk değil son eşleşme;
+`:scope` yok; host yol yerine yalnızca hedefe bakıyor (düğmenin içindeki bir
+simgeye tıklama sayılmazdı; test eklendi); azaltma yok.

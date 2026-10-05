@@ -10,7 +10,7 @@ mod node;
 mod sink;
 
 pub use arena::{Arena, NodeId};
-pub use document::{Children, Document};
+pub use document::{Children, Document, StaleNode};
 pub use node::{Attribute, ElementData, Node, NodeData};
 
 // Re-exported so consumers name elements with the same atom types this crate

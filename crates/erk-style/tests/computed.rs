@@ -1,7 +1,7 @@
 use erk_dom::{Document, LocalName, NodeId};
 use erk_style::style::values::computed::Display;
 use erk_style::style::values::generics::length::GenericMargin;
-use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
+use erk_style::{ComputedValues, Interaction, InvalidSelector, StyleEngine, Styles, query};
 
 fn style(html: &str) -> (Document, Styles) {
     let doc = Document::parse_html(html);
@@ -279,4 +279,73 @@ fn styles_say_which_states_their_selectors_depend_on() {
         !styles.react_to(&none, &all),
         "the UA stylesheet has no state rules"
     );
+}
+
+const QUERIED: &str = r#"<main id="m"><ul class="liste">
+    <li id="a" class="oge">bir</li>
+    <li id="b" class="oge secili" data-x="1">iki</li>
+    <li id="c">üç <span id="s" class="oge">içte</span></li>
+  </ul><button id="d" disabled>tamam</button></main><p id="e">son</p>"#;
+
+fn ids(doc: &Document, nodes: &[NodeId]) -> Vec<String> {
+    nodes
+        .iter()
+        .map(|node| {
+            doc.node(*node)
+                .and_then(|node| node.as_element())
+                .and_then(|element| element.attr(&erk_dom::local_name!("id")))
+                .unwrap_or("?")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn queries_find_what_css_selectors_match_in_document_order() {
+    let doc = Document::parse_html(QUERIED);
+    let none = Interaction::default();
+    let find = |selector: &str| ids(&doc, &query(&doc, doc.root(), selector, &none).unwrap());
+    assert_eq!(find("#b"), ["b"]);
+    assert_eq!(find(".oge"), ["a", "b", "s"]);
+    assert_eq!(find("li.oge.secili"), ["b"]);
+    assert_eq!(find("ul > .oge"), ["a", "b"]);
+    assert_eq!(find("li span"), ["s"]);
+    assert_eq!(find("[data-x='1']"), ["b"]);
+    assert_eq!(find("li:first-child, p"), ["a", "e"]);
+    assert_eq!(find("li:not(.oge)"), ["c"]);
+    assert_eq!(find("button[disabled], li:nth-child(2)"), ["b", "d"]);
+    assert_eq!(find("li + li"), ["b", "c"]);
+    assert!(find("#yok").is_empty());
+
+    // Inside a scope only, and `:scope` is the scope.
+    let ul = query(&doc, doc.root(), "ul", &none).unwrap()[0];
+    let inside = |selector: &str| ids(&doc, &query(&doc, ul, selector, &none).unwrap());
+    assert_eq!(inside(".oge"), ["a", "b", "s"]);
+    assert!(inside("p").is_empty());
+    assert!(inside("ul").is_empty(), "not the scope itself");
+    assert_eq!(inside(":scope > li"), ["a", "b", "c"]);
+
+    // State pseudo-classes follow the interaction.
+    let s = Some(query(&doc, doc.root(), "#s", &none).unwrap()[0]);
+    let hovering = Interaction { hover: s, ..none };
+    assert_eq!(
+        ids(
+            &doc,
+            &query(&doc, doc.root(), "li:hover", &hovering).unwrap()
+        ),
+        ["c"]
+    );
+    assert!(
+        query(&doc, doc.root(), "li:hover", &none)
+            .unwrap()
+            .is_empty()
+    );
+
+    for bad in ["", "#", "li >", "!!", "::"] {
+        assert_eq!(
+            query(&doc, doc.root(), bad, &none),
+            Err(InvalidSelector),
+            "{bad:?}"
+        );
+    }
 }

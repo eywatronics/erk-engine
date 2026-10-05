@@ -24,7 +24,7 @@ mod thread;
 pub use messages::{
     Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key,
     KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, ResourceKind,
-    ResourceRequest, ResourceResponse, ScriptFallback, TextBox, ToRenderer,
+    ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer,
 };
 pub use thread::spawn;
 

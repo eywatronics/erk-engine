@@ -17,6 +17,7 @@ use erk_renderer::{
 };
 use softbuffer::{Context, Surface};
 
+use crate::counter::Counter;
 use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 use winit::application::ApplicationHandler;
@@ -53,10 +54,15 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
     let _ = to_renderer.send(ToRenderer::Fonts(fonts.catalogue().clone()));
     let provider = Provider::for_page(page).with_fonts(fonts);
     let answers = to_renderer.clone();
+    // The demo host: the counter, on pages that have one.
+    let (mut counter, questions) = Counter::start();
     let forwarder = std::thread::Builder::new()
         .name("erk-frames".to_owned())
         .spawn(move || {
             for message in from_renderer {
+                for answer in counter.on(&message) {
+                    let _ = answers.send(answer);
+                }
                 match message {
                     FromRenderer::Frame(frame) => {
                         if proxy.send_event(UserEvent::Frame(frame)).is_err() {
@@ -73,12 +79,11 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
                             return;
                         }
                     }
-                    // The demo shell subscribes to no event yet (its host
-                    // logic comes with the counter demo, M2.4) and asks no
-                    // question whose answer could arrive.
+                    // Events, answers and changes are the demo host's.
                     FromRenderer::Event(_)
                     | FromRenderer::Inspected { .. }
-                    | FromRenderer::QueryResult { .. } => {}
+                    | FromRenderer::QueryResult { .. }
+                    | FromRenderer::Done { .. } => {}
                 }
             }
             // Fails harmlessly when the event loop has already exited, as it
@@ -90,6 +95,9 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
     // A send only fails if the renderer is gone, which the forwarder and
     // `finish` below report.
     let _ = to_renderer.send(ToRenderer::Load { html });
+    for question in questions {
+        let _ = to_renderer.send(question);
+    }
     let title = format!(
         "Erk — {}",
         page.file_name().map_or_else(

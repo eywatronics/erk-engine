@@ -20,7 +20,7 @@ use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
     Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton,
-    PointerInput, PointerKind, ResourceRequest,
+    PointerInput, PointerKind, ResourceRequest, Status,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -61,8 +61,21 @@ struct Scroller {
 
 impl Page {
     pub(crate) fn parse(html: &str) -> Self {
+        Self::with_document(Document::parse_html(html))
+    }
+
+    /// Show `html` instead, in the same arena: every id of the document
+    /// before is stale from now on (p1-contract §2). What the user was
+    /// doing with the old document goes with it.
+    pub(crate) fn load(&mut self, html: &str) {
+        let mut doc = std::mem::take(&mut self.doc);
+        doc.load_html(html);
+        *self = Self::with_document(doc);
+    }
+
+    fn with_document(doc: Document) -> Self {
         Self {
-            doc: Document::parse_html(html),
+            doc,
             hits: Vec::new(),
             pointer_at: None,
             styles: Styles::default(),
@@ -522,29 +535,33 @@ impl Page {
             .filter(|id| self.doc.node(*id).is_some());
     }
 
-    /// The first element matching `selector` in document order. Only `#id`
-    /// is understood for now.
-    pub(crate) fn query(&self, selector: &str) -> Option<NodeId> {
-        let id = selector.trim().strip_prefix('#')?;
-        if id.is_empty() {
-            return None;
-        }
-        let mut stack = vec![self.doc.root()];
-        while let Some(node) = stack.pop() {
-            if self
-                .doc
-                .node(node)
-                .and_then(|found| found.as_element())
-                .and_then(|element| element.attr(&local_name!("id")))
-                == Some(id)
-            {
-                return Some(node);
-            }
-            let mut children: Vec<_> = self.doc.children(node).collect();
-            children.reverse();
-            stack.extend(children);
-        }
-        None
+    /// The first element inside `scope` (the document for `None`) matching
+    /// the selector list `selector`, in document order.
+    pub(crate) fn query(
+        &self,
+        scope: Option<u64>,
+        selector: &str,
+    ) -> Result<Option<NodeId>, Status> {
+        let scope = match scope {
+            None => self.doc.root(),
+            Some(bits) => self.node(bits)?,
+        };
+        let found = erk_style::query(&self.doc, scope, selector, &self.interaction())
+            .map_err(|_| Status::InvalidArgument)?;
+        Ok(found.first().copied())
+    }
+
+    /// Set `node`'s text as `textContent` does; the next frame shows it.
+    pub(crate) fn set_text(&mut self, node: u64, text: &str) -> Result<(), Status> {
+        let node = self.node(node)?;
+        self.doc.set_text(node, text).map_err(|_| Status::StaleNode)
+    }
+
+    /// The node `bits` names: 0 and other numbers no id has are invalid, an
+    /// id whose node is gone is stale.
+    fn node(&self, bits: u64) -> Result<NodeId, Status> {
+        let id = NodeId::from_bits(bits).ok_or(Status::InvalidArgument)?;
+        self.doc.node(id).map(|_| id).ok_or(Status::StaleNode)
     }
 }
 

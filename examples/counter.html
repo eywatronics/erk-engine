@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Sayaç</title>
+<!-- The counter demo (M2.4): the shell's demo host finds #count,
+     #increment and #decrement, counts the clicks and sets the number's
+     text. Open it with `erk examples/counter.html`. -->
+<style>
+  body { margin: 0; background: #f1f5f9; color: #0f172a; font-family: "Noto Sans"; font-size: 15px; }
+  .kart { width: 320px; margin: 80px auto; padding: 24px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; text-align: center; }
+  h1 { margin: 0 0 4px 0; font-size: 20px; }
+  .not { color: #64748b; font-size: 13px; }
+  #count { margin: 12px 0 20px 0; font-size: 56px; font-weight: 700; }
+  .dugmeler { display: flex; gap: 12px; justify-content: center; }
+  button { display: inline-block; padding: 10px 20px; border: none; border-radius: 8px; font: inherit; cursor: pointer; }
+  #increment { background: #2563eb; color: #ffffff; }
+  #increment:hover { background: #1d4ed8; }
+  #increment:active { background: #1e3a8a; }
+  #decrement { background: #e2e8f0; color: #0f172a; }
+  #decrement:hover { background: #cbd5e1; }
+  button:focus { box-shadow: 0 0 0 3px #93c5fd; }
+</style>
+</head>
+<body>
+  <div class="kart">
+    <h1>Sayaç</h1>
+    <div class="not">Sayıyı host tutar; Erk yalnızca gösterir.</div>
+    <div id="count">0</div>
+    <div class="dugmeler">
+      <button id="decrement">Azalt</button>
+      <button id="increment">Artır</button>
+    </div>
+  </div>
+</body>
+</html>

@@ -192,6 +192,64 @@ impl StyleEngine {
     }
 }
 
+/// A selector that does not parse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidSelector;
+
+/// The elements inside `scope` (not `scope` itself) that match the CSS
+/// selector list `selector`, in document order, as `querySelectorAll`
+/// finds them. `:scope` is `scope` when it is an element. State
+/// pseudo-classes (`:hover`, `:focus`) follow `interaction`.
+pub fn query(
+    doc: &Document,
+    scope: NodeId,
+    selector: &str,
+    interaction: &Interaction,
+) -> Result<Vec<NodeId>, InvalidSelector> {
+    use selectors::context::{
+        MatchingContext, MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, SelectorCaches,
+    };
+    use style::selector_parser::SelectorParser;
+
+    let url = UrlExtraData::from(url::Url::parse("about:blank").expect("valid URL"));
+    let list = SelectorParser::parse_author_origin_no_namespace(selector, &url)
+        .map_err(|_| InvalidSelector)?;
+    let guard = SharedRwLock::new();
+    let tree = StyledTree::new(doc, &guard);
+    tree.populate(&url, interaction);
+    let mut caches = SelectorCaches::default();
+    let mut context = MatchingContext::new(
+        MatchingMode::Normal,
+        None,
+        &mut caches,
+        QuirksMode::NoQuirks,
+        NeedsSelectorFlags::No,
+        MatchingForInvalidation::No,
+    );
+    let is_element = |id: NodeId| doc.node(id).is_some_and(|node| node.as_element().is_some());
+    if is_element(scope) {
+        context.scope_element = Some(ErkNode::new(&tree, scope).opaque());
+    }
+    let mut found = Vec::new();
+    let mut stack: Vec<NodeId> = doc.children(scope).collect();
+    stack.reverse();
+    while let Some(id) = stack.pop() {
+        if is_element(id)
+            && selectors::matching::matches_selector_list(
+                &list,
+                &ErkNode::new(&tree, id),
+                &mut context,
+            )
+        {
+            found.push(id);
+        }
+        let mut children: Vec<NodeId> = doc.children(id).collect();
+        children.reverse();
+        stack.extend(children);
+    }
+    Ok(found)
+}
+
 /// What the user is doing with a document, for the pseudo-classes that
 /// follow it. An element matches `:hover` when it or a descendant is under
 /// the pointer, `:active` likewise for the pressed element, `:focus` when

@@ -122,6 +122,64 @@ impl Document {
         node.next_sibling = None;
     }
 
+    /// Remove `id` and everything in it, a `<template>`'s contents too: their
+    /// ids go stale and never name another node. Whether `id` was a node
+    /// that can be removed; the document node cannot.
+    pub fn remove(&mut self, id: NodeId) -> bool {
+        if id == self.root || self.nodes.get(id).is_none() {
+            return false;
+        }
+        self.detach(id);
+        let mut stack = vec![id];
+        while let Some(node) = stack.pop() {
+            let Some(removed) = self.nodes.remove(node) else {
+                continue;
+            };
+            let mut child = removed.first_child;
+            while let Some(id) = child {
+                stack.push(id);
+                child = self.nodes.get(id).and_then(|node| node.next_sibling);
+            }
+            if let NodeData::Element(element) = removed.data {
+                stack.extend(element.template_contents);
+            }
+        }
+        true
+    }
+
+    /// Set `id`'s text as the DOM's `textContent` does: a text or comment
+    /// node's data becomes `text`; an element's children are removed and
+    /// replaced by one text node, or by none for an empty string. On other
+    /// nodes it does nothing. `Err` if `id` is not a node (it was removed).
+    pub fn set_text(&mut self, id: NodeId, text: &str) -> Result<(), StaleNode> {
+        let node = self.nodes.get_mut(id).ok_or(StaleNode)?;
+        match &mut node.data {
+            NodeData::Text(data) | NodeData::Comment(data) => {
+                text.clone_into(data);
+            }
+            NodeData::Element(_) => {
+                while let Some(child) = self.get(id).first_child {
+                    self.remove(child);
+                }
+                if !text.is_empty() {
+                    let child = self.create(NodeData::Text(text.to_owned()));
+                    self.append(id, child);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Remove every node but the document node, which is left empty.
+    pub(crate) fn clear(&mut self) {
+        self.nodes.remove_all_but(self.root);
+        let root = self.get_mut(self.root);
+        root.first_child = None;
+        root.last_child = None;
+        self.quirks_mode = QuirksMode::NoQuirks;
+    }
+
     pub(crate) fn get(&self, id: NodeId) -> &Node {
         self.nodes.get(id).expect("stale NodeId")
     }
@@ -130,6 +188,10 @@ impl Document {
         self.nodes.get_mut(id).expect("stale NodeId")
     }
 }
+
+/// The node an id named has been removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StaleNode;
 
 /// Iterator over a node's children, first to last.
 pub struct Children<'a> {
