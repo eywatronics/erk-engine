@@ -11,14 +11,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use erk_renderer::{Frame, FromRenderer, ToRenderer};
+use erk_renderer::{
+    Frame, FromRenderer, Modifiers, PointerButton, PointerInput, PointerKind, ToRenderer,
+};
 use softbuffer::{Context, Surface};
 
 use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
@@ -63,6 +65,12 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
                             let _ = answers.send(provider.answer(request));
                         }
                     }
+                    // The demo shell subscribes to no event yet (its host
+                    // logic comes with the counter demo, M2.4) and asks no
+                    // question whose answer could arrive.
+                    FromRenderer::Event(_)
+                    | FromRenderer::Inspected { .. }
+                    | FromRenderer::QueryResult { .. } => {}
                 }
             }
             // Fails harmlessly when the event loop has already exited, as it
@@ -86,6 +94,8 @@ pub(crate) fn run(page: &Path, html: String) -> Result<(), String> {
         to_renderer,
         window: None,
         frame: None,
+        pointer: (0.0, 0.0),
+        modifiers: Modifiers::default(),
     };
     let result = event_loop.run_app(&mut app);
 
@@ -118,6 +128,10 @@ struct App {
     window: Option<WindowState>,
     /// The latest frame from the renderer, kept for redraws.
     frame: Option<Frame>,
+    /// Where the pointer is, in CSS pixels, and the modifier keys held:
+    /// a button event carries neither.
+    pointer: (f32, f32),
+    modifiers: Modifiers,
 }
 
 impl App {
@@ -128,6 +142,16 @@ impl App {
         let _ = self.to_renderer.send(ToRenderer::Scale {
             factor: window.scale_factor() as f32,
         });
+    }
+
+    fn send_pointer(&self, kind: PointerKind, button: PointerButton) {
+        let _ = self.to_renderer.send(ToRenderer::Pointer(PointerInput {
+            kind,
+            x: self.pointer.0,
+            y: self.pointer.1,
+            button,
+            modifiers: self.modifiers,
+        }));
     }
 
     /// The viewport is the window's size in device pixels.
@@ -229,6 +253,40 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::CursorMoved { position, .. } => {
+                let scale = self
+                    .window
+                    .as_ref()
+                    .map_or(1.0, |state| state.window.scale_factor());
+                // The renderer works in CSS pixels.
+                self.pointer = ((position.x / scale) as f32, (position.y / scale) as f32);
+                self.send_pointer(PointerKind::Move, PointerButton::None);
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.send_pointer(PointerKind::Leave, PointerButton::None);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    MouseButton::Left => PointerButton::Primary,
+                    MouseButton::Right => PointerButton::Secondary,
+                    MouseButton::Middle => PointerButton::Middle,
+                    _ => return,
+                };
+                let kind = match state {
+                    ElementState::Pressed => PointerKind::Down,
+                    ElementState::Released => PointerKind::Up,
+                };
+                self.send_pointer(kind, button);
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let state = modifiers.state();
+                self.modifiers = Modifiers {
+                    shift: state.shift_key(),
+                    control: state.control_key(),
+                    alt: state.alt_key(),
+                    meta: state.super_key(),
+                };
+            }
             _ => {}
         }
     }

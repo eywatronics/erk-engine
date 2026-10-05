@@ -74,12 +74,9 @@ fn time_frames(html: String, runs: usize) -> (Duration, Vec<Duration>) {
         let start = Instant::now();
         to.send(message).expect("the renderer thread runs");
         loop {
-            match from.recv().expect("the renderer thread runs") {
-                FromRenderer::Frame(frame) => {
-                    std::hint::black_box(frame);
-                    return start.elapsed();
-                }
-                FromRenderer::Resources(_) => {}
+            if let FromRenderer::Frame(frame) = from.recv().expect("the renderer thread runs") {
+                std::hint::black_box(frame);
+                return start.elapsed();
             }
         }
     };

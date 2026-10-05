@@ -55,9 +55,8 @@ o adımda sorulur).
 ## Dosya yapısı (M2 sonunda)
 
 ```
-crates/erk-renderer/src/document.rs     kalıcı belge: DOM, eleman durumu, kaydırma, son layout (M2.0)
-crates/erk-renderer/src/hit.rs          hit-test: boyama sırasının tersinden (M2.1)
-crates/erk-renderer/src/events.rs       tıklama ve odak olayları, yayılma yolu (M2.1, M2.2)
+crates/erk-renderer/src/page.rs         kalıcı belge, hit-test (boyama sırasının tersinden), tıklama (M2.0, M2.1)
+crates/erk-renderer/src/events.rs       odak olayları (M2.2)
 crates/erk-renderer/src/scroll.rs       kaydırma kapları ve kırpma (M2.3)
 crates/erk-renderer/tests/input.rs      girdi protokolü testleri (M2.1–M2.3)
 crates/erk-renderer/tests/counter.rs    sayaç demosunun otomatik testi (M2.4)
@@ -87,19 +86,19 @@ examples/perf/long-page.html            kaydırma ve kare süresi ölçüm sayfa
 
 ### M2.1: Girdi hattı, hit-test, tıklama, denetim
 
-- [ ] Mesajlar (düz veri): `ToRenderer::Pointer { kind: Move | Down | Up |
+- [x] Mesajlar (düz veri): `ToRenderer::Pointer { kind: Move | Down | Up |
   Leave, x, y, button, modifiers }` (mantıksal piksel). Kabuk winit'in fare
   olaylarını ölçekten bağımsız mantıksal piksele çevirip gönderir.
-- [ ] Hit-test: son layout'un kutuları boyama sırasının tersinden gezilir
+- [x] Hit-test: son layout'un kutuları boyama sırasının tersinden gezilir
   (yığın bağlamları, `z-index`, akış); metnin üstündeki nokta metnin
   elemanını verir; `pointer-events: none` atlanır; `visibility: hidden` hedef
   olmaz.
-- [ ] Tıklama: aynı eleman (ya da ortak ata) üstünde basma ve bırakma bir
+- [x] Tıklama: aynı eleman (ya da ortak ata) üstünde basma ve bırakma bir
   `ERK_EVENT_CLICK` olur; `FromRenderer::Event { kind, target, path, x, y,
   modifiers }`. `path` hedeften köke düğümler: capture, target ve bubble
   sırasını host bu yoldan kurar. Otomatik test: bir tıklama doğru `NodeId`'yi
   bildiriyor (kabulün maddesi).
-- [ ] Denetim (p1-contract §8.1): `ToRenderer::InspectAt { x, y }` hit-test'in
+- [x] Denetim (p1-contract §8.1): `ToRenderer::InspectAt { x, y }` hit-test'in
   `NodeId`'sini döndürür; `ToRenderer::Highlight { node }` seçili düğümün
   kutularını bir kaplamayla çizer. **Muhafız** (p1-contract §11): vurgu
   açıkken ve kapalıyken DOM dökümü ve hesaplanmış stiller aynı; display
@@ -260,3 +259,23 @@ bilinen fark diye listeleniyor; gizli metin ölçülmüyor; satır içi kutudan
 önceki boşluk atılıyor; daralan boşluk onu yazan düğüme sayılmıyor; düğümün
 kendi boşlukları ayrı aralıklara bölünüyor (ilk ikisi yerleşim hatası, gerisi
 ölçümün ve listenin kendisi).
+
+**M2.1 (2026-10-05).** Girdi hattı, hit-test, tıklama, denetim.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| `hit.rs` ve `events.rs` | Hit-test ve tıklama `page.rs`'te (`Page`): son karenin isabet bölgelerini tutan kalıcı belge zaten orada. Odak olayları M2.2'de gerekirse ayrılır |
+| Kutular boyama sırasının tersinden gezilir | Display list'e boyanmayan ve dökümde görünmeyen `Hit { node, frame }` öğeleri giriyor: her elemanın kenarlık kutusu, kendi arka planıyla aynı yerde; her metin satırı için metnin elemanı. Böylece yığın bağlamları, `z-index` ve akış boyamayla aynı sıradan geliyor, ayrı bir sıralama yok; noktanın altındaki son öğe en üstteki. `pointer-events: none` ve `visibility: hidden` öğe üretmiyor |
+| — | **Boş tuval kök elemanın:** testteki sayfada `html` ve `body`'nin yüksekliği 0 (bütün çocuklar mutlak konumlu), dolayısıyla hiçbir kutunun örtmediği noktada hedef çıkmıyordu. Chrome görüntü alanındaki böyle bir noktayı kök elemana verir (tuval onundur); Erk de öyle. Görüntü alanı dışı hedefsiz |
+| Basma ve bırakma bir tıklama olur | Birincil tuşun basıldığı ve bırakıldığı düğümlerin en derin ortak atası tıklanır (iki eleman arasında kayan imleçte Chrome gibi); yol hedeften kök elemana elemanlar, metin düğümü değil. Diğer tuşlar ve karışık basma/bırakma tıklama üretmez |
+| — | **Fare girdisi kare çizmez:** M2.1'de girdi henüz hiçbir stili değiştirmiyor; renderer döngüsü yalnızca belge, boyut, ölçek, font, kaynak ya da vurgu değişince çiziyor (`changed`). Hareket başına tam kare M2.2'de `:hover` ile geliyor |
+| `Query` (M2.4) | Testlerin düğüm bulması için şimdiden: yalnızca `#id`. Tam seçici M2.4'te |
+| Kabuk winit olaylarını mantıksal piksele çevirir | `CursorMoved` fiziksel konumu ölçek faktörüne bölüyor; sol, sağ, orta tuş birincil, ikincil, orta. Olaylar henüz kabukta kimseye gitmiyor (abonelik M2.4'ün demo host'unda). Kabuğun eşlemesinin otomatik testi yok: winit olayı üretmek pencere istiyor; renderer tarafı `tests/input.rs`'te mesaj protokolüyle sınanıyor |
+
+Mutasyonlar (10/10 yakalandı): hit-test öndeki yerine arkadaki kutuyu
+seçiyor; `pointer-events: none` yok sayılıyor; gizli metin hedef oluyor;
+metin elemanı yerine bloğu hedefliyor; tıklama ortak ata yerine bırakılan
+elemana gidiyor; her tuş tıklıyor (ilk hâlinde kaçtı, karışık tuş testi
+eklendi); tuval kök elemana düşmüyor (betiğim mutasyonu yanlış uyguladı,
+elle uygulanınca iki test kırıldı); vurgu sayfanın altına çiziliyor; fare
+girdisi kare çiziyor; sorgu etiket adını da eşliyor.

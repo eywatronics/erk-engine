@@ -286,6 +286,7 @@ fn the_renderer_thread_asks_the_host_and_repaints() {
             Ok(FromRenderer::Frame(frame)) if !frame.resources_pending() => break frame,
             Ok(FromRenderer::Frame(_)) => {}
             Ok(FromRenderer::Resources(more)) => panic!("asked again: {more:?}"),
+            Ok(_) => panic!("nothing else was asked"),
             Err(RecvTimeoutError::Timeout) => panic!("no final frame"),
             Err(RecvTimeoutError::Disconnected) => panic!("the renderer thread died"),
         }
@@ -322,7 +323,7 @@ fn requested(from: &std::sync::mpsc::Receiver<FromRenderer>) -> Vec<ResourceRequ
     loop {
         match from.recv_timeout(PATIENCE) {
             Ok(FromRenderer::Resources(requests)) => break requests,
-            Ok(FromRenderer::Frame(_)) => {}
+            Ok(_) => {}
             Err(error) => panic!("no resource requests: {error:?}"),
         }
     }

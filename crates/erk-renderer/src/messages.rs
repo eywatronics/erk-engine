@@ -25,6 +25,18 @@ pub enum ToRenderer {
     /// The host has no resource for request `id`; the page renders
     /// without it.
     ResourceMissing { id: u64 },
+    /// Pointer input over the page.
+    Pointer(PointerInput),
+    /// Which node is under the point `x`, `y` (CSS pixels)? Answered with
+    /// `FromRenderer::Inspected` (p1-contract §8.1, `erk_inspect_at`).
+    InspectAt { request: u64, x: f32, y: f32 },
+    /// Draw the developer tools' highlight over `node`'s boxes, or remove it
+    /// (`None`). It is drawn over the page, never added to the document.
+    Highlight { node: Option<u64> },
+    /// The first element matching `selector`, answered with
+    /// `FromRenderer::QueryResult` (`erk_query`). Only `#id` for now; full
+    /// selectors come with the host's mutations (M2.4).
+    Query { request: u64, selector: String },
     /// Stop the renderer thread.
     Shutdown,
 }
@@ -36,6 +48,71 @@ pub enum FromRenderer {
     /// The document names resources the host has not been asked for yet.
     /// Sent before the frame that is painted without them.
     Resources(Vec<ResourceRequest>),
+    /// Something happened on the page the host may answer (a click).
+    Event(Event),
+    /// The answer to `ToRenderer::InspectAt`: the topmost node there, if any.
+    Inspected { request: u64, node: Option<u64> },
+    /// The answer to `ToRenderer::Query`.
+    QueryResult { request: u64, node: Option<u64> },
+}
+
+/// One pointer action at `x`, `y`, in CSS pixels of the viewport (a window
+/// sends its physical position divided by its scale).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointerInput {
+    pub kind: PointerKind,
+    pub x: f32,
+    pub y: f32,
+    /// The button pressed or released; `None` for moves.
+    pub button: PointerButton,
+    pub modifiers: Modifiers,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerKind {
+    Move,
+    Down,
+    Up,
+    /// The pointer left the page.
+    Leave,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerButton {
+    None,
+    Primary,
+    Secondary,
+    Middle,
+}
+
+/// The modifier keys held during an input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+/// An event on the page, as p1-contract's `ErkEvent` describes it: its
+/// kind, the node it happened to, and the path from that node up to the
+/// root element, from which the host dispatches the capture, target and
+/// bubble phases. Nodes are `NodeId` bits; coordinates are CSS pixels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Event {
+    pub kind: EventKind,
+    pub target: u64,
+    /// `target` first, then each ancestor element up to the root element.
+    pub path: Vec<u64>,
+    pub x: f32,
+    pub y: f32,
+    pub modifiers: Modifiers,
+}
+
+/// The kinds of p1-contract §10, numbered the same.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventKind {
+    Click = 1,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

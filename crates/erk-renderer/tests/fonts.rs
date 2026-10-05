@@ -97,7 +97,7 @@ impl Host {
                     }
                 }
                 Ok(FromRenderer::Frame(frame)) if !frame.resources_pending() => break frame,
-                Ok(FromRenderer::Frame(_)) => {}
+                Ok(_) => {}
                 Err(error) => panic!("no complete frame: {error:?}"),
             }
         }

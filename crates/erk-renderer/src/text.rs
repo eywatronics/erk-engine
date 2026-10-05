@@ -7,6 +7,8 @@
 //! consulted yet (M1.7).
 
 use std::ops::Range;
+
+use erk_dom::NodeId;
 use std::sync::Arc;
 
 use erk_style::style::properties::style_structs::Font as FontStyle;
@@ -222,9 +224,8 @@ impl VerticalAlign {
 /// One item of a block's inline content, in tree order.
 pub(crate) enum InlineToken<S> {
     /// The text of a text node, with the style of its element, the
-    /// language it is written in (for `text-transform`) and the text node's
-    /// arena index.
-    Text(String, S, LanguageIdentifier, usize),
+    /// language it is written in (for `text-transform`) and the text node.
+    Text(String, S, LanguageIdentifier, NodeId),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
     Open(S),
@@ -347,9 +348,9 @@ pub(crate) struct Paragraph {
     pub(crate) items: Vec<InlineItem>,
     decorations: Vec<Decoration>,
     raised: Vec<Raised>,
-    /// Where each text node's text went: its arena index and its range of
+    /// Where each text node's text went: the node and its range of
     /// `text`, in text order.
-    pub(crate) sources: Vec<(usize, Range<usize>)>,
+    pub(crate) sources: Vec<(NodeId, Range<usize>)>,
 }
 
 /// An inline element being read, until its `Close`.
@@ -404,7 +405,7 @@ impl Paragraph {
         let mut previous: Option<char> = None;
         // The text node a pending space was written in: the space is its
         // text, though it is emitted only before the next content.
-        let mut space_owner: Option<usize> = None;
+        let mut space_owner: Option<NodeId> = None;
         // Element ends seen since the last content: whether each came after
         // the pending space (the space is then inside the element).
         let mut closes: Vec<(OpenElement, bool)> = Vec::new();
@@ -546,7 +547,7 @@ impl Paragraph {
         closes: &mut Vec<(OpenElement, bool)>,
         pending_space: &mut bool,
         last_was_space: &mut bool,
-        space_owner: &mut Option<usize>,
+        space_owner: &mut Option<NodeId>,
     ) {
         let (after, before): (Vec<_>, Vec<_>) =
             closes.drain(..).partition(|(_, after_space)| *after_space);
@@ -568,7 +569,7 @@ impl Paragraph {
 
     /// Text node `node`'s text went to `range`: added to its last range when
     /// the two meet (a collapsed space and the characters around it).
-    fn attribute(&mut self, node: usize, range: Range<usize>) {
+    fn attribute(&mut self, node: NodeId, range: Range<usize>) {
         if let Some((last, so_far)) = self.sources.last_mut()
             && *last == node
             && so_far.end == range.start

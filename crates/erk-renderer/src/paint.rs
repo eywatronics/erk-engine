@@ -135,6 +135,11 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
             }
             DisplayItem::PushOpacity(opacity) => ctx.push_opacity_layer(*opacity),
             DisplayItem::PopOpacity => ctx.pop_layer(),
+            DisplayItem::Hit { .. } => {}
+            DisplayItem::Highlight(frame) => {
+                ctx.set_paint(color(crate::display::HIGHLIGHT));
+                ctx.fill_rect(&rect(*frame));
+            }
             DisplayItem::Glyphs(run) => {
                 ctx.set_paint(color(run.color));
                 ctx.glyph_run(&mut resources, &run.font)

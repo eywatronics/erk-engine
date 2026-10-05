@@ -17,6 +17,23 @@ impl NodeId {
     pub fn index(self) -> u32 {
         self.index
     }
+
+    /// The id as one number, `index | generation << 32`: the internal form
+    /// of p1-contract §2, as plain data for messages. The C-ABI mixes it
+    /// with a per-app key (M3); the host never reads the bits.
+    pub fn to_bits(self) -> u64 {
+        u64::from(self.index) | (u64::from(self.generation.get()) << 32)
+    }
+
+    /// The id a [`NodeId::to_bits`] number stands for, or `None` if no id
+    /// has that form (a generation of 0). Whether it names a live node is
+    /// for the arena to say.
+    pub fn from_bits(bits: u64) -> Option<Self> {
+        Some(Self {
+            index: bits as u32,
+            generation: NonZeroU32::new((bits >> 32) as u32)?,
+        })
+    }
 }
 
 struct Slot<T> {
@@ -103,6 +120,18 @@ impl<T> Arena<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_id_survives_its_number_and_a_zero_generation_is_no_id() {
+        let mut arena = Arena::new();
+        arena.insert('a');
+        let id = arena.insert('b');
+        assert_eq!(NodeId::from_bits(id.to_bits()), Some(id));
+        assert_eq!(id.to_bits() >> 32, 1, "generation in the high half");
+        assert_eq!(id.to_bits() as u32, 1, "index in the low half");
+        assert_eq!(NodeId::from_bits(7), None);
+        assert_eq!(NodeId::from_bits(0), None);
+    }
 
     #[test]
     fn inserted_value_can_be_read_back() {

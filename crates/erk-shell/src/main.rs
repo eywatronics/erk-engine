@@ -102,7 +102,7 @@ fn screenshot(page: &std::path::Path, html: String, out: &PathBuf) -> Result<(),
                 }
             }
             Ok(FromRenderer::Frame(frame)) if !frame.resources_pending() => break frame,
-            Ok(FromRenderer::Frame(_)) => {}
+            Ok(_) => {}
             Err(_) => return Err("the renderer stopped before painting".to_owned()),
         }
     };
