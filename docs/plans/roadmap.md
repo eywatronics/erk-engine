@@ -28,7 +28,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M0.5** | Mimari sözleşme | Bitti |
 | **M1** | Statik UI | Bitti |
 | **M2** | Etkileşim temeli | Bitti ([m2-interaction.md](m2-interaction.md)) |
-| **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
+| **M3** | Kütüphane (Rust API, C-ABI) | Sürüyor ([m3-library.md](m3-library.md)) |
 | **M4** | Etkileşimli DOM | Yeni |
 | **M5** | Artımlı render ve formlar | Yeni |
 | **M6** | Bağlamalar: Python, Go, JavaScript | Yeni |
@@ -257,6 +257,22 @@ yeniden hesaplamanın kare süresi kaydedilmiş.
   çekirdeğin değil aşamaları çağıran `erk` crate'inin ölçümüyle
 - Muhafızlar: üretilen `erk.h` depodakiyle aynı; bir C örneği CI'da derlenip
   çalışıyor; `unsafe` yalnızca `erk-style` ve `erk-ffi`'de
+
+M3 de adımlara bölünür; her adım kendi PR'ı ([m3-library.md](m3-library.md)):
+
+| Adım | Kapsam | Durum |
+|---|---|---|
+| M3.0 | Display list düz veri (`FontId`, `ImageId`), raster ayrı bileşen, sınırın muhafızı | Yeni |
+| M3.1 | `erk` crate'i: UI iş parçacığında belge, dış id, ekransız `App` (`tick`, `input`), pencere döngüsü ve font taraması kabuktan, kabuk `erk`'in ilk kullanıcısı, UI yığını kararı | Yeni |
+| M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Yeni |
+| M3.3 | Denetim sorguları, aşama süreleri | Yeni |
+| M3.4 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Yeni |
+| M3.5 | Kabul: Rust ve C örnekleri CI'da, ABI v0.2 | Yeni |
+
+**Karar (plan):** M3'ün API'si motorun bugün yaptıklarıyla sınırlı; düğüm
+oluşturma, silme ve öznitelik çağrıları M4'ün `Mutation` API'siyle gelir.
+Ekransız uygulama ve `tick`/`input`, kabulün belirleyici tık testi için
+M3'e çekildi; host'un kendi penceresine çizimi M3 sonrası.
 
 **Kabul:** Rust ve C örnek uygulamaları CI'da derlenip bir sayfa açıyor ve bir
 tık olayı alıyor. Yanlış iş parçacığından çağrı ve eski `NodeId` hata kodu
