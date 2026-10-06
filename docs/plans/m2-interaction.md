@@ -197,23 +197,23 @@ inceler, gerçek olanları düzeltir.
 
 ### M2.8: macOS CI ve kabul
 
-- [ ] CI'a macOS job'ı (derleme ve testler; fontique CoreText yolu).
-- [ ] Kabul maddelerinin hepsi otomatik testle; tam yeniden hesaplamanın kare
+- [x] CI'a macOS job'ı (derleme ve testler; fontique CoreText yolu).
+- [x] Kabul maddelerinin hepsi otomatik testle; tam yeniden hesaplamanın kare
   süresi kayıtlı; `roadmap.md`'de M2 "Bitti".
 
 ### M2 kabulü
 
-- [ ] Uzun bir sayfa kayıyor, hover stili değiştiriyor, bir tık doğru
+- [x] Uzun bir sayfa kayıyor, hover stili değiştiriyor, bir tık doğru
   `NodeId`'yi raporluyor (otomatik testler).
-- [ ] Sayaç demosu çalışıyor; otomatik test tıklama gönderip sayının
+- [x] Sayaç demosu çalışıyor; otomatik test tıklama gönderip sayının
   değiştiği kareyi altın görüntüyle doğruluyor.
-- [ ] GPU yolu yoksa CPU'ya düşüyor (test).
-- [ ] Tam yeniden hesaplamanın kare süresi kaydedilmiş, M5'in tabanı olarak.
-- [ ] Metin geometrisi testi her referans sayfasında yeşil; satır içi kutu
+- [x] GPU yolu yoksa CPU'ya düşüyor (test).
+- [x] Tam yeniden hesaplamanın kare süresi kaydedilmiş, M5'in tabanı olarak.
+- [x] Metin geometrisi testi her referans sayfasında yeşil; satır içi kutu
   parçalanması düzeltilmiş (test).
-- [ ] `css/css-position`'da düşen her test sınıflanmış.
-- [ ] macOS CI yeşil.
-- [ ] `roadmap.md`'de M2 "Bitti".
+- [x] `css/css-position`'da düşen her test sınıflanmış.
+- [x] macOS CI yeşil.
+- [x] `roadmap.md`'de M2 "Bitti".
 
 ## Açık sorular
 
@@ -472,3 +472,37 @@ yarıçaptan kenarlık düşülmüyor.
 | "Eşdeğerlik, CPU'dan GPU'ya geçişte hiçbir görsel gerileme olmadığını kanıtlıyor" | Fazla: eşdeğerlik tek bir sayfada ve ekran dışı dokuda sınanıyor; pencere yüzeyinin biçimi ve sunumu otomatik testsiz (M2.5'in notlarında yazılı) |
 | Atlas belleği: uzun oturumlarda görüntü atlasından çıkarma (eviction) gerekebilir | Kısmen var: `upload_images` her karede o karede çizilmeyen görüntüleri atlastan siliyor, atlas sınırsız büyümüyor. Açık kalan, gelip giden görüntülerin her gelişte yeniden yüklenmesi; Erk bugün görünmeyenleri de çizdiği için bir sayfanın görüntüleri atlasta kalıyor. Görünmeyeni çizmeme (M5) gelince yeniden bakılır |
 | 0 × 0 (küçültülmüş pencere) yüzeyi `.max(1)` ile korunuyor | Doğru; yapılacak bir şey yok |
+
+**M2.8 (2026-10-06).** macOS CI ve M2'nin kabulü.
+
+| Plan ne diyordu | Gerçek |
+|---|---|
+| CI'a macOS job'ı (fontique CoreText yolu) | `rust-checks` matrisine `macos-latest` eklendi; ilk denemede yeşil. Orada da koşanlar: CoreText ile font taraması (`the_system_has_fonts_and_serves_their_faces`), GPU eşdeğerliği Metal'de (`the_gpu_paints_what_the_cpu_paints`), sayacın altın görüntüsü piksel piksel aynı. Fuzz, WPT ve boyut job'ları Linux'ta kalıyor |
+
+M2'nin kabul maddeleri ve onları sınayan testler:
+
+| Madde | Test |
+|---|---|
+| Uzun bir sayfa kayıyor | `a_long_page_scrolls_with_the_wheel` |
+| Hover stili değiştiriyor | `hover_and_active_restyle_the_element_under_the_pointer`, `the_states_reference_page_follows_the_pointer_and_the_focus` |
+| Bir tık doğru `NodeId`'yi raporluyor | `a_click_reports_the_element_under_the_pointer_and_its_path` |
+| Sayaç: tıklama, sayı değişiyor, altın görüntü | `clicks_count_and_the_page_shows_the_number` |
+| GPU yolu yoksa CPU'ya düşüyor | `without_the_gpu_path_the_renderer_still_sends_frames`, `without_an_adapter_there_is_no_gpu_path`, `a_panic_while_starting_is_a_reason_to_fall_back` |
+| Metin geometrisi her referans sayfasında yeşil; parçalanma düzeltilmiş | `erk_text_matches_chrome` (bilinen fark listesi boş: 21 sayfanın her metin satırı Chrome'la 1 px içinde), `an_inline_element_that_wraps_takes_its_opening_edge_with_it` |
+| `css/css-position`'da düşen her test sınıflanmış | M2.7'nin notları: 200 test, test adı başına |
+| macOS CI yeşil | PR #37 |
+
+Tam yeniden hesaplamanın kare süresi, M5'in tabanı (800 × 600, `measure`,
+30 çağrının medyanı, GTX 1650 olan bu makinede; tam kare: tutulan belgenin
+stili, layout'u ve vello_cpu'yla boyaması; boyama: yalnızca display list):
+
+| Sayfa | Tam kare | Boyama, vello_cpu | Boyama, GPU |
+|---|---|---|---|
+| `examples/perf/nodes-1000.html` | 75,28 ms | 17,18 ms | 13,01 ms |
+| `examples/perf/long-page.html` | 38,10 ms | 20,32 ms | 12,30 ms |
+| `examples/settings.html` | 14,58 ms | 8,45 ms | 1,81 ms |
+
+M2.0'ın tabanına göre (72,11 / 31,20 / 15,83 ms) long-page ~7 ms ağır: her
+karede kırpma ve kaydırma kapsamlarının hesabı (M2.3) ve ölçüm gürültüsü.
+nodes-1000'in karesinin dörtte üçü stil ve layout: M5'in artımlı işinin
+hedefi bu.
