@@ -372,7 +372,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .window
                     .as_ref()
                     .map_or(1.0, |state| state.window.scale_factor());
-                let (dx, dy) = wheel_delta(delta, scale);
+                let (dx, dy) = wheel_delta(delta, scale, self.modifiers.shift);
                 self.send(ToRenderer::Wheel {
                     dx,
                     dy,
@@ -508,12 +508,22 @@ const LINE: f32 = 40.0;
 /// A wheel turn as CSS pixels to scroll towards the end of the page: winit
 /// reports lines (a wheel) or physical pixels (a touchpad), positive when
 /// the content should move down, the other way round.
-fn wheel_delta(delta: MouseScrollDelta, scale: f64) -> (f32, f32) {
-    match delta {
+///
+/// With Shift held a vertical turn scrolls sideways, as in browsers: a plain
+/// wheel has no other way to reach a horizontal scroller. macOS turns it
+/// itself and reports it sideways already, so only a purely vertical turn is
+/// turned.
+fn wheel_delta(delta: MouseScrollDelta, scale: f64, shift: bool) -> (f32, f32) {
+    let (dx, dy) = match delta {
         MouseScrollDelta::LineDelta(x, y) => (-x * LINE, -y * LINE),
         MouseScrollDelta::PixelDelta(position) => {
             ((-position.x / scale) as f32, (-position.y / scale) as f32)
         }
+    };
+    if shift && dx == 0.0 {
+        (dy, 0.0)
+    } else {
+        (dx, dy)
     }
 }
 
@@ -528,21 +538,33 @@ mod tests {
         use winit::dpi::PhysicalPosition;
         // A notch towards the user scrolls down.
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(0.0, -1.0), 2.0),
+            wheel_delta(MouseScrollDelta::LineDelta(0.0, -1.0), 2.0, false),
             (0.0, LINE)
         );
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(1.0, 0.0), 1.0),
+            wheel_delta(MouseScrollDelta::LineDelta(1.0, 0.0), 1.0, false),
             (-LINE, 0.0)
         );
         // A touchpad's physical pixels, at scale 2.
         assert_eq!(
             wheel_delta(
                 MouseScrollDelta::PixelDelta(PhysicalPosition::new(10.0, -30.0)),
-                2.0
+                2.0,
+                false
             ),
             (-5.0, 15.0)
         );
+    }
+
+    #[test]
+    fn shift_turns_a_vertical_wheel_sideways() {
+        let notch = MouseScrollDelta::LineDelta(0.0, -1.0);
+        assert_eq!(wheel_delta(notch, 1.0, true), (LINE, 0.0));
+        assert_eq!(wheel_delta(notch, 1.0, false), (0.0, LINE));
+        // A turn that is already sideways (a tilt wheel, a touchpad, or
+        // macOS, which turns it itself) keeps its direction.
+        let sideways = MouseScrollDelta::LineDelta(-1.0, 0.0);
+        assert_eq!(wheel_delta(sideways, 1.0, true), (LINE, 0.0));
     }
 
     #[test]

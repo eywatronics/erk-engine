@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Erk M2 demosu</title>
+<!-- Everything M2 added, on one page: open it with `erk examples/m2-demo.html`
+     (the GPU path) or `erk --cpu examples/m2-demo.html`. -->
+<style>
+  body { margin: 0; background: #eef2f7; color: #0f172a; font-family: system-ui, sans-serif; font-size: 14px; }
+  .sayfa { padding: 16px 20px 40px 20px; }
+  h1 { margin: 0; font-size: 22px; }
+  .alt { color: #64748b; margin: 2px 0 14px 0; }
+  .izgara { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; }
+  .kart { width: 335px; padding: 14px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08); }
+  .kart:hover { border-color: #93c5fd; }
+  h2 { margin: 0 0 4px 0; font-size: 15px; }
+  .ipucu { color: #64748b; font-size: 12px; margin-bottom: 10px; }
+  .etiket { display: inline-block; padding: 1px 6px; margin-right: 4px; background: #e2e8f0; border-radius: 4px; font-size: 11px; color: #334155; }
+
+  /* 1. Sayaç: tıklama, Enter, Space; :hover, :active, :focus */
+  .sayac { display: flex; align-items: center; gap: 12px; }
+  #count { width: 70px; font-size: 40px; font-weight: 700; text-align: center; }
+  button { display: inline-block; padding: 8px 16px; border: 2px solid #1e40af; border-radius: 8px; background: #2563eb; color: #ffffff; font: inherit; cursor: pointer; }
+  button:hover { background: #1d4ed8; }
+  button:active { background: #1e3a8a; }
+  button:focus { border-color: #f59e0b; }
+  #decrement { background: #e2e8f0; color: #0f172a; border-color: #94a3b8; }
+  #decrement:hover { background: #cbd5e1; }
+
+  /* 2. Durumlar ve odak sırası */
+  .kutular { display: flex; gap: 8px; }
+  .kutu { flex: 1; padding: 10px 6px; text-align: center; background: #f1f5f9; border: 2px solid #e2e8f0; border-radius: 8px; }
+  .kutu:hover { background: #dbeafe; border-color: #60a5fa; }
+  .kutu:active { background: #bfdbfe; }
+  .kutu:focus { border-color: #f59e0b; background: #fef3c7; }
+  .grup { margin-top: 10px; padding: 8px; border: 2px dashed #cbd5e1; border-radius: 8px; }
+  .grup:focus-within { border-color: #22c55e; background: #f0fdf4; }
+  .alan { margin-top: 6px; padding: 6px 8px; background: #ffffff; border: 1px solid #94a3b8; border-radius: 6px; }
+  .alan:focus { border-color: #22c55e; }
+
+  /* 3. Kaydırma ve kırpma */
+  .liste { height: 130px; overflow: auto; border: 2px solid #cbd5e1; border-radius: 14px; background: #f8fafc; }
+  .oge { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }
+  .oge:hover { background: #e0f2fe; }
+  .yatay { margin-top: 10px; overflow: auto; border: 1px solid #cbd5e1; border-radius: 8px; }
+  .serit { display: flex; gap: 8px; padding: 8px; width: 900px; }
+  .serit div { flex: 0 0 90px; height: 34px; border-radius: 6px; background: #c7d2fe; }
+  .serit div:hover { background: #818cf8; }
+  .kesik { position: relative; margin-top: 10px; height: 40px; overflow: hidden; border-radius: 20px; background: #fde68a; }
+  .kesik .ic { position: absolute; left: 210px; top: 6px; width: 200px; height: 60px; background: #f59e0b; }
+
+  /* 4. İmleçler */
+  .imlecler { display: flex; flex-wrap: wrap; gap: 6px; }
+  .imlecler div { width: 78px; padding: 8px 0; text-align: center; font-size: 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; }
+
+  /* 5. Metin */
+  .metin p { margin: 0 0 8px 0; line-height: 1.45; }
+  .rozet { padding: 1px 6px; border: 2px solid #16a34a; border-radius: 4px; background: #dcfce7; }
+  .vurgu { padding: 0 8px; border-left: 4px solid #2563eb; background: #dbeafe; }
+  .vurgu b { background: #fde68a; }
+  .yukari { position: relative; top: -6px; left: 2px; font-size: 11px; color: #dc2626; }
+  pre { margin: 0; padding: 6px 8px; background: #0f172a; color: #e2e8f0; border-radius: 6px; font-family: monospace; font-size: 12px; }
+  .korunan { white-space: pre-wrap; padding: 6px 8px; background: #f1f5f9; border-radius: 6px; }
+  .satirlar { white-space: pre-line; color: #334155; }
+  .kirilmaz { white-space: nowrap; }
+
+  /* 6. Konumlandırma */
+  .sahne { position: relative; height: 90px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
+  .ortala { display: flex; justify-content: center; align-items: center; height: 90px; }
+  .ortala .uc { position: absolute; padding: 6px 10px; border-radius: 6px; background: #7c3aed; color: #ffffff; }
+  .kose { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="sayfa">
+  <h1>Erk M2 — etkileşim demosu</h1>
+  <div class="alt">Fareyle gezin, tıklayın, tekerleği çevirin, Tab ile dolaşın. Pencere GPU'da çizer; <span class="etiket">--cpu</span> ile CPU'da.</div>
+
+  <div class="izgara">
+    <div class="kart">
+      <h2>1. Sayaç (tıklama, Enter, Space)</h2>
+      <div class="ipucu">Sayıyı host tutar, Erk metnini değiştirir (<span class="etiket">SetText</span> <span class="etiket">Query</span>). Düğmeye Tab ile gelip Enter ya da Space'e basın.</div>
+      <div class="sayac">
+        <button id="decrement">Azalt</button>
+        <div id="count">0</div>
+        <button id="increment">Artır</button>
+      </div>
+    </div>
+
+    <div class="kart">
+      <h2>2. Durumlar ve odak</h2>
+      <div class="ipucu">:hover, :active, :focus, :focus-within. Tab sırası: önce tabindex 1 ve 2, sonra belge sırası.</div>
+      <div class="kutular">
+        <div class="kutu" tabindex="0">Kutu A</div>
+        <div class="kutu" tabindex="2">Kutu B (2.)</div>
+        <div class="kutu" tabindex="1">Kutu C (1.)</div>
+      </div>
+      <div class="grup">
+        İçindeki alan odaklanınca çerçeve yeşil olur
+        <div class="alan" tabindex="0">Ad: Ayşe Yılmaz</div>
+        <div class="alan" tabindex="0">Şehir: İzmir</div>
+      </div>
+    </div>
+
+    <div class="kart">
+      <h2>3. Kaydırma ve kırpma</h2>
+      <div class="ipucu">Tekerlek önce imlecin altındaki kabı kaydırır, sonunda sayfaya geçer. Mor şerit Shift+tekerlekle yana kayar. Çubuk imleç üstündeyken görünür.</div>
+      <div class="liste">
+        <div class="oge">Birinci öğe — yuvarlak köşeli kap</div>
+        <div class="oge">İkinci öğe — içerik köşelerden kırpılır</div>
+        <div class="oge">Üçüncü öğe</div>
+        <div class="oge">Dördüncü öğe</div>
+        <div class="oge">Beşinci öğe</div>
+        <div class="oge">Altıncı öğe</div>
+        <div class="oge">Yedinci öğe</div>
+        <div class="oge">Sekizinci öğe — liste sonu</div>
+      </div>
+      <div class="yatay"><div class="serit"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+      <div class="kesik"><div class="ic"></div></div>
+    </div>
+
+    <div class="kart">
+      <h2>4. İmleçler</h2>
+      <div class="ipucu">Fareyi kutuların üstünde gezdirin; metnin üstünde imleç I olur.</div>
+      <div class="imlecler">
+        <div style="cursor: pointer">pointer</div>
+        <div style="cursor: text">text</div>
+        <div style="cursor: move">move</div>
+        <div style="cursor: grab">grab</div>
+        <div style="cursor: crosshair">crosshair</div>
+        <div style="cursor: help">help</div>
+        <div style="cursor: wait">wait</div>
+        <div style="cursor: not-allowed">not-allowed</div>
+        <div style="cursor: col-resize">col-resize</div>
+        <div style="cursor: zoom-in">zoom-in</div>
+        <div style="cursor: none">none</div>
+        <div style="cursor: default">default</div>
+      </div>
+    </div>
+
+    <div class="kart metin">
+      <h2>5. Metin</h2>
+      <p>Adres:<br>Kordon Boyu No: 12<br>35220 Konak / İzmir</p>
+      <p>Satır sonuna gelen <span class="vurgu">kenarlıklı ve <b>iç içe</b> vurgulu bir parça</span> kenarını metniyle birlikte taşır.</p>
+      <p>Konumlu satır içi öğe: Erk<span class="yukari">M2</span> yukarı kayar, satır değişmez.</p>
+      <pre>fn main() {
+    println!("Merhaba, Erk!");
+}</pre>
+      <p class="korunan" style="margin-top: 8px">pre-wrap:   boşluklar   korunur,
+satır sonları da korunur, uzun satır ise kabın kenarında kırılır.</p>
+      <p class="satirlar">pre-line:   boşluklar    daralır
+ama satır sonları kalır.</p>
+      <p>Kırılmayan rozetler: <span class="kirilmaz rozet">Kaydet ve kapat</span> <span class="kirilmaz rozet">Vazgeç</span> <span class="kirilmaz rozet">Yardım al</span></p>
+    </div>
+
+    <div class="kart">
+      <h2>6. Konumlandırma</h2>
+      <div class="ipucu">Esnek kapta mutlak konumlu öğe, kabın tek öğesi gibi ortalanır.</div>
+      <div class="sahne">
+        <div class="ortala"><div class="uc">Ortadaki mutlak öğe</div></div>
+        <div class="kose">sağ alt köşe</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

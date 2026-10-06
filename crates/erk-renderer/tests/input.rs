@@ -1142,6 +1142,31 @@ fn text_directly_in_a_scroll_container_scrolls_with_it() {
 }
 
 #[test]
+fn a_wide_flex_strip_scrolls_sideways_in_its_scroller() {
+    // The M2 demo's strip: a scroller only as tall as its content, so a
+    // vertical turn leaves it alone and a sideways one moves it.
+    let html = r#"<body style="margin: 0"><div style="width: 300px; overflow: auto">
+        <div style="display: flex; width: 900px; height: 40px">
+        <div style="flex: 0 0 450px; background: rgb(255, 0, 0)"></div>
+        <div style="flex: 0 0 450px; background: rgb(0, 0, 255)"></div></div></div></body>"#;
+    let (page, plain) = Session::open(html);
+    assert_eq!(pixel(&plain, 10, 20), [255, 0, 0]);
+    page.send(wheel(100.0, 100.0, 20.0));
+    nothing_comes(&page);
+    page.send(ToRenderer::Wheel {
+        dx: 500.0,
+        dy: 0.0,
+        x: 100.0,
+        y: 20.0,
+    });
+    assert_eq!(
+        pixel(&page.frame(), 10, 20),
+        [0, 0, 255],
+        "scrolled sideways"
+    );
+}
+
+#[test]
 fn a_wider_viewport_takes_back_what_the_document_no_longer_scrolls_sideways() {
     let html = r#"<body style="margin: 0"><div style="display: flex; width: 600px; height: 50px">
         <div style="flex: 1; background: rgb(255, 0, 0)"></div>
