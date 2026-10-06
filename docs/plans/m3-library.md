@@ -120,19 +120,19 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.0: Display list düz veri, raster sınırı
 
-- [ ] `GlyphRun`'da `FontData` yerine `FontId`: motor her yeni yüzü bir kez
+- [x] `GlyphRun`'da `FontData` yerine `FontId`: motor her yeni yüzü bir kez
   numaralar, baytları raster tarafına bir kez gönderir; raster tarafı bir
   font tablosu tutar. Görüntüler aynı şekilde `ImageId` ve görüntü tablosu.
   Test: aynı fontu kullanan iki kare yüzü bir kez gönderiyor; belge değişince
   tablolar sızmıyor (kaldırılan görüntünün baytları bırakılıyor).
-- [ ] Raster ayrı bir bileşen olur: display list ve tablo güncellemelerini
+- [x] Raster ayrı bir bileşen olur: display list ve tablo güncellemelerini
   alıp vello_cpu ya da vello_hybrid'le çizer. Bu adımda hâlâ renderer iş
   parçacığının içinde çağrılır; M3.1'de kendi iş parçacığına geçer. Altın
   görüntüler ve Chrome skorları değişmez.
-- [ ] **Muhafız:** `check-renderer-surface.sh` raster sınırının mesajlarını
+- [x] **Muhafız:** `check-renderer-surface.sh` raster sınırının mesajlarını
   da denetler: yalnızca prelude tipleri, `Arc`/`Mutex`/`Cell`/`Box`/ödünç
   yok. Kasıtlı ihlal: display list'e bir `Arc` alanı.
-- [ ] Ölçüm: 1000 elemanlı sayfada kare süresi M2'nin tabanıyla (75 ms);
+- [x] Ölçüm: 1000 elemanlı sayfada kare süresi M2'nin tabanıyla (75 ms);
   display list'in sınırdan geçiş maliyeti ayrıca.
 
 ### M3.1: `erk` crate'i, UI iş parçacığında belge
@@ -249,4 +249,17 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ## Yürütme Notları
 
-(Her adımın bulguları, düzeltilen varsayımları ve kararları buraya yazılır.)
+### M3.0
+
+| Konu | Not |
+|---|---|
+| Sınırın tipleri | Display list, `FontId`/`ImageId` ve `TableUpdate` `list.rs`'te; dosya yalnızca prelude tiplerini ve kendi tiplerini anıyor. `Hit` öğesi düğümü `NodeId` değil id'nin bitleri (`u64`) olarak taşıyor; metin parçaları (`TextFragment`) raster'a gitmediği için listeden çıktı, `build` onları ayrıca döndürüyor |
+| Motor tarafı | Yüzler display list kurulurken numaralanıyor (`Resources::font_id`, yüz = font dosyasının `Blob` kimliği ve indeksi); görüntüler çözülünce. `Resources::table_updates(list)` raster'ın tablolarına gerekenleri hesaplıyor: yeni yüzler, listenin ilk kez boyadığı görüntüler, belgesi gitmiş görüntülerin unutulması. Fontlar belge değişince de kalıyor (p1-contract §6.2) |
+| Raster tarafı | `Tables` yalnızca `TableUpdate`'lerle dolar; yüzün ve görüntünün baytlarının kendi kopyası. Tabloda olmayan bir öğe çizilmez, yanlış çizilmez (test). GPU atlası artık işaretçi adresiyle değil `ImageId` ile tutuluyor |
+| **Testin bulduğu hata** | Gömülü Noto Sans her karede yeni bir `Blob` olarak kaydediliyordu (`Blob` kimliği global bir sayaçtan); aynı yüz her karede yeni bir numara alır, baytları (~600 KB) her karede yeniden gönderilir ve raster'ın tablosu sınırsız büyürdü. Gömülü yüzlerin blob'ları artık bir kez kuruluyor (`EMBEDDED`). Host'un fontları zaten saklanan blob'lardı |
+| **Chrome testinin bulduğu hata** | `render_html_with_resources` her çağrıda yeni bir tablo kurup motorun "gönderildi" kaydını eskisiyle kullanınca ikinci karede metin çizilmedi (`images` ve `hidpi` düştü). Kural: bir `Resources` tek bir raster'ın tablolarıyla eşleşir; yardımcı iki karede aynı tabloyu kullanıyor. M3.1'de ikisini `App` birlikte tutar |
+| Bayt kopyası | Bir yüz raster'a bir kez kopyalanıyor: motor şekillendirme için, raster çizim için birer kopya tutuyor. Büyük bir CJK fontunda (~20 MB) bu bellek iki katı demek; paylaşılan değişmez bayt (`Arc`) sınırın düz veri kuralını delerdi. Ayrı süreç ya da bellek ölçümü bir gerek gösterirse yeniden bakılır |
+| Muhafız | `check-renderer-surface.sh` 4. adım: `list.rs`'te `::`, ödünç, `Arc`/`Rc`/`Box`/`dyn`/hücre/kilit yok; display list tipleri başka dosyada tanımlanamaz. Kasıtlı ihlaller: `Arc` alanı, `use std::sync::Arc as Shared`, `Box`, ödünç dilim, `parley::FontData`, `super::Pixmap`, `RefCell`, `Rc` (sekizi de yakalandı); `TableUpdate`'in `gpu.rs`'te yeniden tanımlanması yakalandı |
+| Mutasyonlar | Yüzlerin tekilleştirilmemesi, gitmiş görüntülerin unutulmaması, görüntü güncellemelerinin düşmesi, gömülü blob'ların her karede yeniden kurulması: dördü de testlerce yakalandı |
+| Ölçüm (800 × 600, 30 karenin medyanı, kalıcı belgeden tam kare) | nodes-1000: `main` 71,56 ms, M3.0 71,64 ms; long-page: `main` 34,18 ms, M3.0 32,21 ms. Fark gürültü içinde. Display list bu adımda henüz iş parçacığı değiştirmiyor; geçişin maliyeti M3.1'de, sınır gerçekten iki iş parçacığı arasına inince ölçülür |
+| Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |

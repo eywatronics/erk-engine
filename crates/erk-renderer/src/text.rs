@@ -38,6 +38,16 @@ use taffy::{AvailableSpace, Size};
 
 pub(crate) const NOTO_SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 const NOTO_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSans-Bold.ttf");
+
+/// The embedded faces as blobs, made once: a blob's id is the face's
+/// identity for the raster's font table (list.rs), so every frame's
+/// collection must hand out the same ones.
+static EMBEDDED: std::sync::LazyLock<[Blob<u8>; 2]> = std::sync::LazyLock::new(|| {
+    [
+        Blob::new(Arc::new(NOTO_SANS_REGULAR)),
+        Blob::new(Arc::new(NOTO_SANS_BOLD)),
+    ]
+});
 const FAMILY: &str = "Noto Sans";
 
 /// What Parley carries with each piece of text: its colour, as straight
@@ -1554,10 +1564,8 @@ impl TextEngine {
             }),
             source_cache: SourceCache::default(),
         };
-        for font in [NOTO_SANS_REGULAR, NOTO_SANS_BOLD] {
-            fonts
-                .collection
-                .register_fonts(Blob::new(Arc::new(font)), None);
+        for blob in EMBEDDED.iter() {
+            fonts.collection.register_fonts(blob.clone(), None);
         }
         for blob in host.loaded() {
             fonts.collection.register_fonts(blob.clone(), None);

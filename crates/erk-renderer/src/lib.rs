@@ -15,11 +15,13 @@ mod fonts;
 #[cfg(feature = "gpu")]
 mod gpu;
 mod layout;
+mod list;
 mod messages;
 mod page;
 mod paint;
 mod resources;
 mod scroll;
+mod tables;
 mod text;
 mod thread;
 
@@ -72,7 +74,15 @@ impl Frame {
 /// at one device pixel per CSS pixel. No resource is loaded: images render
 /// as missing.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
-    render_document(html, width, height, 1.0, &mut Resources::default()).0
+    render_document(
+        html,
+        width,
+        height,
+        1.0,
+        &mut Resources::default(),
+        &mut tables::Tables::default(),
+    )
+    .0
 }
 
 /// Like [`render_html`], answering the document's resource requests with
@@ -99,13 +109,17 @@ pub fn render_html_at_scale(
     scale: f32,
     provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
 ) -> Frame {
+    // One raster's tables for both frames: the resources remember what
+    // they were sent.
     let mut resources = Resources::default();
-    let (frame, requests) = render_document(html, width, height, scale, &mut resources);
+    let mut tables = tables::Tables::default();
+    let (frame, requests) =
+        render_document(html, width, height, scale, &mut resources, &mut tables);
     if requests.is_empty() {
         return frame;
     }
     answer(&mut resources, &requests, provide);
-    render_document(html, width, height, scale, &mut resources).0
+    render_document(html, width, height, scale, &mut resources, &mut tables).0
 }
 
 /// `scale` if it is a usable number of device pixels per CSS pixel, else 1.
@@ -152,13 +166,16 @@ pub fn paint_repeatedly(
     frame_done: &mut dyn FnMut(),
 ) -> Result<String, String> {
     let mut page = Page::parse(html);
-    let (list, _) = page.prepare(width, height, 1.0, &mut Resources::default());
+    let mut resources = Resources::default();
+    let (list, _) = page.prepare(width, height, 1.0, &mut resources);
+    let mut tables = tables::Tables::default();
+    tables.apply(resources.table_updates(&list));
     if gpu {
         #[cfg(feature = "gpu")]
         {
             let mut gpu = gpu::Gpu::offscreen(wgpu::Backends::all())?;
             for _ in 0..runs {
-                gpu.render(&list, width, height, 1.0)?;
+                gpu.render(&list, &tables, width, height, 1.0)?;
                 frame_done();
             }
             return Ok(gpu.adapter.clone());
@@ -167,23 +184,25 @@ pub fn paint_repeatedly(
         return Err("built without the gpu feature".to_owned());
     }
     for _ in 0..runs {
-        std::hint::black_box(paint::paint(&list, width, height, 1.0));
+        std::hint::black_box(paint::paint(&list, &tables, width, height, 1.0));
         frame_done();
     }
     Ok("vello_cpu".to_owned())
 }
 
 /// Parse, style, lay out and paint `html` with the resources that have
-/// arrived; also return requests for the URLs it names that were not
-/// known before.
+/// arrived, through `tables`, the raster's tables these resources have
+/// filled; also return requests for the URLs it names that were not known
+/// before.
 pub(crate) fn render_document(
     html: &str,
     width: u16,
     height: u16,
     scale: f32,
     resources: &mut Resources,
+    tables: &mut tables::Tables,
 ) -> (Frame, Vec<ResourceRequest>) {
-    Page::parse(html).render(width, height, scale, resources)
+    Page::parse(html).render(width, height, scale, resources, tables)
 }
 
 /// The border box of every element of `html`'s body that generates a box,
@@ -250,7 +269,8 @@ pub fn text_boxes(
     );
     let scrolling =
         scroll::Scrolling::new(&doc, &styles, &layouts, (w, h), &scroll::Offsets::new());
-    let list = display::DisplayList::build(&doc, &styles, &layouts, &resources, &scrolling, &[]);
+    let (_, text) =
+        display::DisplayList::build(&doc, &styles, &layouts, &resources, &scrolling, &[]);
     // Each counted text node's position in document order, by arena index.
     let mut order = std::collections::HashMap::new();
     let mut stack = vec![(doc.root(), false)];
@@ -275,8 +295,7 @@ pub fn text_boxes(
         children.reverse();
         stack.extend(children.into_iter().map(|child| (child, in_body)));
     }
-    list.text
-        .iter()
+    text.iter()
         .filter_map(|fragment| {
             Some(TextBox {
                 index: *order.get(&(fragment.node.index() as usize))?,

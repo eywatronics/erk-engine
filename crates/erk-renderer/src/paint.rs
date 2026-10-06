@@ -14,13 +14,16 @@ use vello_cpu::{
 
 use crate::color::Rgba;
 use crate::display::{DisplayItem, DisplayList, Frame, GlyphRun, Radii};
+use crate::list::ImageId;
+use crate::tables::Tables;
 
 /// What painting a display list asks of a rasterizer.
 pub(crate) trait Canvas {
     fn set_transform(&mut self, transform: Affine);
     fn set_color(&mut self, color: Rgba);
-    /// Paint with `image`, repeated along an axis where `repeat` says so.
-    fn set_image(&mut self, image: &Arc<Pixmap>, repeat: (bool, bool));
+    /// Paint with image `id`, `image`, repeated along an axis where
+    /// `repeat` says so.
+    fn set_image(&mut self, id: ImageId, image: &Arc<Pixmap>, repeat: (bool, bool));
     fn set_paint_transform(&mut self, transform: Affine);
     fn reset_paint_transform(&mut self);
     fn set_fill_rule(&mut self, rule: Fill);
@@ -30,7 +33,7 @@ pub(crate) trait Canvas {
     fn push_clip_layer(&mut self, path: &BezPath);
     fn push_opacity_layer(&mut self, opacity: f32);
     fn pop_layer(&mut self);
-    fn glyphs(&mut self, run: &GlyphRun);
+    fn glyphs(&mut self, run: &GlyphRun, font: &parley::FontData);
 }
 
 /// The image paint both rasterizers take, around a source each makes.
@@ -69,7 +72,7 @@ impl Canvas for Cpu {
     fn set_color(&mut self, rgba: Rgba) {
         self.ctx.set_paint(color(rgba));
     }
-    fn set_image(&mut self, image: &Arc<Pixmap>, repeat: (bool, bool)) {
+    fn set_image(&mut self, _: ImageId, image: &Arc<Pixmap>, repeat: (bool, bool)) {
         self.ctx
             .set_paint(image_paint(ImageSource::Pixmap(image.clone()), repeat));
     }
@@ -101,9 +104,9 @@ impl Canvas for Cpu {
     fn pop_layer(&mut self) {
         self.ctx.pop_layer();
     }
-    fn glyphs(&mut self, run: &GlyphRun) {
+    fn glyphs(&mut self, run: &GlyphRun, font: &parley::FontData) {
         self.ctx
-            .glyph_run(&mut self.resources, &run.font)
+            .glyph_run(&mut self.resources, font)
             .font_size(run.size)
             .hint(true)
             .fill_glyphs(glyphs(run));
@@ -119,7 +122,13 @@ impl Canvas for Cpu {
 /// Paint `list`, in CSS pixels, into a `width` × `height` pixmap of device
 /// pixels, `scale` device pixels per CSS pixel. Everything is drawn through
 /// one scale transform, so glyphs are rasterised at device resolution.
-pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> Pixmap {
+pub(crate) fn paint(
+    list: &DisplayList,
+    tables: &Tables,
+    width: u16,
+    height: u16,
+    scale: f32,
+) -> Pixmap {
     let settings = RenderSettings {
         level: Level::fallback(),
         num_threads: 0,
@@ -128,16 +137,19 @@ pub(crate) fn paint(list: &DisplayList, width: u16, height: u16, scale: f32) -> 
         ctx: RenderContext::new_with(width, height, settings),
         resources: Resources::new(),
     };
-    paint_list(&mut cpu, list, width, height, scale);
+    paint_list(&mut cpu, list, tables, width, height, scale);
     let mut pixmap = Pixmap::new(width, height);
     cpu.ctx.render(&mut pixmap, &mut cpu.resources);
     pixmap
 }
 
-/// Paint `list` onto `ctx`, a `width` × `height` target of device pixels.
+/// Paint `list` onto `ctx`, a `width` × `height` target of device pixels,
+/// with the faces and images in `tables`. An item whose face or image is
+/// not there is left out.
 pub(crate) fn paint_list(
     ctx: &mut impl Canvas,
     list: &DisplayList,
+    tables: &Tables,
     width: u16,
     height: u16,
     scale: f32,
@@ -210,18 +222,22 @@ pub(crate) fn paint_list(
                 ctx.pop_layer();
             }
             DisplayItem::Image {
-                image,
+                image: id,
                 tile,
                 repeat,
                 area,
                 clip,
                 clip_radii,
+                ..
             } => {
+                let Some(image) = tables.image(*id) else {
+                    continue;
+                };
                 let rounded = clip_radii.iter().any(|(x, y)| *x > 0.0 && *y > 0.0);
                 if rounded {
                     ctx.push_clip_layer(&rounded_rect(*clip, clip_radii));
                 }
-                ctx.set_image(image, *repeat);
+                ctx.set_image(*id, image, *repeat);
                 // One copy of the image maps onto the tile.
                 ctx.set_paint_transform(
                     Affine::translate((f64::from(tile.x), f64::from(tile.y)))
@@ -250,8 +266,10 @@ pub(crate) fn paint_list(
                 ctx.fill_rect(&rect(*frame));
             }
             DisplayItem::Glyphs(run) => {
-                ctx.set_color(run.color);
-                ctx.glyphs(run);
+                if let Some(font) = tables.font(run.font) {
+                    ctx.set_color(run.color);
+                    ctx.glyphs(run, font);
+                }
             }
         }
     }
