@@ -9,7 +9,7 @@
 //! goes back to the CPU, that frame too.
 //!
 //! [`RasterThread`] runs a raster on a thread of its own, as the embedding
-//! layer does; the renderer thread of `spawn` (thread.rs) runs one inline.
+//! layer does.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
@@ -211,47 +211,61 @@ enum ToRaster {
 }
 
 /// A raster on a thread of its own: frames go in with
-/// [`RasterThread::paint`], and what was painted comes back.
+/// [`RasterThread::paint`], and what was painted goes to the sink it was
+/// started with, on the raster's thread: a channel's sender, or a window
+/// event loop's proxy.
 pub struct RasterThread {
     to: Sender<ToRaster>,
-    from: Receiver<Painted>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl RasterThread {
     /// A raster that paints on the CPU, into frames for the host.
-    pub fn cpu() -> Self {
-        Self::start(|| (Rasterizer::new(Start::Cpu), Vec::new()))
+    pub fn cpu(sink: impl FnMut(Painted) + Send + 'static) -> Self {
+        Self::start(|| (Rasterizer::new(Start::Cpu), Vec::new()), sink)
     }
 
     /// A raster that paints into `window` on the GPU (p1-contract §7: the
     /// host's window), on the CPU while the GPU starts or when it cannot.
-    /// Call it on the thread that runs the window's event loop.
+    /// Call it on the thread that runs the window's event loop: some
+    /// platforms give a window's handle only there.
     #[cfg(feature = "gpu")]
-    pub fn on_window(window: impl crate::gpu::Window) -> Self {
-        let (rasterizer, told) =
-            Rasterizer::on_window(std::sync::Arc::new(window), crate::gpu::WINDOW_BACKENDS);
-        Self::start(move || (rasterizer, told))
+    pub fn on_window(
+        window: impl crate::gpu::Window,
+        sink: impl FnMut(Painted) + Send + 'static,
+    ) -> Self {
+        Self::on_window_with(
+            std::sync::Arc::new(window),
+            crate::gpu::WINDOW_BACKENDS,
+            sink,
+        )
     }
 
-    fn start(make: impl FnOnce() -> (Rasterizer, Vec<Painted>) + Send + 'static) -> Self {
+    #[cfg(feature = "gpu")]
+    pub(crate) fn on_window_with(
+        window: std::sync::Arc<dyn crate::gpu::Window>,
+        backends: wgpu::Backends,
+        sink: impl FnMut(Painted) + Send + 'static,
+    ) -> Self {
+        let (rasterizer, told) = Rasterizer::on_window(window, backends);
+        Self::start(move || (rasterizer, told), sink)
+    }
+
+    fn start(
+        make: impl FnOnce() -> (Rasterizer, Vec<Painted>) + Send + 'static,
+        mut sink: impl FnMut(Painted) + Send + 'static,
+    ) -> Self {
         let (to, inbox) = channel();
-        let (outbox, from) = channel();
         let handle = std::thread::Builder::new()
             .name("erk-raster".to_owned())
             .spawn(move || {
                 let (rasterizer, told) = make();
-                for message in told {
-                    if outbox.send(message).is_err() {
-                        return;
-                    }
-                }
-                run(rasterizer, &inbox, &outbox);
+                told.into_iter().for_each(&mut sink);
+                run(rasterizer, &inbox, &mut sink);
             })
             .expect("the raster thread starts");
         Self {
             to,
-            from,
             handle: Some(handle),
         }
     }
@@ -259,8 +273,7 @@ impl RasterThread {
     /// Paint `prepared`. A frame still queued when a newer one arrives is
     /// skipped.
     pub fn paint(&self, prepared: Prepared) {
-        // A raster that has stopped paints nothing; its sender reports why
-        // through `recv`.
+        // A raster that has stopped paints nothing.
         let _ = self.to.send(ToRaster::Paint(prepared));
     }
 
@@ -268,16 +281,6 @@ impl RasterThread {
     /// still reach the raster, which the next frames rely on.
     pub fn skip(&self, prepared: Prepared) {
         let _ = self.to.send(ToRaster::Skip(prepared));
-    }
-
-    /// What was painted, if anything is waiting.
-    pub fn try_recv(&self) -> Option<Painted> {
-        self.from.try_recv().ok()
-    }
-
-    /// What was painted next, waiting up to `timeout`.
-    pub fn recv_timeout(&self, timeout: Duration) -> Option<Painted> {
-        self.from.recv_timeout(timeout).ok()
     }
 }
 
@@ -290,7 +293,7 @@ impl Drop for RasterThread {
     }
 }
 
-fn run(mut rasterizer: Rasterizer, inbox: &Receiver<ToRaster>, outbox: &Sender<Painted>) {
+fn run(mut rasterizer: Rasterizer, inbox: &Receiver<ToRaster>, sink: &mut impl FnMut(Painted)) {
     loop {
         let first = if rasterizer.starting() {
             match inbox.recv_timeout(GPU_POLL) {
@@ -329,11 +332,7 @@ fn run(mut rasterizer: Rasterizer, inbox: &Receiver<ToRaster>, outbox: &Sender<P
         if let Some(prepared) = newest {
             out.extend(rasterizer.paint(prepared));
         }
-        for painted in out {
-            if outbox.send(painted).is_err() {
-                return;
-            }
-        }
+        out.into_iter().for_each(&mut *sink);
     }
 }
 
@@ -371,5 +370,65 @@ mod tests {
             painted.rgba().chunks(4).any(|pixel| pixel[0] < 128),
             "the text is painted"
         );
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests {
+    use std::sync::Arc;
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    use wgpu::rwh::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
+
+    use super::*;
+    use crate::engine::Engine;
+
+    /// A window that gives no handle, as one on a machine where the GPU
+    /// path cannot start.
+    #[derive(Debug)]
+    struct NoWindow;
+
+    impl HasWindowHandle for NoWindow {
+        fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+            Err(HandleError::Unavailable)
+        }
+    }
+
+    impl HasDisplayHandle for NoWindow {
+        fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+            Err(HandleError::Unavailable)
+        }
+    }
+
+    #[test]
+    fn without_the_gpu_path_the_raster_still_paints_frames() {
+        for backends in [wgpu::Backends::all(), wgpu::Backends::empty()] {
+            let (sink, painted) = channel();
+            let raster = RasterThread::on_window_with(Arc::new(NoWindow), backends, move |p| {
+                let _ = sink.send(p);
+            });
+            let patience = Duration::from_secs(60);
+            match painted.recv_timeout(patience) {
+                Ok(Painted::Raster(Raster::Cpu { reason })) => {
+                    assert!(!reason.is_empty(), "{backends:?}");
+                }
+                Ok(_) => panic!("{backends:?}: the raster was not told first"),
+                Err(error) => panic!("{backends:?}: {error:?}"),
+            }
+            let mut engine = Engine::new();
+            engine.load_html(r#"<html style="background: #123456"></html>"#);
+            engine.resize(8, 4);
+            raster.paint(engine.prepare().0.expect("a frame"));
+            let frame = loop {
+                match painted.recv_timeout(patience) {
+                    Ok(Painted::Frame(frame)) => break frame,
+                    Ok(Painted::Presented { .. }) => panic!("presented without a GPU"),
+                    Ok(_) => {}
+                    Err(error) => panic!("{backends:?}: no frame: {error:?}"),
+                }
+            };
+            assert_eq!(&frame.rgba()[..4], &[0x12, 0x34, 0x56, 255]);
+        }
     }
 }

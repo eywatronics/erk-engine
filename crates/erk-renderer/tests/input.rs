@@ -4,14 +4,17 @@
 //! focus order and keyboard activation (M2.2); the wheel, scrolling and
 //! scroll bars (M2.3).
 
+mod support;
+
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use erk_renderer::{
-    Cursor, Event, EventKind, Frame, FromRenderer, Key, KeyInput, KeyState, Modifiers,
-    PointerButton, PointerInput, PointerKind, Status, ToRenderer, spawn,
+    Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton,
+    PointerInput, PointerKind, Status,
 };
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const PATIENCE: Duration = Duration::from_secs(60);
 /// Long enough for a frame that is not coming to show up if it were.

@@ -6,13 +6,16 @@
 //! solid square 0.8 em wide on a 1 em advance. At 20px with no margins the
 //! first square covers x 2..18, the second 22..38, the line's top 0..16.
 
+mod support;
+
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use erk_renderer::{
-    FontCatalog, Frame, FromRenderer, GenericFamilies, ResourceKind, ResourceRequest,
-    ResourceResponse, ScriptFallback, ToRenderer, spawn,
+    FontCatalog, Frame, GenericFamilies, ResourceKind, ResourceRequest, ResourceResponse,
+    ScriptFallback,
 };
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const ERK_TEST: &[u8] = include_bytes!("fonts/ErkTest.ttf");
 const PATIENCE: Duration = Duration::from_secs(60);

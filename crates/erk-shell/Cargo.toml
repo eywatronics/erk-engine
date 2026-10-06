@@ -1,6 +1,6 @@
 [package]
 name = "erk-shell"
-description = "Erk Engine shell: the window and the demo host."
+description = "Erk Engine shell: the demo host, the first user of the erk crate."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,16 +13,9 @@ name = "erk"
 path = "src/main.rs"
 
 [dependencies]
-# The only engine crate the shell may depend on directly; it must not reach
-# the DOM (checked in CI). The renderer is talked to through messages.
-erk-renderer = { path = "../erk-renderer", features = ["gpu"] }
-softbuffer = "=0.4.8"
-winit = "=0.30.13"
-# The system's fonts, scanned by the host (p1-contract §6.2): DirectWrite,
-# fontconfig or CoreText. fontconfig is loaded at run time, so Linux builds
-# need no C library; without it only the embedded font remains. Same version
-# Parley uses in the renderer.
-fontique = { version = "=0.11.1", default-features = false, features = ["system", "fontconfig-dlopen"] }
+# The only project crate the shell may depend on (checked in CI): it is the
+# first host of the Rust API, and reaches the engine through nothing else.
+erk = { path = "../erk" }
 
 [dev-dependencies]
 png = "0.18"

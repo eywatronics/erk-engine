@@ -152,21 +152,34 @@ jobs:
             exit 1
           fi
 
-      # The shell talks to the renderer through messages and must not be able
-      # to reach the DOM. --depth 1 on purpose: erk-shell -> erk-renderer ->
-      # erk-dom is always there indirectly; a direct dependency is the breach.
-      - name: erk-shell does not depend on erk-dom
+      # The shell is the first host of the Rust API (M3.3): it reaches the
+      # engine through erk and nothing else, and erk reaches the document and
+      # the styles through the engine (p1-contract §1.1). --depth 1 on
+      # purpose: the crates behind are always there indirectly; a direct
+      # dependency is the breach.
+      - name: erk-shell depends only on erk, erk only on erk-renderer
         run: |
-          tree=$(cargo tree -p erk-shell -e normal --target all --all-features --locked --depth 1 --prefix none)
-          if grep -E '^erk-(dom|style) ' <<< "$tree"; then
-            echo "the shell talks to the renderer through messages, not the DOM or styles"
+          direct() {
+            cargo tree -p "$1" -e normal --target all --all-features --locked --depth 1 --prefix none \
+              | tail -n +2 | grep -E '^erk' | cut -d' ' -f1 | sort -u
+          }
+          shell=$(direct erk-shell)
+          erk=$(direct erk)
+          if [ "$shell" != "erk" ]; then
+            echo "erk-shell's project dependencies must be erk alone, not:"
+            echo "$shell"
+            exit 1
+          fi
+          if [ "$erk" != "erk-renderer" ]; then
+            echo "erk's project dependencies must be erk-renderer alone, not:"
+            echo "$erk"
             exit 1
           fi
 
-      # The dependency check above cannot see a DOM type re-exported by the
-      # renderer, shared state in a message, or the shell painting through
-      # render_html instead of the renderer thread.
-      - name: The renderer's surface is its thread and plain-data messages
+      # The dependency checks cannot see a DOM type re-exported by the
+      # renderer, shared state in what crosses to the raster, or the shell
+      # painting through render_html.
+      - name: The renderer's surface is its engine, raster and plain data
         run: bash .github/scripts/check-renderer-surface.sh
 
       # The engine is embedded: all I/O, the environment and the clock

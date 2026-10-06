@@ -1,100 +1,51 @@
 //! The counter demo's host (M2.4): the first host logic, written against
-//! the renderer's messages as a host will write it against the C-ABI (M3).
+//! the `erk` API as any host writes it.
 //!
 //! When a page has a `#count` element and an `#increment` (and perhaps a
-//! `#decrement`) button, the host keeps the number: a click whose path
-//! passes through a button changes it, and the host sets `#count`'s text.
-//! The renderer only shows it. Pages without them are left alone.
+//! `#decrement`) button, the host keeps the number: a click on a button
+//! changes it, and the host sets `#count`'s text. Erk only shows it. Pages
+//! without them are left alone.
 
-use erk_renderer::{EventKind, FromRenderer, ToRenderer};
+use std::cell::Cell;
+use std::rc::Rc;
 
-/// The requests the host's queries go out under.
-const COUNT: u64 = 1;
-const INCREMENT: u64 = 2;
-const DECREMENT: u64 = 3;
+use erk::{App, EventKind};
 
-#[derive(Default)]
-pub(crate) struct Counter {
-    value: i64,
-    /// The nodes, as the queries answer them.
-    count: Option<Option<u64>>,
-    increment: Option<Option<u64>>,
-    decrement: Option<Option<u64>>,
-    /// The next request a change goes out under.
-    next: u64,
-}
-
-impl Counter {
-    /// The host, and the questions it asks the page it was loaded with.
-    pub(crate) fn start() -> (Self, Vec<ToRenderer>) {
-        let ask = |request, id: &str| ToRenderer::Query {
-            request,
-            scope: None,
-            selector: format!("#{id}"),
+/// Run the counter on `app`'s page, if it has one.
+pub(crate) fn install(app: &mut App) {
+    let find = |app: &App, id: &str| app.query(None, &format!("#{id}")).ok().flatten();
+    let (Some(count), Some(increment)) = (find(app, "count"), find(app, "increment")) else {
+        return;
+    };
+    let value = Rc::new(Cell::new(0_i64));
+    let buttons = [(Some(increment), 1), (find(app, "decrement"), -1)];
+    for (button, step) in buttons {
+        let Some(button) = button else {
+            continue;
         };
-        let host = Self {
-            next: 100,
-            ..Self::default()
-        };
-        let questions = vec![
-            ask(COUNT, "count"),
-            ask(INCREMENT, "increment"),
-            ask(DECREMENT, "decrement"),
-        ];
-        (host, questions)
-    }
-
-    /// What the host does about `message`.
-    pub(crate) fn on(&mut self, message: &FromRenderer) -> Vec<ToRenderer> {
-        match message {
-            FromRenderer::QueryResult { request, result } => {
-                let node = result.ok().flatten();
-                match *request {
-                    COUNT => self.count = Some(node),
-                    INCREMENT => self.increment = Some(node),
-                    DECREMENT => self.decrement = Some(node),
-                    _ => {}
-                }
-                Vec::new()
-            }
-            FromRenderer::Event(event) if event.kind == EventKind::Click => {
-                let (Some(Some(count)), Some(Some(increment))) = (self.count, self.increment)
-                else {
-                    return Vec::new();
-                };
-                let on = |button: u64| event.path.contains(&button);
-                let step = if on(increment) {
-                    1
-                } else if self.decrement.flatten().is_some_and(on) {
-                    -1
-                } else {
-                    return Vec::new();
-                };
-                self.value += step;
-                self.next += 1;
-                vec![ToRenderer::SetText {
-                    request: self.next,
-                    node: count,
-                    text: self.value.to_string(),
-                }]
-            }
-            _ => Vec::new(),
-        }
+        let value = value.clone();
+        // A click anywhere inside the button bubbles up to it.
+        let _ = app.on(button, EventKind::Click, move |cx, _| {
+            value.set(value.get() + step);
+            let _ = cx.set_text(count, &value.get().to_string());
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::sync::mpsc::Receiver;
-    use std::time::Duration;
 
-    use erk_renderer::{Frame, Modifiers, PointerButton, PointerInput, PointerKind};
+    use erk::{Config, Input, Modifiers, PointerButton, PointerInput, PointerKind};
 
     use super::*;
 
     const PAGE: &str = include_str!("../../../examples/counter.html");
-    const PATIENCE: Duration = Duration::from_secs(60);
+
+    /// The buttons' middles at 800 × 600, from their layout boxes. M3.4's
+    /// box query will let the test ask for them.
+    const DECREMENT: (f32, f32) = (358.5, 282.0);
+    const INCREMENT: (f32, f32) = (443.5, 282.0);
 
     fn decode(png_bytes: &[u8]) -> (u32, u32, Vec<u8>) {
         let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
@@ -105,120 +56,49 @@ mod tests {
         (info.width, info.height, pixels)
     }
 
-    /// Run the host on what the renderer says until `done` is true of a
-    /// message; the last frame seen.
-    fn pump(
-        host: &mut Counter,
-        to: &std::sync::mpsc::Sender<ToRenderer>,
-        from: &Receiver<FromRenderer>,
-        mut done: impl FnMut(&FromRenderer) -> bool,
-    ) -> Option<Frame> {
-        let mut frame = None;
-        loop {
-            let message = from.recv_timeout(PATIENCE).expect("the renderer answers");
-            for answer in host.on(&message) {
-                to.send(answer).unwrap();
-            }
-            let stop = done(&message);
-            if let FromRenderer::Frame(painted) = message {
-                frame = Some(painted);
-            }
-            if stop {
-                return frame;
-            }
-        }
+    fn counter() -> App {
+        let mut app = App::headless(Config {
+            system_fonts: false,
+            ..Config::default()
+        })
+        .unwrap();
+        app.load_html(PAGE);
+        install(&mut app);
+        // Input is hit-tested against the last frame painted.
+        app.tick(0);
+        app
     }
 
-    /// The acceptance item: a click goes to the renderer, the host counts,
-    /// and the frame showing the new number is the golden image.
+    /// The acceptance item: clicks reach the host, the host counts, and the
+    /// frame showing the new number is the golden image.
     #[test]
     fn clicks_count_and_the_page_shows_the_number() {
-        // The buttons' boxes, to click their middles.
-        let boxes = erk_renderer::element_boxes(PAGE, 800, 600, &mut |_| None);
-        let buttons: Vec<_> = boxes.iter().filter(|b| b.tag == "button").collect();
-        let middle = |b: &erk_renderer::ElementBox| (b.x + b.width / 2.0, b.y + b.height / 2.0);
-        let (decrement, increment) = (middle(buttons[0]), middle(buttons[1]));
-
-        let (to, from, renderer) = erk_renderer::spawn();
-        to.send(ToRenderer::Load {
-            html: PAGE.to_owned(),
-        })
-        .unwrap();
-        to.send(ToRenderer::Resize {
-            width: 800,
-            height: 600,
-        })
-        .unwrap();
-        let (mut host, questions) = Counter::start();
-        for question in questions {
-            to.send(question).unwrap();
+        let mut app = counter();
+        // Up three times, down once: 2.
+        for (turn, (x, y)) in [INCREMENT, INCREMENT, INCREMENT, DECREMENT]
+            .into_iter()
+            .enumerate()
+        {
+            app.click(x, y);
+            app.tick(turn as u64 + 1);
         }
-        // The answers, and the first frame: input is hit-tested against the
-        // last frame painted, and before one there is nothing to click. (The
-        // answers come during the batch the frame is painted after.)
-        let (mut answered, mut painted) = (false, false);
-        pump(&mut host, &to, &from, |m| {
-            answered |= matches!(
-                m,
-                FromRenderer::QueryResult {
-                    request: DECREMENT,
-                    ..
-                }
-            );
-            painted |= matches!(m, FromRenderer::Frame(_));
-            answered && painted
-        });
-        assert!(host.count.flatten().is_some() && host.increment.flatten().is_some());
-
-        let click = |(x, y): (f32, f32)| {
-            for kind in [PointerKind::Down, PointerKind::Up] {
-                to.send(ToRenderer::Pointer(PointerInput {
-                    kind,
-                    x,
-                    y,
-                    button: PointerButton::Primary,
-                    modifiers: Modifiers::default(),
-                }))
-                .unwrap();
-            }
-        };
-        // Up three times, down once: 2. Each change is answered, then painted.
-        let mut frame = None;
-        for target in [increment, increment, increment, decrement] {
-            click(target);
-            let changed = host.next + 1;
-            let mut answered = false;
-            frame = pump(&mut host, &to, &from, |m| {
-                if let FromRenderer::Done { request, result } = m
-                    && *request == changed
-                {
-                    assert_eq!(*result, Ok(()));
-                    answered = true;
-                }
-                answered && matches!(m, FromRenderer::Frame(_))
-            });
-        }
-        assert_eq!(host.value, 2);
-        let frame = frame.expect("a frame after the last change");
-        assert!(
-            frame.display_list().contains("\"2\""),
-            "{}",
-            frame.display_list()
-        );
-
+        let count = app.query(None, "#count").unwrap().unwrap();
+        assert_eq!(app.text(count).unwrap(), "2");
         // Leave the pointer's state out of the image: move it away.
-        to.send(ToRenderer::Pointer(PointerInput {
+        app.input(Input::Pointer(PointerInput {
             kind: PointerKind::Leave,
             x: 0.0,
             y: 0.0,
             button: PointerButton::None,
             modifiers: Modifiers::default(),
-        }))
-        .unwrap();
-        let frame = pump(&mut host, &to, &from, |m| {
-            matches!(m, FromRenderer::Frame(_))
-        })
-        .unwrap();
+        }));
+        app.tick(10);
+        let frame = app.frame().expect("a frame");
+        assert!(
+            frame.display_list().contains("\"2\""),
+            "{}",
+            frame.display_list()
+        );
 
         let actual = frame.to_png().unwrap();
         let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/counter-2.png");
@@ -239,64 +119,28 @@ mod tests {
                 panic!("the counter differs from {}", golden.display());
             }
         }
-        to.send(ToRenderer::Shutdown).unwrap();
-        renderer.join().unwrap();
     }
 
     #[test]
-    fn a_click_anywhere_inside_a_button_counts() {
-        let (mut host, _) = Counter::start();
-        for (request, node) in [(COUNT, 1), (INCREMENT, 2), (DECREMENT, 3)] {
-            host.on(&FromRenderer::QueryResult {
-                request,
-                result: Ok(Some(node)),
-            });
-        }
-        let click = |target, path: Vec<u64>| {
-            FromRenderer::Event(erk_renderer::Event {
-                kind: EventKind::Click,
-                target,
-                path,
-                x: 0.0,
-                y: 0.0,
-                modifiers: Modifiers::default(),
-            })
-        };
-        // An icon (9) inside the increment button, then the decrement
-        // button twice, then elsewhere.
-        let texts: Vec<String> = [
-            click(9, vec![9, 2, 5]),
-            click(3, vec![3, 5]),
-            click(3, vec![3, 5]),
-            click(5, vec![5]),
-        ]
-        .iter()
-        .flat_map(|event| host.on(event))
-        .map(|change| match change {
-            ToRenderer::SetText { node: 1, text, .. } => text,
-            other => panic!("{other:?}"),
-        })
-        .collect();
-        assert_eq!(texts, ["1", "0", "-1"]);
+    fn a_click_beside_the_buttons_counts_nothing() {
+        let mut app = counter();
+        app.click(INCREMENT.0 + 200.0, INCREMENT.1);
+        let count = app.query(None, "#count").unwrap().unwrap();
+        assert_eq!(app.text(count).unwrap(), "0");
     }
 
     #[test]
     fn a_page_without_the_counter_is_left_alone() {
-        let (mut host, _) = Counter::start();
-        for request in [COUNT, INCREMENT, DECREMENT] {
-            host.on(&FromRenderer::QueryResult {
-                request,
-                result: Ok(None),
-            });
-        }
-        let click = FromRenderer::Event(erk_renderer::Event {
-            kind: EventKind::Click,
-            target: 7,
-            path: vec![7, 8],
-            x: 0.0,
-            y: 0.0,
-            modifiers: Modifiers::default(),
-        });
-        assert!(host.on(&click).is_empty());
+        let mut app = App::headless(Config {
+            system_fonts: false,
+            ..Config::default()
+        })
+        .unwrap();
+        app.load_html(r#"<button id="increment">+</button>"#);
+        install(&mut app);
+        app.tick(0);
+        app.click(10.0, 10.0);
+        let button = app.query(None, "#increment").unwrap().unwrap();
+        assert_eq!(app.text(button).unwrap(), "+");
     }
 }

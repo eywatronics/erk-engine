@@ -14,22 +14,27 @@ including the alternatives that were rejected, is in
 [docs/design/p0-architecture.md](docs/design/p0-architecture.md) (Turkish). The
 milestone plan is in [docs/plans/roadmap.md](docs/plans/roadmap.md).
 
-## Today (M0: first pixel)
+## Today (M3: the library)
 
-A single process with no networking. The engine reads a local HTML file and
-paints it.
+A single process with no networking. The host (the demo shell is the first)
+uses the `erk` crate; the document lives on its UI thread, and only the
+raster has a thread of its own (p1-contract §1.1).
 
 ```
-main thread                         renderer thread
-┌────────────────────┐   messages   ┌──────────────────────────────────┐
-│ erk-shell          │ ───────────► │ erk-renderer                     │
-│ window (winit),    │ ◄─────────── │ DOM, style, layout, paint        │
-│ input, frames      │   (mpsc)     │                                  │
-└────────────────────┘              └──────────────────────────────────┘
+UI thread (the host's)                       raster thread
+┌──────────────────────────────────┐  plain  ┌───────────────────────────┐
+│ host: erk-shell                  │  data   │ erk-renderer: raster      │
+│ erk: App, window (winit), events │ ──────► │ vello_cpu / vello_hybrid  │
+│ erk-renderer: engine             │ ◄────── │ font and image tables     │
+│ (DOM, style, layout, display     │ frames  │                           │
+│  list; frame on a helper thread  │         │                           │
+│  with a large stack)             │         │                           │
+└──────────────────────────────────┘         └───────────────────────────┘
 ```
 
-The shell and the renderer share no mutable state. They talk only through
-typed messages that hold plain owned data: text, integers, pixel bytes. The
+The UI thread and the raster share no mutable state. The display list and
+the font and image tables' updates are plain owned data: numbers, strings,
+byte vectors. The
 same discipline becomes the embedding API and its C ABI in M3, and keeps a
 separate renderer process possible later without a rewrite.
 
@@ -87,9 +92,9 @@ plain data, but is not planned.
 |---|---|---|
 | `erk-dom` | Arena DOM and the html5ever tree sink. Depends on no other `erk-*` crate | M0 |
 | `erk-style` | Stylo adapter and style engine. A named `unsafe` exception, because Stylo's `TElement` requires five `unsafe fn`s | M0 |
-| `erk-renderer` | The engine (document, input, style, layout, display list) on the caller's thread, the raster on its own; the M0 renderer thread and its messages until the shell moves onto `erk` | M0, split in M3.1 |
-| `erk-shell` | Window, event loop, the demo host. Does not depend on `erk-dom` or `erk-style` | M0 |
-| `erk` | Idiomatic Rust embedding API: an app, its document on the UI thread, its raster | M3 (windowless app in M3.1) |
+| `erk-renderer` | The engine (document, input, style, layout, display list) on the caller's thread, the raster on its own | M0, split in M3.1 |
+| `erk-shell` | The demo host, the first user of `erk`: files, resources, the counter. Depends on no project crate but `erk` | M0, on `erk` since M3.3 |
+| `erk` | Idiomatic Rust embedding API: an app, its document on the UI thread, its raster, its window and event loop, the system's fonts | M3 |
 | `erk-ffi` | The same API as a C ABI (`erk.h`); a named `unsafe` exception | M3 |
 | `erk-python` | Python package over the C ABI | M6 |
 
@@ -102,10 +107,12 @@ plain data, but is not planned.
   those five `unsafe fn`s, and unsafe operations inside them are forbidden.
 - `erk-dom` uses no reference counting (`Rc`, `Arc`), and nothing may switch
   that clippy ban off: a canary type checks that clippy still rejects it.
-- `erk-dom` is a leaf; `erk-shell` depends on neither `erk-dom` nor
-  `erk-style` directly, on any platform or feature set.
-- The renderer's public surface is its thread, plain-data messages, `to_png`
-  and `render_html` for its own tests; the shell never calls `render_html`.
+- `erk-dom` is a leaf; `erk-shell` depends on no project crate but `erk`,
+  and `erk` on none but `erk-renderer`, on any platform or feature set.
+- The renderer's public surface is its engine, its raster, plain data, and
+  `render_html` for its own tests. What crosses to the raster (the display
+  list, the font and image tables' updates) names no shared or borrowed
+  type; `erk` and the shell never call `render_html`.
 - html5ever and Stylo resolve to a single version of their atom crates.
 - CI builds with `--locked`.
 - Chrome reference expectations only go down with a written reason.

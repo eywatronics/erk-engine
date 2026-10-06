@@ -2,10 +2,13 @@
 //! two device pixels per CSS pixel the page has the same layout and twice
 //! the pixels, so text and edges are sharp instead of enlarged.
 
+mod support;
+
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use erk_renderer::{Frame, FromRenderer, ToRenderer, render_html, render_html_at_scale, spawn};
+use erk_renderer::{Frame, render_html, render_html_at_scale};
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const PATIENCE: Duration = Duration::from_secs(60);
 

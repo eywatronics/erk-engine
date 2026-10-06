@@ -19,6 +19,7 @@ fn app(html: &str) -> App {
     let mut app = App::headless(Config {
         width: 100,
         height: 60,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();
@@ -352,6 +353,7 @@ fn a_resource_answered_at_once_is_in_the_same_tick() {
     let mut app = App::headless(Config {
         width: 100,
         height: 60,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();
@@ -376,6 +378,7 @@ fn a_resource_answered_from_another_thread_shows_on_a_later_tick() {
     let mut app = App::headless(Config {
         width: 100,
         height: 60,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();
@@ -407,6 +410,7 @@ fn a_response_of_the_wrong_kind_is_refused_and_logged() {
     let mut app = App::headless(Config {
         width: 100,
         height: 60,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();
@@ -431,6 +435,7 @@ fn a_quieter_log_level_hides_warnings() {
         width: 100,
         height: 60,
         log_level: LogLevel::Error,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();

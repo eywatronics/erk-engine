@@ -750,7 +750,10 @@ name = "erk"
 version = "0.1.0"
 dependencies = [
  "erk-renderer",
+ "fontique",
  "png",
+ "softbuffer",
+ "winit",
 ]
 
 [[package]]
@@ -787,11 +790,8 @@ dependencies = [
 name = "erk-shell"
 version = "0.1.0"
 dependencies = [
- "erk-renderer",
- "fontique",
+ "erk",
  "png",
- "softbuffer",
- "winit",
 ]
 
 [[package]]

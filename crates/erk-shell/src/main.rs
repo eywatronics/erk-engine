@@ -6,26 +6,27 @@
 //! erk --screenshot <out.png> <file.html>
 //! ```
 //!
-//! The shell is the host: it reads the file, and the renderer, on its own
-//! thread, only ever receives the document's text. The engine core does no
-//! I/O of its own; resources, time and configuration come from the host.
+//! The shell is the first host of the `erk` crate: it reads the file and
+//! serves the page's resources, and runs the counter demo's logic. The
+//! engine does no I/O of its own; resources, time and configuration come
+//! from the host.
 
 mod counter;
-mod fonts;
 mod resources;
-mod window;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use erk_renderer::{FromRenderer, ToRenderer};
+use erk::{App, Config, LogLevel};
 
-use crate::fonts::SystemFonts;
 use crate::resources::Provider;
 
 /// Screenshot size, the same as the golden images.
-const SCREENSHOT_WIDTH: u16 = 800;
-const SCREENSHOT_HEIGHT: u16 = 600;
+const SCREENSHOT_WIDTH: u32 = 800;
+const SCREENSHOT_HEIGHT: u32 = 600;
+
+/// How many turns a screenshot waits for resources that arrive later.
+const SCREENSHOT_TURNS: u64 = 8;
 
 enum Command {
     /// `gpu`: draw on the GPU when the machine can (`--cpu` turns it off).
@@ -74,10 +75,10 @@ fn main() -> ExitCode {
     };
     let result = match command {
         Command::Window { page, gpu } => {
-            read_page(&page).and_then(|html| window::run(&page, html, gpu))
+            read_page(&page).and_then(|html| window(&page, &html, gpu))
         }
         Command::Screenshot { out, page } => {
-            read_page(&page).and_then(|html| screenshot(&page, html, &out))
+            read_page(&page).and_then(|html| screenshot(&page, &html, &out))
         }
     };
     match result {
@@ -89,48 +90,65 @@ fn main() -> ExitCode {
     }
 }
 
-fn read_page(page: &PathBuf) -> Result<String, String> {
+fn read_page(page: &Path) -> Result<String, String> {
     std::fs::read_to_string(page).map_err(|e| format!("cannot read {}: {e}", page.display()))
 }
 
-/// Paint `html` through the renderer thread, exactly as the window does, and
-/// write the frame as a PNG: the first frame painted after every resource
-/// request has been answered.
-fn screenshot(page: &std::path::Path, html: String, out: &PathBuf) -> Result<(), String> {
-    let fonts = std::sync::Arc::new(SystemFonts::scan());
-    let provider = Provider::for_page(page).with_fonts(fonts.clone());
-    let (to, from, handle) = erk_renderer::spawn();
-    let send = |message| {
-        to.send(message)
-            .map_err(|_| "the renderer stopped".to_owned())
-    };
-    send(ToRenderer::Fonts(fonts.catalogue().clone()))?;
-    send(ToRenderer::Load { html })?;
-    send(ToRenderer::Resize {
+/// The app's messages, on standard error: how the window draws, refused
+/// resources.
+fn log(_: LogLevel, message: &str) {
+    eprintln!("erk: {message}");
+}
+
+/// Open `page` (already read as `html`) in a window and run until it closes.
+fn window(page: &Path, html: &str, gpu: bool) -> Result<(), String> {
+    let title = format!(
+        "Erk — {}",
+        page.file_name().map_or_else(
+            || page.display().to_string(),
+            |name| name.to_string_lossy().into_owned()
+        )
+    );
+    let mut app = App::new(Config {
+        title,
+        gpu,
+        log_level: LogLevel::Info,
+        ..Config::default()
+    })
+    .map_err(|status| format!("cannot make the app: {status:?}"))?;
+    open(&mut app, page, html);
+    app.run().map_err(|error| error.to_string())
+}
+
+/// Paint `html` without a window, as the window would, and write the frame
+/// as a PNG once every resource request has been answered.
+fn screenshot(page: &Path, html: &str, out: &Path) -> Result<(), String> {
+    let mut app = App::headless(Config {
         width: SCREENSHOT_WIDTH,
         height: SCREENSHOT_HEIGHT,
-    })?;
-    // Frames painted while requests were unanswered lack their resources;
-    // the first frame with none pending is the page.
-    let frame = loop {
-        match from.recv() {
-            Ok(FromRenderer::Resources(requests)) => {
-                for request in &requests {
-                    send(provider.answer(request))?;
-                }
-            }
-            Ok(FromRenderer::Frame(frame)) if !frame.resources_pending() => break frame,
-            Ok(_) => {}
-            Err(_) => return Err("the renderer stopped before painting".to_owned()),
+        ..Config::default()
+    })
+    .map_err(|status| format!("cannot make the app: {status:?}"))?;
+    open(&mut app, page, html);
+    for turn in 0..SCREENSHOT_TURNS {
+        app.tick(turn);
+        if app.frame().is_some_and(|frame| !frame.resources_pending()) {
+            break;
         }
-    };
-    send(ToRenderer::Shutdown)?;
-    handle
-        .join()
-        .map_err(|_| "the renderer thread panicked".to_owned())?;
-
+    }
+    let frame = app.frame().ok_or("nothing was painted")?;
     let png = frame.to_png().ok_or("the frame has no pixels")?;
     std::fs::write(out, png).map_err(|e| format!("cannot write {}: {e}", out.display()))
+}
+
+/// Load `html`, with the page's directory as its resources and the counter
+/// demo's host on the pages that have one.
+fn open(app: &mut App, page: &Path, html: &str) {
+    app.set_log(log);
+    let provider = Provider::for_page(page);
+    app.set_resource_provider(move |request, responder| provider.answer(request, responder));
+    app.load_html(html);
+    counter::install(app);
 }
 
 #[cfg(test)]

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# The shell reaches the renderer only through its thread and messages, and
-# the messages hold only plain owned data, so that the channel can become
-# IPC in M3. See docs/design/p0-architecture.md §2.2. The display list the
-# raster paints is held to the same rule (p1-contract §1.1, M3.0).
+# The renderer's surface is its engine, its raster and plain data: what
+# crosses to the host (messages.rs) and to the raster thread (list.rs)
+# holds only plain owned data, so that it can cross the C ABI and, should
+# the raster ever need it, a process boundary (p1-contract §1.1). The
+# embedding layer, erk, is its one user; the shell reaches it through erk
+# (checked by the dependency step in CI).
 set -euo pipefail
 
 src=crates/erk-renderer/src
@@ -29,10 +31,8 @@ forbid() {
 expected='pub use engine::Engine;
 pub use gpu::Window;
 pub use list::Prepared;
-pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput, KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer, };
+pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, GenericFamilies, Key, KeyInput, KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, };
 pub use raster::RasterThread;
-pub use thread::spawn;
-pub use thread::spawn_on_window;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
 pub fn render_html_with_resources( html: &str, width: u16, height: u16, provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>, ) -> Frame {
@@ -59,7 +59,7 @@ fi
 
 # 2. Methods and trait impls on the message types add to that surface from
 #    any module, so they live in messages.rs, apart from to_png in lib.rs.
-impls=$(grep -rnE '^[[:space:]]*impl\b.*\b(Frame|ToRenderer|FromRenderer)\b' "$src" \
+impls=$(grep -rnE '^[[:space:]]*impl\b.*\b(Frame|Painted|Event)\b' "$src" \
   | grep -v "^$src/messages.rs:" | sed -E 's/:[0-9]+:[[:space:]]*/: /' || true)
 if [ "$impls" != "$src/lib.rs: impl Frame {" ]; then
   echo "impl blocks for the message types outside messages.rs:"
@@ -91,19 +91,12 @@ forbid "the display list's types belong in list.rs" -rnE --exclude=list.rs \
   '\b(struct|enum|type)[[:space:]]+(DisplayList|DisplayItem|GlyphRun|PositionedGlyph|TableUpdate|FontId|ImageId|Radii)\b' \
   "$src"
 
-# 5. The shell never paints synchronously; render_html is for the
-#    renderer's own tests.
-[ -d crates/erk-shell ] || { echo "crates/erk-shell is missing"; exit 1; }
-forbid "the shell talks to the renderer through messages, not render_html" \
-  -rn 'render_html' crates/erk-shell
-# The engine and the raster are the embedding layer's (erk, p1-contract
-# §1.1); the shell keeps to the messages until it moves onto erk (M3.3).
-engine_uses=$(grep -rnwE --include='*.rs' 'Engine|RasterThread|Prepared' crates/erk-shell \
-  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)
-if [ -n "$engine_uses" ]; then
-  echo "the shell talks to the renderer through messages, not its engine:"
-  echo "$engine_uses"
-  fail=1
-fi
+# 5. The embedding layer paints through the engine and the raster thread;
+#    render_html and its kin are for the renderer's own tests.
+for crate in crates/erk crates/erk-shell; do
+  [ -d "$crate" ] || { echo "$crate is missing"; exit 1; }
+done
+forbid "erk paints through its engine and raster, not render_html" \
+  -rnE 'render_html|paint_repeatedly|element_boxes|text_boxes' crates/erk crates/erk-shell
 
 exit $fail

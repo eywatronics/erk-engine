@@ -170,16 +170,16 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.3: Pencere, kabuk `erk`'in ilk kullanıcısı
 
-- [ ] Pencereli `App::run`: winit döngüsü, softbuffer ve GPU yüzeyi
+- [x] Pencereli `App::run`: winit döngüsü, softbuffer ve GPU yüzeyi
   kabuktan `erk`'e taşınır; döngü saati okur ve `now_ns` olarak verir.
   macOS'ta UI iş parçacığı ana iş parçacığıdır.
-- [ ] Sistem font taraması kabuktan `erk`'e taşınır (§6.2).
-- [ ] Kabuk `erk`'in ilk kullanıcısı: argümanlar, dosya sağlayıcısı,
+- [x] Sistem font taraması kabuktan `erk`'e taşınır (§6.2).
+- [x] Kabuk `erk`'in ilk kullanıcısı: argümanlar, dosya sağlayıcısı,
   `--screenshot` (ekransız `App`'le), sayaç demosu. Eski `spawn()`/
   `ToRenderer` yolu kaldırılır; renderer testleri motorun eşzamanlı API'sine
   ya da ekransız `App`'e taşınır; `check-renderer-surface.sh` yeni sınıra
   göre yeniden yazılır.
-- [ ] **Muhafızlar:** `erk-shell` projeden yalnızca `erk`'e bağımlı
+- [x] **Muhafızlar:** `erk-shell` projeden yalnızca `erk`'e bağımlı
   (`cargo tree --depth 1`); `erk-renderer` pencere katmanını bilmez (bugünkü
   kural, `erk`'e taşınan winit'le yeniden denenir).
 
@@ -291,3 +291,17 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | Bulunan sınır | Crate belgesindeki sayaç örneği düştü: Erk'in UA stil sayfasında `<button>` satır içi, `width`/`height` almıyor (Chrome'da `inline-block`). Düğmelerin doğal görünümü css-support.md'de M5; örnek stili açıkça veriyor |
 | Mutasyonlar | Capture aşamasının atlanması, her türün kabarması, `stop_propagation`'ın yok sayılması, kaldırılmış callback'in geri konması, `set_text` sonrası taramanın atlanması, panikte callback'in kaybı, `tick`'in kanalı işlememesi, ilk karenin yanıtlarsız çizilmesi, yanıtlanmayan `Responder`'ın bekleyen kalması, log düzeyinin yok sayılması: on mutasyonun onu da yakalandı. **Yaşayan:** atlanacak karenin yine de çizilmesi; son kare aynı çıktığı için ekransız uygulamada gözlenemiyor, pencerede kısa bir görüntüsüz kare olarak görünürdü. Verim ve görünüm farkı, doğruluk değil; pencere M3.3'te gelince yeniden bakılır |
 | Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi (render koduna dokunulmadı) |
+
+### M3.3
+
+| Konu | Not |
+|---|---|
+| Pencere | `App::new` (pencereli) ve `App::run`: winit döngüsü, softbuffer ve GPU yüzeyi kabuktan `erk`'e taşındı. Girdi geldiği gibi uygulamaya gidiyor; döngünün işi bitince (`about_to_wait`) uygulama bir tur (`tick`) atıyor, kare raster'a gidiyor. Raster'ın çizdikleri ve başka iş parçacıklarından gelen mesajlar döngüyü kullanıcı olaylarıyla uyandırıyor (`RasterThread` artık çıktısını bir kanal yerine host'un verdiği bir işleve veriyor; `AppHandle`/`Responder` bir uyandırıcı taşıyor). Callback'teki panik platformun döngüsünden geçmeden yakalanıyor, pencere kapanıyor ve panik `run`'dan çıkıyor (p1-contract §8). Döngü saati okuyup `now_ns` olarak veriyor |
+| Sistem fontları | Font taraması `erk`'e taşındı (`fonts.rs`, p1-contract §6.2). `Config::system_fonts` (varsayılan açık): katalog motora, yüzlerin istekleri host'un sağlayıcısına değil sistem fontlarına gidiyor. Testler kapalı açıyor: gömülü Noto Sans her makinede aynı |
+| Kabuk | `erk`'in ilk kullanıcısı: argümanlar, dosya sağlayıcısı (`Responder` ile), log'u standart hataya yazan bir callback, `--screenshot` (ekransız `App`) ve sayaç demosu abonelikle (`on(Click)`, `set_text`). Kabuk artık projeden yalnızca `erk`'e bağımlı |
+| Eski yol kalktı | `spawn`, `spawn_on_window`, `ToRenderer`/`FromRenderer` ve renderer iş parçacığı kütüphaneden çıktı. Protokolü kullanan renderer testleri (input, images, fonts, hidpi, robustness, thread) aynı protokolü `tests/support/protocol.rs`'teki test sürücüsünden alıyor: motor ve raster iş parçacığının üstünde kurulmuş, testler değişmeden geçiyor. GPU geri düşme testi raster'ın testlerine taşındı. `measure --frames` motor ve raster'la |
+| Sayaç | Altın görüntü (`counter-2.png`) yeni yolda piksel piksel aynı. Düğmelerin yeri `element_boxes` ile ölçülüyordu; kabuk renderer'a bağımlı olmadığı için koordinatlar teste sabit yazıldı, M3.4'ün kutu sorgusu gelince ondan alınacak |
+| Muhafızlar | CI: `erk-shell`'in projeden tek bağımlılığı `erk`, `erk`'in tek bağımlılığı `erk-renderer` (`cargo tree --depth 1`). Kasıtlı ihlaller: kabuğa `erk-renderer`, kabuğa `erk` yerine `erk-style`, `erk`'e `erk-dom`: üçü de yakalandı (`--target all --all-features` platforma ya da özelliğe göre eklenen bağımlılığı da görüyor). `check-renderer-surface.sh` yeni yüzeyle; `erk` ve kabuk `render_html` ailesini çağıramaz (ihlal yakalandı); mesaj tiplerinin `impl`'leri `messages.rs` dışında olamaz (`Painted` için ihlal yakalandı). Kabuğun motor yasağı (M3.1) bağımlılık denetiminin altında kaldığı için kaldırıldı |
+| Elle doğrulama | Release kabuk M2 demosunu pencerede açıyor, GPU'da çiziyor (`erk: drawing on the GPU: NVIDIA GeForce GTX 1650 (Dx12)`); ekran görüntüsü sistem fontlarıyla eskisiyle aynı |
+| Yaşayan mutasyon (M3.2) | Atlanacak karenin çizilmesi pencerede görüntüsüz bir kare olarak görünürdü; pencere testi otomatik değil, bu yüzden hâlâ testle yakalanmıyor. Pencereli otomatik test M3.6'nın kabulünde yeniden düşünülür |
+| Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |

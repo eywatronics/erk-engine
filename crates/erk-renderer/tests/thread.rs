@@ -1,9 +1,12 @@
 //! The renderer thread: messages in, frames out.
 
+mod support;
+
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use erk_renderer::{FromRenderer, ToRenderer, render_html, spawn};
+use erk_renderer::render_html;
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const PAGE: &str = "<h1>Merhaba</h1><p>İş parçacığından.</p>";
 

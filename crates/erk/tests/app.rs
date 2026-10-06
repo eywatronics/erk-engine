@@ -12,6 +12,7 @@ fn app() -> App {
     let mut app = App::headless(Config {
         width: 100,
         height: 60,
+        system_fonts: false,
         ..Config::default()
     })
     .unwrap();
@@ -109,23 +110,28 @@ fn a_viewport_out_of_range_is_refused() {
     for config in [
         Config {
             width: 0,
+            system_fonts: false,
             ..Config::default()
         },
         Config {
             height: 70_000,
+            system_fonts: false,
             ..Config::default()
         },
         Config {
             width: 40_000,
             scale: 2.0,
+            system_fonts: false,
             ..Config::default()
         },
         Config {
             scale: f32::NAN,
+            system_fonts: false,
             ..Config::default()
         },
         Config {
             scale: 0.0,
+            system_fonts: false,
             ..Config::default()
         },
     ] {
