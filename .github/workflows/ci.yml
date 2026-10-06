@@ -14,9 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is the primary development platform; Linux is the second
-        # target. macOS joins in M2, when the window layer needs checking there.
-        os: [ubuntu-latest, windows-latest]
+        # Windows is the primary development platform, Linux the second
+        # target; macOS joined in M2.8 (the CoreText font scan, Metal).
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # A test that waits on a channel forever must fail the run, not hold it
     # for GitHub's six-hour default.
@@ -42,7 +42,7 @@ jobs:
 
       # The GPU path's tests (M2.5) need an adapter and the hosted runners
       # have no GPU: Linux gets Mesa's software Vulkan (lavapipe); Windows
-      # has WARP, DirectX's software adapter, built in.
+      # has WARP, DirectX's software adapter, built in; macOS has Metal.
       - name: Software GPU (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
