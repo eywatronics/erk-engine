@@ -26,8 +26,11 @@ forbid() {
 #    here is a design change: update this list in the same pull request.
 #    Each public item is read whole, however rustfmt wraps it: a type added
 #    to a multi-line `pub use` list must show up here too.
-expected='pub use gpu::Window;
-pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer, };
+expected='pub use engine::Engine;
+pub use gpu::Window;
+pub use list::Prepared;
+pub use messages::{ Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key, KeyInput, KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer, };
+pub use raster::RasterThread;
 pub use thread::spawn;
 pub use thread::spawn_on_window;
 pub fn to_png(&self) -> Option<Vec<u8>> {
@@ -93,5 +96,14 @@ forbid "the display list's types belong in list.rs" -rnE --exclude=list.rs \
 [ -d crates/erk-shell ] || { echo "crates/erk-shell is missing"; exit 1; }
 forbid "the shell talks to the renderer through messages, not render_html" \
   -rn 'render_html' crates/erk-shell
+# The engine and the raster are the embedding layer's (erk, p1-contract
+# §1.1); the shell keeps to the messages until it moves onto erk (M3.3).
+engine_uses=$(grep -rnwE --include='*.rs' 'Engine|RasterThread|Prepared' crates/erk-shell \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)
+if [ -n "$engine_uses" ]; then
+  echo "the shell talks to the renderer through messages, not its engine:"
+  echo "$engine_uses"
+  fail=1
+fi
 
 exit $fail

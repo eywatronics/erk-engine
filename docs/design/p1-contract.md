@@ -154,13 +154,15 @@ dışında) ve onu da `now_ns` olarak verir.
   - `erk_resource_complete(...)` (§6).
 - macOS'ta pencere ana iş parçacığı ister; orada UI iş parçacığı ana iş
   parçacığı olmalıdır.
-- **Açık soru (M3): UI iş parçacığının yığını.** Layout her iç içelik
-  düzeyinde bir kez özyinelenir; ayrıştırıcı derinliği Chrome gibi 512'de
-  keser. Renderer iş parçacığı bugün 16 MiB yığınla çalışıyor, ama §1.1'e
-  göre M3'te layout UI iş parçacığına geçecek ve Windows'ta ana iş
-  parçacığının yığını 1 MB. M3'te ya layout'un özyinelemesi kaldırılır ya da
-  en derin belgenin gerektirdiği yığın ölçülüp sözleşmeye yazılır; host'tan
-  büyük bir yığın beklemek C host'ları için gerçekçi değil.
+- **UI iş parçacığının yığını (karar, M3.1).** Layout her iç içelik
+  düzeyinde bir kez özyinelenir (bir kısmı Taffy'nin içinde); ayrıştırıcı
+  derinliği Chrome gibi 512'de keser. O belge release'de 2–4 MiB, debug'da
+  4–8 MiB yığın istiyor; Windows'ta ana iş parçacığının yığını 1 MB. Bu
+  yüzden bir karenin stili, layout'u ve display list'i 16 MiB yığınlı
+  yardımcı bir iş parçacığında, UI iş parçacığı beklerken çalışır (kare
+  başına ~0,19 ms). Belge yine UI iş parçacığının: değişiklikler ve sorgular
+  orada, anında. Host'tan büyük bir yığın beklenmez: motorun her işlemi en
+  derin belgede 1 MiB yığınla çalışır (test).
 
 ## 5. Callback'ler
 

@@ -263,11 +263,12 @@ M3 de adımlara bölünür; her adım kendi PR'ı ([m3-library.md](m3-library.md
 | Adım | Kapsam | Durum |
 |---|---|---|
 | M3.0 | Display list düz veri (`FontId`, `ImageId`), raster ayrı bileşen, sınırın muhafızı | Bitti: raster yalnızca kendi tablolarından çiziyor; her karede yeniden gönderilecek gömülü font hatası bulundu; kare süresi değişmedi |
-| M3.1 | `erk` crate'i: UI iş parçacığında belge, dış id, ekransız `App` (`tick`, `input`), pencere döngüsü ve font taraması kabuktan, kabuk `erk`'in ilk kullanıcısı, UI yığını kararı | Yeni |
+| M3.1 | Motor (`Engine`) ve raster iş parçacığı ayrıldı; `erk` crate'i: ekransız `App` (`tick`, `input`), dış id, durum kodları, UI yığını kararı | Bitti: kare 16 MiB'lık yardımcı iş parçacığında, motor en derin belgede 1 MiB yığınla çalışıyor; kare süresi değişmedi |
 | M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Yeni |
-| M3.3 | Denetim sorguları, aşama süreleri | Yeni |
-| M3.4 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Yeni |
-| M3.5 | Kabul: Rust ve C örnekleri CI'da, ABI v0.2 | Yeni |
+| M3.3 | Pencere döngüsü ve font taraması `erk`'e, kabuk `erk`'in ilk kullanıcısı, eski mesaj yolu kalkar | Yeni |
+| M3.4 | Denetim sorguları, aşama süreleri | Yeni |
+| M3.5 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Yeni |
+| M3.6 | Kabul: Rust ve C örnekleri CI'da, ABI v0.2 | Yeni |
 
 **Karar (plan):** M3'ün API'si motorun bugün yaptıklarıyla sınırlı; düğüm
 oluşturma, silme ve öznitelik çağrıları M4'ün `Mutation` API'siyle gelir.

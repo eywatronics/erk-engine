@@ -11,6 +11,7 @@
 mod case;
 mod color;
 mod display;
+mod engine;
 mod fonts;
 #[cfg(feature = "gpu")]
 mod gpu;
@@ -19,19 +20,23 @@ mod list;
 mod messages;
 mod page;
 mod paint;
+mod raster;
 mod resources;
 mod scroll;
 mod tables;
 mod text;
 mod thread;
 
+pub use engine::Engine;
 #[cfg(feature = "gpu")]
 pub use gpu::Window;
+pub use list::Prepared;
 pub use messages::{
     Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key,
-    KeyInput, KeyState, Modifiers, PointerButton, PointerInput, PointerKind, Raster, ResourceKind,
-    ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer,
+    KeyInput, KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster,
+    ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer,
 };
+pub use raster::RasterThread;
 pub use thread::spawn;
 #[cfg(feature = "gpu")]
 pub use thread::spawn_on_window;

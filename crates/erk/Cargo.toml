@@ -1,0 +1,17 @@
+[package]
+name = "erk"
+description = "Erk Engine: an embedded HTML/CSS UI engine. The Rust API."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The engine and the raster; the document and the style system stay behind
+# them (p1-contract §1.1).
+erk-renderer = { path = "../erk-renderer" }
+
+[lints]
+workspace = true

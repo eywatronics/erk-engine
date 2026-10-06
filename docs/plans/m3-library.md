@@ -65,18 +65,8 @@ aracı olarak; çalışma anı bağımlılığı değil, indirme izni o adımda 
 
 ## Açık sorular
 
-- **UI iş parçacığının yığını** (p1-contract §4). Layout her iç içelik
-  düzeyinde özyineleniyor, ayrıştırıcı 512'de kesiyor; renderer iş parçacığı
-  bugün 16 MiB yığınla çalışıyor, Windows'ta ana iş parçacığının yığını 1 MB.
-  M3.1'de 512 düzeylik belgenin gerektirdiği yığın debug ve release'de
-  ölçülür. Adaylar: özyinelemeyi kaldırmak; kareyi (stil ve layout) büyük
-  yığınlı bir yardımcı iş parçacığında eşzamanlı çalıştırmak (UI iş parçacığı
-  bekler, API yine anında yanıt verir); sınırı düşürüp sözleşmeye yazmak.
-  Ölçümle karar verilir, gerekçesiyle yürütme notlarına yazılır.
-- **Display list'in sınırdan geçişi.** Her karede display list raster iş
-  parçacığına taşınır (kopya değil, sahiplik devri). Fontlar ve görüntüler
-  yalnızca ilk kullanımda gider. M3.0'da 1000 elemanlı sayfada maliyet
-  ölçülür; M2'nin tabanına göre gerilemesi yazılır.
+- ~~UI iş parçacığının yığını~~ ve ~~display list'in sınırdan geçişi~~:
+  M3.1'de ölçüldü ve karara bağlandı (yürütme notları).
 - **Windows'ta C örneğinin derleyicisi** (MSVC `cl` ya da `clang`): CI'da
   hangisinin kurulumsuz çalıştığı M3.4'te denenir.
 
@@ -100,20 +90,22 @@ aracı olarak; çalışma anı bağımlılığı değil, indirme izni o adımda 
 ## Dosya yapısı (M3 sonunda)
 
 ```
-crates/erk-renderer/src/engine.rs   eşzamanlı motor: belge, kaynaklar, stil, layout → display list (M3.0)
-crates/erk-renderer/src/raster.rs   raster iş parçacığı ve sınırının mesajları, font ve görüntü tabloları (M3.0)
+crates/erk-renderer/src/list.rs     display list ve tablo güncellemeleri, düz veri (M3.0)
+crates/erk-renderer/src/tables.rs   raster'ın font ve görüntü tabloları (M3.0)
+crates/erk-renderer/src/engine.rs   eşzamanlı motor: belge, kaynaklar, girdi, kare hazırlığı (M3.1)
+crates/erk-renderer/src/raster.rs   raster iş parçacığı: CPU ve GPU, GPU açılışı ve düşme (M3.1)
 crates/erk/src/lib.rs               App, Node, Config, Status (M3.1)
 crates/erk/src/ids.rs               dış id: app_key ile karıştırma (M3.1)
-crates/erk/src/window.rs            winit döngüsü, softbuffer, GPU yüzeyi (kabuktan, M3.1)
-crates/erk/src/fonts.rs             sistem font taraması (kabuktan, M3.1)
 crates/erk/src/events.rs            abonelikler, capture/target/bubble dağıtımı (M3.2)
-crates/erk/src/inspect.rs           denetim sorguları, aşama süreleri (M3.3)
-crates/erk-ffi/src/lib.rs           C-ABI, panik sınırı ve zehirlenme (M3.4)
-crates/erk-ffi/cbindgen.toml        erk.h üretimi (M3.4)
-include/erk.h                       üretilen başlık, depoda (M3.4)
-examples/c/hello.c                  C örneği: sayfa açar, tık alır (M3.4)
-crates/erk/examples/hello.rs        Rust örneği: aynısı (M3.5)
-crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcısı; projeden yalnızca erk'e bağımlı (M3.1)
+crates/erk/src/window.rs            winit döngüsü, softbuffer, GPU yüzeyi (kabuktan, M3.3)
+crates/erk/src/fonts.rs             sistem font taraması (kabuktan, M3.3)
+crates/erk/src/inspect.rs           denetim sorguları, aşama süreleri (M3.4)
+crates/erk-ffi/src/lib.rs           C-ABI, panik sınırı ve zehirlenme (M3.5)
+crates/erk-ffi/cbindgen.toml        erk.h üretimi (M3.5)
+include/erk.h                       üretilen başlık, depoda (M3.5)
+examples/c/hello.c                  C örneği: sayfa açar, tık alır (M3.5)
+crates/erk/examples/hello.rs        Rust örneği: aynısı (M3.6)
+crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcısı; projeden yalnızca erk'e bağımlı (M3.3)
 ```
 
 ---
@@ -135,35 +127,26 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 - [x] Ölçüm: 1000 elemanlı sayfada kare süresi M2'nin tabanıyla (75 ms);
   display list'in sınırdan geçiş maliyeti ayrıca.
 
-### M3.1: `erk` crate'i, UI iş parçacığında belge
+### M3.1: Motor, raster iş parçacığı, ekransız `erk::App`
 
-- [ ] `erk::App`: `Config` (boyut, ölçek, başlık), `load_html`, `root`,
-  `query(scope, selector)`, `set_text`, `text`. Belge, stil ve layout
-  çağıranın iş parçacığında; raster kendi iş parçacığında. `App` `Send`
-  değil (derlenmeyen bir doctest kanıtlar).
-- [ ] Dış id (§2): `app_key = splitmix64(sıra_no) & 0xFFFF_FFFF`. Testler:
+- [x] `erk-renderer`'da eşzamanlı **motor** (`Engine`): belge, kaynaklar,
+  girdi, sorgular ve kare hazırlığı (stil, layout, display list, tablo
+  güncellemeleri) çağıranın iş parçacığında; **raster** (`RasterThread`)
+  hazırlanan kareyi kendi iş parçacığında çizer (vello_cpu, GPU açılışı ve
+  düşmesiyle). Bugünkü `spawn()` yolu bu ikisinin üstünde yeniden kurulur;
+  kabuk ve testler M3.3'e kadar onu kullanır.
+- [x] `erk::App` (ekransız, karar 2): `Config`, `load_html`, `root`,
+  `query(scope, selector)`, `set_text`, `text`, `input(...)`,
+  `tick(now_ns)`, `frame()`. Belge, stil ve layout çağıranın iş
+  parçacığında; raster kendi iş parçacığında. `App` `Send` değil
+  (derlenmeyen bir doctest kanıtlar).
+- [x] Dış id (§2): `app_key = splitmix64(sıra_no) & 0xFFFF_FFFF`. Testler:
   iki `App`'te aynı sırayla bulunan düğümlerin id'leri ötekinde
   `StaleNode`; yok edilip yeniden oluşturulan uygulamada eski id'ler de; dış
   id hiçbir zaman 0 değil (özellik testi); `load_html` sonrası eski id.
-- [ ] `Status` sözleşmenin tüm kodlarıyla (`InvalidArgument` …
+- [x] `Status` sözleşmenin tüm kodlarıyla (`InvalidArgument` …
   `Poisoned`), değerleri `erk.h`'teki sayılar.
-- [ ] Ekransız `App` (karar 2): pencere yok, CPU raster; `tick(now_ns)` kareyi
-  çizer, `frame()` pikselleri verir, `input(...)` işaretçi, tuş ve tekerlek
-  girdisi enjekte eder.
-- [ ] Pencereli `App::run`: winit döngüsü, softbuffer ve GPU yüzeyi
-  kabuktan `erk`'e taşınır; döngü saati okur ve `now_ns` olarak verir.
-  macOS'ta UI iş parçacığı ana iş parçacığıdır.
-- [ ] Sistem font taraması kabuktan `erk`'e taşınır (§6.2).
-- [ ] Kabuk `erk`'in ilk kullanıcısı: argümanlar, dosya sağlayıcısı,
-  `--screenshot` (ekransız `App`'le), sayaç demosu. Eski `spawn()`/
-  `ToRenderer` yolu kaldırılır; renderer testleri motorun eşzamanlı API'sine
-  ya da ekransız `App`'e taşınır.
-- [ ] **UI yığını** açık sorusunun ölçümü ve kararı.
-- [ ] **Muhafızlar:** `erk-shell` projeden yalnızca `erk`'e bağımlı
-  (`cargo tree --depth 1`); `erk-renderer` pencere katmanını bilmez (bugünkü
-  kural, `erk`'e taşınan winit'le yeniden denenir); `erk` çekirdek değil,
-  `check-core-io.sh` onu kapsamaz ama `erk-renderer`'a saat sızmadığı yine
-  denetlenir.
+- [x] **UI yığını** açık sorusunun ölçümü ve kararı.
 
 ### M3.2: Olaylar, callback'ler, kaynaklar
 
@@ -185,7 +168,22 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 - [ ] Host closure'undan çıkan panik temizlikten sonra `run`'ı ya da
   `tick`'i çağırana taşınır (§8, `resume_unwind`); test.
 
-### M3.3: Denetim sorguları ve aşama süreleri
+### M3.3: Pencere, kabuk `erk`'in ilk kullanıcısı
+
+- [ ] Pencereli `App::run`: winit döngüsü, softbuffer ve GPU yüzeyi
+  kabuktan `erk`'e taşınır; döngü saati okur ve `now_ns` olarak verir.
+  macOS'ta UI iş parçacığı ana iş parçacığıdır.
+- [ ] Sistem font taraması kabuktan `erk`'e taşınır (§6.2).
+- [ ] Kabuk `erk`'in ilk kullanıcısı: argümanlar, dosya sağlayıcısı,
+  `--screenshot` (ekransız `App`'le), sayaç demosu. Eski `spawn()`/
+  `ToRenderer` yolu kaldırılır; renderer testleri motorun eşzamanlı API'sine
+  ya da ekransız `App`'e taşınır; `check-renderer-surface.sh` yeni sınıra
+  göre yeniden yazılır.
+- [ ] **Muhafızlar:** `erk-shell` projeden yalnızca `erk`'e bağımlı
+  (`cargo tree --depth 1`); `erk-renderer` pencere katmanını bilmez (bugünkü
+  kural, `erk`'e taşınan winit'le yeniden denenir).
+
+### M3.4: Denetim sorguları ve aşama süreleri
 
 - [ ] `parent`, `child_at`, `box` (border box ve margin, border, padding;
   kutusuz düğümde `NotFound`), `computed_style` (`ad: değer;` satırları),
@@ -196,9 +194,9 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
   (`check-core-io.sh` zaten yasaklıyor; test süreleri sıfırdan büyük ve
   toplamı karenin süresini aşmıyor).
 
-### M3.4: C-ABI (`erk-ffi`)
+### M3.5: C-ABI (`erk-ffi`)
 
-- [ ] `erk-ffi` (`cdylib` ve `staticlib`): M3.1–M3.3'ün API'si sözleşmenin
+- [ ] `erk-ffi` (`cdylib` ve `staticlib`): M3.1–M3.4'ün API'si sözleşmenin
   imzalarıyla; `ErkStr` girdisi çağrı dönmeden kopyalanır, küçük çıktılar
   çağıranın tamponuna (`BUFFER_TOO_SMALL`, yarım yazma yok), büyükler
   `ErkString` ve `erk_string_free`. `erk_abi_version` 0.2.
@@ -227,7 +225,7 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
   dizesi çağrıdan hemen sonra ezilir, belge etkilenmez; `destroy` sayaçlı
   test C'den de.
 
-### M3.5: Kabul
+### M3.6: Kabul
 
 - [ ] Rust örneği (`crates/erk/examples/hello.rs`) ve C örneği CI'da
   derlenip bir sayfa açıyor ve bir tık olayı alıyor.
@@ -262,4 +260,19 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | Muhafız | `check-renderer-surface.sh` 4. adım: `list.rs`'te `::`, ödünç, `Arc`/`Rc`/`Box`/`dyn`/hücre/kilit yok; display list tipleri başka dosyada tanımlanamaz. Kasıtlı ihlaller: `Arc` alanı, `use std::sync::Arc as Shared`, `Box`, ödünç dilim, `parley::FontData`, `super::Pixmap`, `RefCell`, `Rc` (sekizi de yakalandı); `TableUpdate`'in `gpu.rs`'te yeniden tanımlanması yakalandı |
 | Mutasyonlar | Yüzlerin tekilleştirilmemesi, gitmiş görüntülerin unutulmaması, görüntü güncellemelerinin düşmesi, gömülü blob'ların her karede yeniden kurulması: dördü de testlerce yakalandı |
 | Ölçüm (800 × 600, 30 karenin medyanı, kalıcı belgeden tam kare) | nodes-1000: `main` 71,56 ms, M3.0 71,64 ms; long-page: `main` 34,18 ms, M3.0 32,21 ms. Fark gürültü içinde. Display list bu adımda henüz iş parçacığı değiştirmiyor; geçişin maliyeti M3.1'de, sınır gerçekten iki iş parçacığı arasına inince ölçülür |
+| Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M3.1
+
+| Konu | Not |
+|---|---|
+| **Adımların yeniden bölünmesi** | Plan M3.1'de pencere döngüsünü, font taramasını ve kabuğun `erk`'e taşınmasını da istiyordu. Kabuğun sayaç demosu tıklama olayı ister, olaylar ise M3.2'de. Bu yüzden M3.1 motor, raster ve ekransız `App` ile sınırlandı; pencere ve kabuk yeni M3.3'e geçti, sonraki adımlar birer kaydı (denetim M3.4, C-ABI M3.5, kabul M3.6). Kapsam değişmedi |
+| Motor ve raster | `Engine` (`engine.rs`) bugün renderer iş parçacığının döngüsünde duran mesaj başına mantığı taşıyor: belge, kaynaklar, girdi, sorgular, "gösterilen bir şey değişti mi" kaydı ve kare hazırlığı. `RasterThread` (`raster.rs`) yalnızca `Prepared` kareler alıyor; GPU açılışı, GPU'ya geçince son kareyi yeniden çizmesi ve GPU kaybında CPU'ya düşmesi oraya taşındı. Kuyrukta bekleyen eski bir kare atlanıyor ama tablo güncellemeleri uygulanıyor (test, mutasyonla). `spawn()` yolu bu ikisinin üstünde yeniden kuruldu: bütün eski protokol testleri değişmeden geçiyor |
+| **UI yığını kararı** | 512 düzeylik belge (5000 `<div>`, ayrıştırıcı 512'de kesiyor) release'de 2 MiB'da taşıyor, 4 MiB'da sığıyor; debug'da 4'te taşıyor, 8'de sığıyor. Windows ana iş parçacığı 1 MB. Özyinelemenin bir kısmı Taffy'nin içinde, kaldırılamıyor; sınırı düşürmek geçerli belgeleri reddederdi. Karar: kare hazırlığı (stil, layout, display list) 16 MiB yığınlı kapsamlı bir yardımcı iş parçacığında, UI iş parçacığı beklerken (`spawn_scoped`; `Page` `Send`). Maliyeti açıp kapatma başına 0,19 ms (release, 2000 tekrar). Test: motorun her işlemi (yükleme, kare, sorgu, metin, girdi, hit-test, değişiklik) en derin belgede 1 MiB yığınlı bir iş parçacığında çalışıyor; kare doğrudan çalıştırılınca test yığın taşmasıyla düşüyor (mutasyon). Renderer iş parçacığı artık 16 MiB istemiyor. p1-contract §4 güncellendi |
+| Dış id | `ids.rs`: `app_key = splitmix64(sıra_no) & 0xFFFF_FFFF`, yalnızca indeks yarısı karışıyor, dış id hiçbir zaman 0 değil (256 anahtar × 256 id özellik testi). Başka bir uygulamanın ve yok edilmiş bir uygulamanın id'leri `StaleNode`; `load_html` sonrası eski id'ler de. Belge düğümü yükleme sonrası aynı (aynı arena). Mutasyonlar: anahtarın içe ya da dışa uygulanmaması, her uygulamaya aynı anahtar: üçü de yakalandı |
+| `App` `Send` değil | `PhantomData<*const ()>`; derlenmemesi gereken doctest. Mutasyon (alan `PhantomData<()>`): doctest derlenip düştü |
+| Ekransız `App` | `tick(now_ns)` değişiklik varsa kareyi hazırlıyor, raster iş parçacığına veriyor ve pikselleri bekliyor; değişiklik yoksa kare aynı kalıyor (test). `input` imleci taşıyınca `:hover` bir sonraki karede (test). Geçersiz görüntü alanı ya da ölçek `InvalidArgument`; ayrı ölçek denetimi mutasyonla gereksiz çıktı (geçersiz ölçek zaten geçersiz bir kenar veriyor) ve kaldırıldı |
+| `textContent` | `Engine::text`: metin düğümünün kendisi ya da altındaki bütün metin, yorumlar hariç, özyinelemesiz. Belge düğümü boş (DOM §4.4) |
+| Muhafız | `check-renderer-surface.sh`: gözden geçirilmiş yüzeye `Engine`, `Prepared`, `RasterThread`, `Painted` eklendi; kabuk M3.3'e kadar bunları kullanamaz. Kasıtlı ihlaller: `erk_renderer::Engine` parametresi, `use … RasterThread as R`, `{Frame, Prepared}` listesi: üçü de yakalandı. İlk deneme "Erk Engine" yorumunu da yakalıyordu; yorum satırları ayıklanıyor |
+| Ölçüm (800 × 600, 30 karenin medyanı, tam kare) | `erk` üzerinden `tick` (UI iş parçacığında hazırlık, yardımcı iş parçacığı, raster iş parçacığına devir, piksellerin beklenmesi) ile eski tek iş parçacıklı yol: nodes-1000 73,81 ve 70,32 ms, long-page 30,56 ve 32,04 ms. Fark gürültü içinde; display list sahiplik devriyle geçiyor, kopyalanmıyor |
 | Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |

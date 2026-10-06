@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use erk_dom::{Document, ElementData, NodeId, local_name};
+use erk_dom::{Document, ElementData, NodeData, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
 use erk_style::{Interaction, StyleEngine, Styles};
@@ -568,6 +568,36 @@ impl Page {
         let found = erk_style::query(&self.doc, scope, selector, &self.interaction())
             .map_err(|_| Status::InvalidArgument)?;
         Ok(found.first().copied())
+    }
+
+    /// The document node.
+    pub(crate) fn root(&self) -> NodeId {
+        self.doc.root()
+    }
+
+    /// `node`'s text as `textContent` reads it: a text node's own text,
+    /// else the text of every text node under it, in document order. The
+    /// document node has none (DOM §4.4). Walked without recursion: the
+    /// caller's stack may be a UI thread's.
+    pub(crate) fn text(&self, node: u64) -> Result<String, Status> {
+        let node = self.node(node)?;
+        if node == self.doc.root() {
+            return Ok(String::new());
+        }
+        let mut text = String::new();
+        let mut stack = vec![node];
+        while let Some(id) = stack.pop() {
+            match self.doc.node(id).map(|node| &node.data) {
+                Some(NodeData::Text(own)) => text.push_str(own),
+                Some(NodeData::Element(_) | NodeData::DocumentFragment) => {
+                    let mut children: Vec<_> = self.doc.children(id).collect();
+                    children.reverse();
+                    stack.extend(children);
+                }
+                _ => {}
+            }
+        }
+        Ok(text)
     }
 
     /// Set `node`'s text as `textContent` does; the next frame shows it.
