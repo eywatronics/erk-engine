@@ -1,7 +1,6 @@
 use erk_style::style::color::{AbsoluteColor, ColorSpace};
 
-/// Straight (non-premultiplied) sRGB bytes, `[r, g, b, a]`.
-pub(crate) type Rgba = [u8; 4];
+pub(crate) use crate::list::Rgba;
 
 pub(crate) fn srgb_bytes(color: AbsoluteColor) -> Rgba {
     let color = color.to_color_space(ColorSpace::Srgb);

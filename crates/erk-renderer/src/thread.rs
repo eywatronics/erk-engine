@@ -16,6 +16,7 @@ use crate::messages::Raster;
 use crate::messages::{Cursor, FromRenderer, Status, ToRenderer};
 use crate::page::Page;
 use crate::resources::Resources;
+use crate::tables::Tables;
 
 /// Layout recurses once per level of nesting, and the parser allows 512
 /// levels (as Chrome's does). A debug build needs more than the default 2 MiB
@@ -126,6 +127,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>, start: Start
     // The resources of the current document: asked for once, kept across
     // resizes, dropped with the document; the host's fonts outlive it.
     let mut resources = Resources::default();
+    // The raster's copies of the faces and images the lists name.
+    let mut tables = Tables::default();
     // The cursor the shell was last told to show.
     let mut cursor = Cursor::Default;
     loop {
@@ -302,7 +305,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>, start: Start
                 if !requests.is_empty() && outbox.send(FromRenderer::Resources(requests)).is_err() {
                     return;
                 }
-                let drawn = gpu.render(&list, width, height, crate::device_scale(scale));
+                tables.apply(resources.table_updates(&list));
+                let drawn = gpu.render(&list, &tables, width, height, crate::device_scale(scale));
                 let message = match drawn {
                     Ok(()) => FromRenderer::Presented { width, height },
                     // The GPU path is lost: on with vello_cpu, this frame too.
@@ -320,7 +324,8 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>, start: Start
                 }
             }
             if changed {
-                let (frame, requests) = page.render(width, height, scale, &mut resources);
+                let (frame, requests) =
+                    page.render(width, height, scale, &mut resources, &mut tables);
                 // The requests first: a host that answers at once has its
                 // answers queued before it sees the frame painted without them.
                 if !requests.is_empty() && outbox.send(FromRenderer::Resources(requests)).is_err() {

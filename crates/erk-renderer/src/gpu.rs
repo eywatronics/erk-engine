@@ -21,7 +21,9 @@ use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 
 use crate::color::Rgba;
 use crate::display::{DisplayItem, DisplayList, GlyphRun};
+use crate::list::ImageId;
 use crate::paint::{Canvas, color, glyphs, image_paint, paint_list};
+use crate::tables::Tables;
 
 /// A window the GPU path can draw into: what winit's windows and a host's
 /// raw-window-handle wrapper both are.
@@ -49,9 +51,9 @@ pub(crate) struct Gpu {
     format: wgpu::TextureFormat,
     renderer: Renderer,
     resources: Resources,
-    /// The images uploaded to the atlas, by the address of their pixmap,
-    /// which they keep alive.
-    images: HashMap<usize, (Arc<Pixmap>, vello_common::paint::ImageId)>,
+    /// The images uploaded to the atlas, by the number the display list
+    /// names them by.
+    images: HashMap<ImageId, vello_common::paint::ImageId>,
     /// What the adapter is, for the host's information.
     pub(crate) adapter: String,
 }
@@ -184,13 +186,14 @@ impl Gpu {
     pub(crate) fn render(
         &mut self,
         list: &DisplayList,
+        tables: &Tables,
         width: u16,
         height: u16,
         scale: f32,
     ) -> Result<(), String> {
         let (w, h) = (u32::from(width).max(1), u32::from(height).max(1));
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.upload_images(list, &mut encoder);
+        self.upload_images(list, tables, &mut encoder);
         let mut scene = Scene::new(w as u16, h as u16);
         {
             let mut canvas = Hybrid {
@@ -198,7 +201,7 @@ impl Gpu {
                 resources: &mut self.resources,
                 images: &self.images,
             };
-            paint_list(&mut canvas, list, w as u16, h as u16, scale);
+            paint_list(&mut canvas, list, tables, w as u16, h as u16, scale);
         }
         let size = RenderSize {
             width: w,
@@ -263,15 +266,22 @@ impl Gpu {
 
     /// Upload the images `list` paints that are not on the GPU yet, and let
     /// go of those it no longer paints.
-    fn upload_images(&mut self, list: &DisplayList, encoder: &mut wgpu::CommandEncoder) {
+    fn upload_images(
+        &mut self,
+        list: &DisplayList,
+        tables: &Tables,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         let mut used = std::collections::HashSet::new();
         for item in &list.items {
-            let DisplayItem::Image { image, .. } = item else {
+            let DisplayItem::Image { image: key, .. } = item else {
                 continue;
             };
-            let key = Arc::as_ptr(image) as usize;
-            used.insert(key);
-            if !self.images.contains_key(&key) {
+            let Some(image) = tables.image(*key) else {
+                continue;
+            };
+            used.insert(*key);
+            if !self.images.contains_key(key) {
                 let id = self.renderer.upload_image(
                     &mut self.resources,
                     &self.device,
@@ -279,17 +289,17 @@ impl Gpu {
                     encoder,
                     image,
                 );
-                self.images.insert(key, (image.clone(), id));
+                self.images.insert(*key, id);
             }
         }
-        let gone: Vec<usize> = self
+        let gone: Vec<ImageId> = self
             .images
             .keys()
             .filter(|key| !used.contains(key))
             .copied()
             .collect();
         for key in gone {
-            if let Some((_, id)) = self.images.remove(&key) {
+            if let Some(id) = self.images.remove(&key) {
                 self.renderer
                     .destroy_image(&mut self.resources, encoder, id);
             }
@@ -367,7 +377,7 @@ fn target_texture(
 struct Hybrid<'a> {
     scene: &'a mut Scene,
     resources: &'a mut Resources,
-    images: &'a HashMap<usize, (Arc<Pixmap>, vello_common::paint::ImageId)>,
+    images: &'a HashMap<ImageId, vello_common::paint::ImageId>,
 }
 
 impl Canvas for Hybrid<'_> {
@@ -377,8 +387,8 @@ impl Canvas for Hybrid<'_> {
     fn set_color(&mut self, rgba: Rgba) {
         self.scene.set_paint(color(rgba));
     }
-    fn set_image(&mut self, image: &Arc<Pixmap>, repeat: (bool, bool)) {
-        if let Some((_, id)) = self.images.get(&(Arc::as_ptr(image) as usize)) {
+    fn set_image(&mut self, key: ImageId, _: &Arc<Pixmap>, repeat: (bool, bool)) {
+        if let Some(id) = self.images.get(&key) {
             let source = ImageSource::OpaqueId {
                 id: *id,
                 may_have_transparency: true,
@@ -414,9 +424,9 @@ impl Canvas for Hybrid<'_> {
     fn pop_layer(&mut self) {
         self.scene.pop_layer();
     }
-    fn glyphs(&mut self, run: &GlyphRun) {
+    fn glyphs(&mut self, run: &GlyphRun, font: &parley::FontData) {
         self.scene
-            .glyph_run(self.resources, &run.font)
+            .glyph_run(self.resources, font)
             .font_size(run.size)
             .hint(true)
             // No glyph atlas: with it the GPU painted nodes-1000 in 9.1 ms
@@ -499,11 +509,13 @@ mod tests {
             });
         }
         let (list, _) = page.prepare(width, height, scale, &mut resources);
-        let cpu = crate::paint::paint(&list, width, height, crate::device_scale(scale));
+        let mut tables = Tables::default();
+        tables.apply(resources.table_updates(&list));
+        let cpu = crate::paint::paint(&list, &tables, width, height, crate::device_scale(scale));
         let mut gpu =
             Gpu::offscreen(wgpu::Backends::all()).expect("a GPU adapter, or WARP or lavapipe");
         eprintln!("adapter: {}", gpu.adapter);
-        gpu.render(&list, width, height, crate::device_scale(scale))
+        gpu.render(&list, &tables, width, height, crate::device_scale(scale))
             .unwrap();
         (cpu.data_as_u8_slice().to_vec(), gpu.read_back())
     }

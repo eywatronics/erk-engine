@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The shell reaches the renderer only through its thread and messages, and
 # the messages hold only plain owned data, so that the channel can become
-# IPC in M3. See docs/design/p0-architecture.md §2.2.
+# IPC in M3. See docs/design/p0-architecture.md §2.2. The display list the
+# raster paints is held to the same rule (p1-contract §1.1, M3.0).
 set -euo pipefail
 
 src=crates/erk-renderer/src
@@ -71,7 +72,23 @@ forbid "messages.rs must hold only plain owned data" -nE \
   "::|&'|\b(Arc|Rc|Weak|Box|dyn|Mutex|RwLock|Cell|RefCell|OnceCell|OnceLock|LazyLock|Atomic[A-Za-z0-9]*)\b" \
   "${RUNNER_TEMP:-/tmp}/messages.rs.code"
 
-# 4. The shell never paints synchronously; render_html is for the
+# 4. What crosses to the raster (p1-contract §1.1) is plain data too: the
+#    display list and the table updates in list.rs name no other type than
+#    the prelude's and their own, so no font or image can ride along shared.
+#    Without a path (`::`) the file can name nothing from elsewhere, not even
+#    through a `use`.
+[ -f "$src/list.rs" ] || { echo "$src/list.rs is missing"; exit 1; }
+grep -vE '^[[:space:]]*//' "$src/list.rs" > "${RUNNER_TEMP:-/tmp}/list.rs.code"
+forbid "list.rs must hold only plain owned data" -nE \
+  "::|&'|\b(Arc|Rc|Weak|Box|dyn|Mutex|RwLock|Cell|RefCell|OnceCell|OnceLock|LazyLock|Atomic[A-Za-z0-9]*)\b" \
+  "${RUNNER_TEMP:-/tmp}/list.rs.code"
+# ...and the types the raster takes are defined there and nowhere else: one
+# moved out of list.rs would escape the check above.
+forbid "the display list's types belong in list.rs" -rnE --exclude=list.rs \
+  '\b(struct|enum|type)[[:space:]]+(DisplayList|DisplayItem|GlyphRun|PositionedGlyph|TableUpdate|FontId|ImageId|Radii)\b' \
+  "$src"
+
+# 5. The shell never paints synchronously; render_html is for the
 #    renderer's own tests.
 [ -d crates/erk-shell ] || { echo "crates/erk-shell is missing"; exit 1; }
 forbid "the shell talks to the renderer through messages, not render_html" \

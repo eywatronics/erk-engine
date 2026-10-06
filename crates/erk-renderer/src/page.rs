@@ -25,6 +25,7 @@ use crate::messages::{
 use crate::paint;
 use crate::resources::Resources;
 use crate::scroll::{Offsets, Scrolling};
+use crate::tables::Tables;
 use crate::text::{EmbeddedFontMetrics, TextEngine};
 
 pub(crate) struct Page {
@@ -90,7 +91,8 @@ impl Page {
     }
 
     /// Style, lay out and paint the page into a `width` × `height` frame of
-    /// device pixels with the resources that have arrived; also return
+    /// device pixels with the resources that have arrived, bringing the
+    /// raster's `tables` up to date for it first; also return
     /// requests for the URLs it names that were not known before.
     pub(crate) fn render(
         &mut self,
@@ -98,10 +100,12 @@ impl Page {
         height: u16,
         scale: f32,
         resources: &mut Resources,
+        tables: &mut Tables,
     ) -> (Frame, Vec<ResourceRequest>) {
         let (list, requests) = self.prepare(width, height, scale, resources);
+        tables.apply(resources.table_updates(&list));
         let scale = crate::device_scale(scale);
-        let pixmap = paint::paint(&list, width, height, scale);
+        let pixmap = paint::paint(&list, tables, width, height, scale);
         let frame = Frame::new(
             width,
             height,
@@ -134,7 +138,8 @@ impl Page {
         let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
         let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
         let bars = self.bars(self.hover);
-        let mut list = DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
+        let (mut list, _) =
+            DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
         // What the user scrolled, as far as it still goes.
         self.offsets = scrolling
             .scopes
@@ -597,8 +602,11 @@ fn hits(items: &[DisplayItem]) -> Vec<(NodeId, Rect, bool)> {
             }
             DisplayItem::Hit { node, frame, text } => {
                 let frame = clips.last().map_or(*frame, |clip| intersect(clip, frame));
-                if frame.width > 0.0 && frame.height > 0.0 {
-                    hits.push((*node, frame, *text));
+                if frame.width > 0.0
+                    && frame.height > 0.0
+                    && let Some(node) = NodeId::from_bits(*node)
+                {
+                    hits.push((node, frame, *text));
                 }
             }
             _ => {}
@@ -648,15 +656,21 @@ mod tests {
     fn a_page_paints_every_frame_as_a_fresh_parse_would() {
         let mut page = Page::parse(HTML);
         let mut resources = Resources::default();
+        let mut tables = Tables::default();
         for (width, height, scale) in [
             (200, 100, 1.0),
             (120, 80, 1.0),
             (240, 160, 2.0),
             (200, 100, 1.0),
         ] {
-            let (frame, _) = page.render(width, height, scale, &mut resources);
-            let (fresh, _) =
-                Page::parse(HTML).render(width, height, scale, &mut Resources::default());
+            let (frame, _) = page.render(width, height, scale, &mut resources, &mut tables);
+            let (fresh, _) = Page::parse(HTML).render(
+                width,
+                height,
+                scale,
+                &mut Resources::default(),
+                &mut Tables::default(),
+            );
             assert_eq!(
                 frame.display_list(),
                 fresh.display_list(),

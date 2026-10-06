@@ -262,7 +262,7 @@ M3 de adımlara bölünür; her adım kendi PR'ı ([m3-library.md](m3-library.md
 
 | Adım | Kapsam | Durum |
 |---|---|---|
-| M3.0 | Display list düz veri (`FontId`, `ImageId`), raster ayrı bileşen, sınırın muhafızı | Yeni |
+| M3.0 | Display list düz veri (`FontId`, `ImageId`), raster ayrı bileşen, sınırın muhafızı | Bitti: raster yalnızca kendi tablolarından çiziyor; her karede yeniden gönderilecek gömülü font hatası bulundu; kare süresi değişmedi |
 | M3.1 | `erk` crate'i: UI iş parçacığında belge, dış id, ekransız `App` (`tick`, `input`), pencere döngüsü ve font taraması kabuktan, kabuk `erk`'in ilk kullanıcısı, UI yığını kararı | Yeni |
 | M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Yeni |
 | M3.3 | Denetim sorguları, aşama süreleri | Yeni |

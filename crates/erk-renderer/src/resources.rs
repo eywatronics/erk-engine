@@ -8,7 +8,8 @@
 //! answered with something that is not a PNG or a JPEG is refused, whatever
 //! its bytes are.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use erk_dom::{Document, NodeData, local_name};
@@ -17,6 +18,7 @@ use vello_cpu::Pixmap;
 use vello_cpu::color::PremulRgba8;
 
 use crate::fonts::HostFonts;
+use crate::list::{DisplayItem, DisplayList, FontId, ImageId, TableUpdate};
 use crate::messages::{FontCatalog, ResourceKind, ResourceRequest, ResourceResponse};
 
 /// The largest image side Erk decodes. Larger ones are refused rather than
@@ -41,12 +43,17 @@ fn within_budget(width: u32, height: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// A decoded image, premultiplied.
+/// A decoded image, premultiplied, and the number the raster knows it by.
 pub(crate) struct Image {
-    pub(crate) pixmap: Arc<Pixmap>,
+    pub(crate) id: ImageId,
+    pub(crate) pixmap: Pixmap,
 }
 
 impl Image {
+    pub(crate) fn size(&self) -> (u16, u16) {
+        (self.pixmap.width(), self.pixmap.height())
+    }
+
     pub(crate) fn width(&self) -> f32 {
         f32::from(self.pixmap.width())
     }
@@ -76,6 +83,28 @@ pub(crate) struct Resources {
     by_id: HashMap<u64, Requested>,
     next_id: u64,
     fonts: HostFonts,
+    /// The number the next decoded image gets.
+    next_image: u32,
+    /// The font faces display lists have named, by number.
+    faces: RefCell<FontIds>,
+    /// What the raster has been sent.
+    sent: Sent,
+}
+
+/// The font faces a display list names, numbered the first time one does.
+/// A face is its font file and its index in it.
+#[derive(Default)]
+struct FontIds {
+    by_face: HashMap<(u64, u32), FontId>,
+    faces: Vec<parley::FontData>,
+}
+
+/// What the raster's tables hold: the faces numbered below `fonts`, and
+/// these images.
+#[derive(Default)]
+struct Sent {
+    fonts: usize,
+    images: HashSet<ImageId>,
 }
 
 impl Resources {
@@ -89,6 +118,71 @@ impl Resources {
 
     pub(crate) fn fonts(&self) -> &HostFonts {
         &self.fonts
+    }
+
+    /// The number a display list names `font` by. Numbering a face changes
+    /// nothing a frame shows, so it happens while the list is built from a
+    /// shared borrow.
+    pub(crate) fn font_id(&self, font: &parley::FontData) -> FontId {
+        let mut ids = self.faces.borrow_mut();
+        let ids = &mut *ids;
+        let key = (font.data.id(), font.index);
+        *ids.by_face.entry(key).or_insert_with(|| {
+            ids.faces.push(font.clone());
+            FontId(u32::try_from(ids.faces.len() - 1).expect("fewer than 2^32 faces"))
+        })
+    }
+
+    /// What the raster's tables need before they can paint `list`: the
+    /// faces numbered since the last call, the images it paints that were
+    /// not sent yet, and the sent images whose document is gone.
+    pub(crate) fn table_updates(&mut self, list: &DisplayList) -> Vec<TableUpdate> {
+        let mut updates = Vec::new();
+        let ids = self.faces.borrow();
+        for (at, face) in ids.faces.iter().enumerate().skip(self.sent.fonts) {
+            updates.push(TableUpdate::Font {
+                id: FontId(u32::try_from(at).expect("fewer than 2^32 faces")),
+                data: face.data.data().to_vec(),
+                index: face.index,
+            });
+        }
+        self.sent.fonts = ids.faces.len();
+        drop(ids);
+        let ready: HashMap<ImageId, &Image> = self
+            .by_url
+            .values()
+            .filter_map(|state| match state {
+                State::Ready(image) => Some((image.id, &**image)),
+                _ => None,
+            })
+            .collect();
+        let gone: Vec<ImageId> = self
+            .sent
+            .images
+            .iter()
+            .filter(|id| !ready.contains_key(id))
+            .copied()
+            .collect();
+        for id in gone {
+            self.sent.images.remove(&id);
+            updates.push(TableUpdate::ForgetImage(id));
+        }
+        for item in &list.items {
+            if let DisplayItem::Image { image, .. } = item
+                && !self.sent.images.contains(image)
+                && let Some(ready) = ready.get(image)
+            {
+                self.sent.images.insert(*image);
+                let (width, height) = ready.size();
+                updates.push(TableUpdate::Image {
+                    id: *image,
+                    width,
+                    height,
+                    rgba: ready.pixmap.data_as_u8_slice().to_vec(),
+                });
+            }
+        }
+        updates
     }
 
     /// The host's fonts, from now on (p1-contract §6.2).
@@ -152,7 +246,11 @@ impl Resources {
         match self.by_id.remove(&response.id) {
             Some(Requested::Image(url)) => {
                 let state = match decode(&response.mime, &response.data) {
-                    Ok(image) => State::Ready(Arc::new(image)),
+                    Ok(pixmap) => {
+                        let id = ImageId(self.next_image);
+                        self.next_image += 1;
+                        State::Ready(Arc::new(Image { id, pixmap }))
+                    }
                     Err(_) => State::Missing,
                 };
                 self.by_url.insert(url, state);
@@ -240,7 +338,7 @@ enum Format {
 
 /// Decode an image response. The MIME type names the format; an empty one
 /// lets the bytes decide. The bytes must then be that format.
-pub(crate) fn decode(mime: &str, data: &[u8]) -> Result<Image, String> {
+pub(crate) fn decode(mime: &str, data: &[u8]) -> Result<Pixmap, String> {
     let sniffed = sniff(data);
     let format = match mime.split(';').next().unwrap_or("").trim() {
         "image/png" => Format::Png,
@@ -275,9 +373,7 @@ pub(crate) fn decode(mime: &str, data: &[u8]) -> Result<Image, String> {
         .collect();
     let width = u16::try_from(width).map_err(|_| "image too wide")?;
     let height = u16::try_from(height).map_err(|_| "image too tall")?;
-    Ok(Image {
-        pixmap: Arc::new(Pixmap::from_parts(pixels, width, height)),
-    })
+    Ok(Pixmap::from_parts(pixels, width, height))
 }
 
 fn sniff(data: &[u8]) -> Option<Format> {
@@ -348,7 +444,7 @@ fn decode_jpeg(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A 2 × 1 PNG: one opaque red pixel, one half-transparent blue one.
@@ -369,8 +465,8 @@ mod tests {
     #[test]
     fn a_png_decodes_premultiplied() {
         let image = decode("image/png", &tiny_png()).unwrap();
-        assert_eq!((image.width(), image.height()), (2.0, 1.0));
-        let pixels = image.pixmap.data();
+        assert_eq!((image.width(), image.height()), (2, 1));
+        let pixels = image.data();
         assert_eq!((pixels[0].r, pixels[0].a), (255, 255));
         assert_eq!((pixels[1].b, pixels[1].a), (128, 128));
     }
@@ -430,7 +526,7 @@ mod tests {
             ("image/png", huge_png_header()),
             ("image/jpeg", huge_jpeg_header()),
         ] {
-            let error = decode(mime, &data).err().expect("refused");
+            let error = decode(mime, &data).expect_err("refused");
             assert!(error.starts_with("the header claims"), "{mime}: {error}");
         }
     }

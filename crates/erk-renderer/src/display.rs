@@ -32,25 +32,15 @@ use std::fmt::Write as _;
 use erk_dom::{Document, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::{ComputedValues, Styles};
-use parley::{FontData, PositionedLayoutItem};
+use parley::PositionedLayoutItem;
 
-use std::sync::Arc;
-
-use vello_cpu::Pixmap;
-
-use crate::color::{Rgba, srgb_bytes};
+use crate::color::srgb_bytes;
 use crate::layout::{Layouts, ShapedText};
+pub(crate) use crate::list::{
+    DisplayItem, DisplayList, Frame, GlyphRun, PositionedGlyph, Radii, Rgba,
+};
 use crate::resources::{Resources, image_url};
 use crate::scroll::{Scrolling, VIEWPORT};
-
-pub(crate) struct DisplayList {
-    /// The canvas colour behind everything (CSS 2 §14.2).
-    pub(crate) canvas: Rgba,
-    pub(crate) items: Vec<DisplayItem>,
-    /// Where each text node's text lies, line by line: not painted, kept
-    /// for the renderer's tests and the inspection queries.
-    pub(crate) text: Vec<TextFragment>,
-}
 
 /// The part of a text node on one line, in CSS pixels relative to the
 /// viewport: from its first to its last placed cluster (white space at the
@@ -65,75 +55,6 @@ pub(crate) struct TextFragment {
     pub(crate) height: f32,
 }
 
-pub(crate) enum DisplayItem {
-    Rect {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        color: Rgba,
-    },
-    /// A background clipped to rounded corners.
-    RoundedRect {
-        frame: Frame,
-        radii: Radii,
-        color: Rgba,
-    },
-    /// A solid border: the ring between the border box and the padding box,
-    /// each side in its own colour.
-    Border {
-        frame: Frame,
-        /// Top, right, bottom, left.
-        widths: [f32; 4],
-        colors: [Rgba; 4],
-        radii: Radii,
-    },
-    /// An outer box shadow: a blurred rounded rectangle, never painted
-    /// inside the box that casts it (`clip`).
-    Shadow {
-        frame: Frame,
-        radius: f32,
-        blur: f32,
-        color: Rgba,
-        clip: Frame,
-        clip_radii: Radii,
-    },
-    /// An image: one copy fills `tile`, repeated along an axis where
-    /// `repeat` says so; `area` is the region painted, clipped to `clip`.
-    Image {
-        image: Arc<Pixmap>,
-        tile: Frame,
-        repeat: (bool, bool),
-        area: Frame,
-        clip: Frame,
-        clip_radii: Radii,
-    },
-    /// Everything until the matching `PopOpacity` is composited at this
-    /// opacity, as one group.
-    PushOpacity(f32),
-    PopOpacity,
-    /// Everything until the matching `PopClip` is clipped to this box,
-    /// with these corner radii.
-    PushClip {
-        frame: Frame,
-        radii: Radii,
-    },
-    PopClip,
-    Glyphs(GlyphRun),
-    /// Where `node` takes pointer input: an element's border box, or a line
-    /// of text standing for its element (`text`). Not painted and not in
-    /// the dump; sitting in paint order, the last one under a point is the
-    /// topmost.
-    Hit {
-        node: NodeId,
-        frame: Frame,
-        text: bool,
-    },
-    /// The developer tools' highlight of a selected node's boxes: drawn
-    /// over the page, not part of the document (p1-contract §8.1).
-    Highlight(Frame),
-}
-
 /// The colour of the highlight overlay, as browsers' developer tools tint a
 /// selected element's box.
 pub(crate) const HIGHLIGHT: Rgba = [111, 168, 220, 166];
@@ -145,35 +66,6 @@ const THUMB_COLOR: Rgba = [0, 0, 0, 102];
 
 /// An item and the scope it is painted in (`None`: unclipped).
 type Tagged = (Option<usize>, DisplayItem);
-
-/// A box in absolute coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Frame {
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-}
-
-/// Corner radii as (horizontal, vertical): top-left, top-right,
-/// bottom-right, bottom-left.
-pub(crate) type Radii = [(f32, f32); 4];
-
-pub(crate) struct GlyphRun {
-    pub(crate) font: FontData,
-    pub(crate) size: f32,
-    pub(crate) color: Rgba,
-    pub(crate) glyphs: Vec<PositionedGlyph>,
-    /// The source text, for dumps and debugging.
-    pub(crate) text: String,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct PositionedGlyph {
-    pub(crate) id: u32,
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-}
 
 const WHITE: Rgba = [255, 255, 255, 255];
 
@@ -193,6 +85,9 @@ struct Walk<'a> {
 }
 
 impl DisplayList {
+    /// The list of a laid-out document, and where each text node's text
+    /// lies, line by line: not painted, kept for the renderer's tests and
+    /// the inspection queries.
     pub(crate) fn build(
         doc: &Document,
         styles: &Styles,
@@ -200,11 +95,10 @@ impl DisplayList {
         resources: &Resources,
         scrolling: &Scrolling,
         bars: &[NodeId],
-    ) -> Self {
+    ) -> (Self, Vec<TextFragment>) {
         let mut list = Self {
             canvas: WHITE,
             items: Vec::new(),
-            text: Vec::new(),
         };
         let walk = Walk {
             doc,
@@ -222,8 +116,7 @@ impl DisplayList {
             items.extend(scroll_bars(scrolling, VIEWPORT).map(|item| (None, item)));
         }
         list.items = clipped(items, scrolling);
-        list.text = walk.text.into_inner();
-        list
+        (list, walk.text.into_inner())
     }
 
     /// The root element's background paints the whole canvas; if it has
@@ -319,21 +212,12 @@ impl DisplayList {
                     );
                 }
                 DisplayItem::Image {
-                    image,
-                    tile,
-                    repeat,
-                    ..
+                    size, tile, repeat, ..
                 } => {
                     let _ = writeln!(
                         out,
                         "image {}x{} at {} {} {}x{} repeat {:?}",
-                        image.width(),
-                        image.height(),
-                        tile.x,
-                        tile.y,
-                        tile.width,
-                        tile.height,
-                        repeat
+                        size.0, size.1, tile.x, tile.y, tile.width, tile.height, repeat
                     );
                 }
                 DisplayItem::PushOpacity(opacity) => {
@@ -609,7 +493,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         );
         if takes_pointer(style) {
             decoration.push(DisplayItem::Hit {
-                node: id,
+                node: id.to_bits(),
                 frame,
                 text: false,
             });
@@ -632,7 +516,8 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
             };
             if content.width > 0.0 && content.height > 0.0 {
                 decoration.push(DisplayItem::Image {
-                    image: image.pixmap.clone(),
+                    image: image.id,
+                    size: image.size(),
                     tile: content,
                     repeat: (false, false),
                     area: content,
@@ -652,7 +537,11 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         let fragments = text_fragments(shaped, (content_x, content_y));
         let mut items = Vec::new();
         if visible {
-            items.extend(inline_content(shaped, (content_x, content_y)));
+            items.extend(inline_content(
+                shaped,
+                (content_x, content_y),
+                walk.resources,
+            ));
         }
         text_hits(walk, &fragments, &mut items);
         context.inline.extend(tag(items, inner));
@@ -669,7 +558,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         let fragments = text_fragments(&anonymous.text, origin);
         let mut items = Vec::new();
         if visible {
-            items.extend(inline_content(&anonymous.text, origin));
+            items.extend(inline_content(&anonymous.text, origin, walk.resources));
         }
         text_hits(walk, &fragments, &mut items);
         context.inline.extend(tag(items, inner));
@@ -696,7 +585,11 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 /// text and fall between pixels; they are snapped to whole pixels, as
 /// Chrome snaps them (found by the Chrome reference test: unsnapped, every
 /// edge is a column of blended pixels).
-fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
+fn inline_content(
+    shaped: &ShapedText,
+    origin: (f32, f32),
+    resources: &Resources,
+) -> Vec<DisplayItem> {
     let mut items: Vec<DisplayItem> = shaped
         .decorations
         .iter()
@@ -732,7 +625,7 @@ fn inline_content(shaped: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
             items
         })
         .collect();
-    items.extend(glyph_runs(shaped, origin));
+    items.extend(glyph_runs(shaped, origin, resources));
     items
 }
 
@@ -766,7 +659,7 @@ fn text_hits(walk: &Walk<'_>, fragments: &[TextFragment], out: &mut Vec<DisplayI
             .is_some_and(|style| takes_pointer(&style))
         {
             out.push(DisplayItem::Hit {
-                node: element,
+                node: element.to_bits(),
                 frame: Frame {
                     x: fragment.x,
                     y: fragment.y,
@@ -858,7 +751,11 @@ fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> 
 /// `origin`. Parley's positioned glyphs already include each line's offset
 /// and baseline; the line's shift moves them down past taller inline boxes
 /// above.
-fn glyph_runs(paragraph: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
+fn glyph_runs(
+    paragraph: &ShapedText,
+    origin: (f32, f32),
+    resources: &Resources,
+) -> Vec<DisplayItem> {
     let (text, shaped) = (&paragraph.text, &paragraph.layout);
     let mut runs = Vec::new();
     for (index, line) in shaped.layout.lines().enumerate() {
@@ -882,7 +779,7 @@ fn glyph_runs(paragraph: &ShapedText, origin: (f32, f32)) -> Vec<DisplayItem> {
                 })
                 .collect();
             runs.push(DisplayItem::Glyphs(GlyphRun {
-                font: run.run().font().clone(),
+                font: resources.font_id(run.run().font()),
                 size: run.run().font_size(),
                 color: run.style().brush.color,
                 glyphs,
@@ -1084,7 +981,8 @@ fn background_images(
             height: if repeat_y { frame.height } else { tile.height },
         };
         out.push(DisplayItem::Image {
-            image: image.pixmap.clone(),
+            image: image.id,
+            size: image.size(),
             tile,
             repeat: (repeat_x, repeat_y),
             area: painted,

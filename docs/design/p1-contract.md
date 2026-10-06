@@ -38,9 +38,10 @@ Sonuçları:
 
 - M0'daki "kabuk ile renderer yalnızca düz veri mesajla konuşur" kuralı, UI
   iş parçacığı ile raster iş parçacığı arasındaki sınıra taşınır. Display list
-  düz veri olmalı. Bugün glyph run'lar `FontData` taşıyor (içinde paylaşılan
-  bir blob); M3'te raster tarafında bir font tablosu ve display list'te
-  `FontId` olur.
+  düz veri olmalı. M3.0'dan beri öyle: glyph run'lar yüzü `FontId`, görüntü
+  öğeleri pikselleri `ImageId` ile anar; baytlar raster tarafındaki font ve
+  görüntü tablolarına bir kez, ilk kullanan listeden önce gider
+  (`erk-renderer/src/list.rs`).
 - Layout'un maliyeti UI iş parçacığındadır; host'un olay işleyicileriyle aynı
   iş parçacığı. Artımlı stil ve layout (M5) bu yüzden önemli; M2'ye kadar
   tam yeniden hesaplama bilerek kabul edilir.
@@ -498,7 +499,7 @@ Bu tablo hangi kuralın ne zaman ve nasıl zorlanacağını söyler.
 | Kural | Zorlama | Taş |
 |---|---|---|
 | Çekirdek G/Ç, ortam ve saat kullanmaz (§1.3) | `check-core-io.sh` | Bugün |
-| UI ↔ raster sınırı düz veri (§1.1) | Bugün `check-renderer-surface.sh`; M3'te display list ve font tablosu sınırına göre yeniden yazılır | Bugün, M3 |
+| UI ↔ raster sınırı düz veri (§1.1) | `check-renderer-surface.sh`: mesajlar ve M3.0'dan beri display list ile tablo güncellemeleri (`list.rs`) yalnızca prelude tipleri ve kendi tipleri; display list tipleri başka dosyada tanımlanamaz | Bugün, M3.0 |
 | `erk-renderer` pencere katmanını bilmez | CI: `cargo tree -p erk-renderer` çıktısında `winit`/`softbuffer` yok | M1 |
 | `unsafe` yalnızca `erk-style` ve `erk-ffi`'de | Lint devralma istisna listesi | M3 |
 | `erk.h` üretilir ve güncel | cbindgen ile yeniden üretip depodakiyle karşılaştırma | M3 |
