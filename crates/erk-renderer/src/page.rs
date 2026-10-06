@@ -570,6 +570,11 @@ impl Page {
         Ok(found.first().copied())
     }
 
+    /// Whether `node` is a node of the document.
+    pub(crate) fn contains(&self, node: u64) -> bool {
+        self.node(node).is_ok()
+    }
+
     /// The document node.
     pub(crate) fn root(&self) -> NodeId {
         self.doc.root()

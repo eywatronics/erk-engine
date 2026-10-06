@@ -178,6 +178,13 @@ dışında) ve onu da `now_ns` olarak verir.
 - **Olaylar:** host belirli düğümlere belirli olay türleri için abone olur.
   Dağıtım DOM'un capture, target ve bubble alt kümesidir. Host tanımadığı olay
   türlerini yok saymalıdır; yeni türler eklenebilir.
+- **Capture aboneliği (M3.2):** DOM'daki gibi bir abonelik ya capture ya
+  bubble aşamasınındır; ikisi de hedefte çağrılır, önce capture olanlar.
+  Rust'ta `on` ve `on_capture`; C-ABI'de `erk_on`'un yanına `erk_on_capture`
+  eklenir (M3.5, ekleme olduğu için kırıcı değil). Odak ve odak kaybı
+  kabarmaz (UI Events), tıklama kabarır. `stop_propagation` olayı bulunduğu
+  düğümde bitirir; o düğümdeki öteki abonelikler yine çalışır. Bir
+  callback'in kaldırdığı, henüz çağrılmamış abonelik çağrılmaz.
 
 ## 6. Kaynaklar
 
@@ -197,7 +204,9 @@ parçacığında host'un `ErkResourceFn`'i çağrılır. İstek ve yanıt yapıl
 - Durum `ErkStatus`'tur, HTTP kodu değil: ağ yok, 404 ile 500 arasındaki
   fark host'undur ve Erk için hepsi "kaynak yok" demektir.
 - `ERK_ERR_NOT_FOUND` ya da hiç yanıt vermemek kaynağı yok sayar; sayfa onsuz
-  çizilir.
+  çizilir. Rust API'sinde yanıt bir `Responder`'dır: yanıtlanmadan bırakılan
+  `Responder` kaynağı yok sayar (M3.2), böylece kare "kaynak bekleniyor"
+  durumunda kalmaz.
 - Host sağlayıcı yoksa hiçbir kaynak yüklenmez.
 - Demo kabuğun sağlayıcısı yalnızca açılan dosyanın dizinini ve `memory://`
   şemasını kabul eder; `file:///etc/passwd` ve kök dışına çıkan yollar

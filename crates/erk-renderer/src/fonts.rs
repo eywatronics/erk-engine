@@ -174,13 +174,15 @@ impl HostFonts {
         self.faces.insert(url.to_owned(), Face::Pending);
     }
 
-    /// The host's answer for `url`: kept if it is a font, missing if not.
-    pub(crate) fn complete(&mut self, url: &str, mime: &str, data: &[u8]) {
-        let face = match validate(mime) {
-            Ok(()) => Face::Ready(Blob::new(Arc::new(data.to_vec()))),
-            Err(_) => Face::Missing,
+    /// The host's answer for `url`: kept if it is a font, missing if not,
+    /// and then why.
+    pub(crate) fn complete(&mut self, url: &str, mime: &str, data: &[u8]) -> Result<(), String> {
+        let (face, result) = match validate(mime) {
+            Ok(()) => (Face::Ready(Blob::new(Arc::new(data.to_vec()))), Ok(())),
+            Err(reason) => (Face::Missing, Err(reason)),
         };
         self.faces.insert(url.to_owned(), face);
+        result
     }
 
     pub(crate) fn missing(&mut self, url: &str) {

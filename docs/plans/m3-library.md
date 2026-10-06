@@ -150,22 +150,22 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.2: Olaylar, callback'ler, kaynaklar
 
-- [ ] `on(node, kind, closure) -> Subscription`, `off(subscription)`;
+- [x] `on(node, kind, closure) -> Subscription`, `off(subscription)`;
   dağıtım capture, target ve bubble (`Event { kind, phase, target,
   current_target, x, y, modifiers }`); `stop_propagation`.
-- [ ] Callback'ler kareler arasında çalışır, stil, layout ya da boyama
+- [x] Callback'ler kareler arasında çalışır, stil, layout ya da boyama
   sırasında asla (§5); içlerinde değişiklik ve sorgu serbest, bir sonraki
   kareden önce uygulanır.
-- [ ] `destroy` tam bir kez (karar 5): `off`, düğümün belgeden gitmesi
+- [x] `destroy` tam bir kez (karar 5): `off`, düğümün belgeden gitmesi
   (`load_html`), `App`'in yok edilmesi; callback kendi aboneliğini
   kaldırırsa callback döndükten sonra. Sayaçlı testle üç yolun üçü.
-- [ ] `AppHandle::post(closure)`: herhangi bir iş parçacığından, bir sonraki
+- [x] `AppHandle::post(closure)`: herhangi bir iş parçacığından, bir sonraki
   kareden önce UI iş parçacığında çalışır (test: arka plan iş parçacığından).
-- [ ] Kaynak sağlayıcısı: `ResourceRequest { id, url, kind }`, yanıt
+- [x] Kaynak sağlayıcısı: `ResourceRequest { id, url, kind }`, yanıt
   callback'in içinden ya da sonra başka bir iş parçacığından
   (`AppHandle::complete_resource`). Yanlış türde yanıt reddedilir (bugünkü
   test korunur). Log callback'i: Erk'in uyarıları (yüklenemeyen kaynak).
-- [ ] Host closure'undan çıkan panik temizlikten sonra `run`'ı ya da
+- [x] Host closure'undan çıkan panik temizlikten sonra `run`'ı ya da
   `tick`'i çağırana taşınır (§8, `resume_unwind`); test.
 
 ### M3.3: Pencere, kabuk `erk`'in ilk kullanıcısı
@@ -276,3 +276,18 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | Muhafız | `check-renderer-surface.sh`: gözden geçirilmiş yüzeye `Engine`, `Prepared`, `RasterThread`, `Painted` eklendi; kabuk M3.3'e kadar bunları kullanamaz. Kasıtlı ihlaller: `erk_renderer::Engine` parametresi, `use … RasterThread as R`, `{Frame, Prepared}` listesi: üçü de yakalandı. İlk deneme "Erk Engine" yorumunu da yakalıyordu; yorum satırları ayıklanıyor |
 | Ölçüm (800 × 600, 30 karenin medyanı, tam kare) | `erk` üzerinden `tick` (UI iş parçacığında hazırlık, yardımcı iş parçacığı, raster iş parçacığına devir, piksellerin beklenmesi) ile eski tek iş parçacıklı yol: nodes-1000 73,81 ve 70,32 ms, long-page 30,56 ve 32,04 ms. Fark gürültü içinde; display list sahiplik devriyle geçiyor, kopyalanmıyor |
 | Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M3.2
+
+| Konu | Not |
+|---|---|
+| `Context` | Callback'ler `&mut Context` alıyor: belge API'si (`load_html`, `root`, `query`, `set_text`, `text`), abonelikler (`on`, `on_capture`, `off`), `stop_propagation`, `handle`. `App` bağlamına `Deref` ediyor; döngü (`tick`, `input`) ve yok etme yalnızca `App`'te. Bu yüzden bir callback içinden `tick` ya da `drop(app)` derlenmiyor (karar 4) |
+| Dağıtım | Motorun olayı hedeften kök elemana yolu taşıyor; `erk` capture (kökten hedefin ebeveynine), target (önce capture abonelikleri, sonra öbürleri) ve bubble (yalnızca tıklama) aşamalarını kuruyor. Her düğümde abonelikler oluşturulma sırasıyla, DOM gibi o anki listenin kopyasıyla çağrılıyor; arada kaldırılan çağrılmıyor. `stop_propagation` bulunduğu düğümü bitiriyor. Sözleşme bir abonelikten capture'ı istemenin yolunu söylemiyordu: `on_capture` eklendi, p1-contract §5'e yazıldı |
+| `destroy` tam bir kez | Rust'ta closure'un `Drop`'u (karar 5). Çalışan callback aboneliğinden geçici olarak alınıyor; kendini kaldırırsa döndükten sonra düşüyor. Abonelikler düğüm belgeden çıkınca bitiyor: `load_html` ve çocukları değiştiren `set_text` sonrası taranıyor. Sayaçlı testler: `off`, iki düğüm silme yolu, `App`'in düşmesi, kendini kaldıran callback |
+| Panik | Callback `catch_unwind` içinde; abonelik yerine konduktan sonra panik `input`'tan host'a çıkıyor, uygulama sürüyor (test). Zehirlenme yalnızca C-ABI'de (M3.5) |
+| `post` | `AppHandle` (`Send`, `Clone`) bir kanala yazıyor; `tick` kareden önce işliyor (test: arka plan iş parçacığından gönderilen iş UI iş parçacığında, `tick`'ten önce değil). Uygulama gittiyse `NotFound`, iş çalışmadan düşüyor (test) |
+| Kaynaklar | `set_resource_provider(fn(&ResourceRequest, Responder))`. `Responder` `Send`: hemen ya da başka bir iş parçacığından yanıt verilebiliyor; yanıtlanmadan düşerse kaynak yok sayılıyor. Hemen gelen yanıtlar aynı `tick`'te: kare hazırlanıyor, yanıt gelmişse çizilmeden tabloları raster'a gidiyor (`RasterThread::skip`) ve kare yanıtlarla yeniden hazırlanıyor (en çok 4 tur). Sağlayıcı yoksa her istek hemen "yok" |
+| Log | `set_log(fn(LogLevel, &str))` ve `Config::log_level`. Motor reddedilen yanıtları (yanlış tür, çözülemeyen görüntü, font olmayan bayt) gerekçesi ve URL'siyle uyarı olarak biriktiriyor (`Engine::take_warnings`). Sayfa içeriği değil, host'un kendi sağladığı kaynağın adı; dosyaya yazılmıyor, host'un callback'ine gidiyor |
+| Bulunan sınır | Crate belgesindeki sayaç örneği düştü: Erk'in UA stil sayfasında `<button>` satır içi, `width`/`height` almıyor (Chrome'da `inline-block`). Düğmelerin doğal görünümü css-support.md'de M5; örnek stili açıkça veriyor |
+| Mutasyonlar | Capture aşamasının atlanması, her türün kabarması, `stop_propagation`'ın yok sayılması, kaldırılmış callback'in geri konması, `set_text` sonrası taramanın atlanması, panikte callback'in kaybı, `tick`'in kanalı işlememesi, ilk karenin yanıtlarsız çizilmesi, yanıtlanmayan `Responder`'ın bekleyen kalması, log düzeyinin yok sayılması: on mutasyonun onu da yakalandı. **Yaşayan:** atlanacak karenin yine de çizilmesi; son kare aynı çıktığı için ekransız uygulamada gözlenemiyor, pencerede kısa bir görüntüsüz kare olarak görünürdü. Verim ve görünüm farkı, doğruluk değil; pencere M3.3'te gelince yeniden bakılır |
+| Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi (render koduna dokunulmadı) |
