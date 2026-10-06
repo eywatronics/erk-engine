@@ -12,6 +12,9 @@
 //! thread between frames, with a [`Context`]: the document API, without the
 //! loop. An `App` dereferences to its context.
 //!
+//! [`App::new`] makes an app with a window, which [`App::run`] opens;
+//! [`App::headless`] one without, which the host ticks and gives input.
+//!
 //! ```
 //! use std::cell::Cell;
 //! use std::rc::Rc;
@@ -40,14 +43,18 @@
 
 mod context;
 mod events;
+mod fonts;
 mod handle;
 mod ids;
+mod window;
 
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use erk_renderer::{Engine, Painted, RasterThread};
+use erk_renderer::{Engine, Painted, Prepared, RasterThread};
 
 pub use context::Context;
 pub use erk_renderer::{
@@ -57,6 +64,8 @@ pub use erk_renderer::{
 pub use events::{Event, EventKind, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};
 pub use ids::Node;
+
+use crate::fonts::SystemFonts;
 
 /// How long a windowless app waits for its raster to paint a frame before
 /// it takes the raster to be gone.
@@ -70,15 +79,24 @@ const ROUNDS: usize = 4;
 /// What an app starts with.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
-    /// The viewport in logical (CSS) pixels.
+    /// The viewport in logical (CSS) pixels: the window's inner size, or a
+    /// windowless app's frame at `scale`.
     pub width: u32,
     pub height: u32,
-    /// Device pixels per CSS pixel.
+    /// Device pixels per CSS pixel of a windowless app; a window has its
+    /// screen's.
     pub scale: f32,
     /// The window's title.
     pub title: String,
     /// The least severe messages the log callback gets.
     pub log_level: LogLevel,
+    /// Draw text with the system's fonts (p1-contract §6.2). Without them
+    /// every family is the embedded Noto Sans, the same on every machine,
+    /// as tests want.
+    pub system_fonts: bool,
+    /// Draw the window on the GPU when the machine can; it falls back to the
+    /// CPU when it cannot.
+    pub gpu: bool,
 }
 
 impl Default for Config {
@@ -89,6 +107,8 @@ impl Default for Config {
             scale: 1.0,
             title: "Erk".to_owned(),
             log_level: LogLevel::Warning,
+            system_fonts: true,
+            gpu: true,
         }
     }
 }
@@ -138,6 +158,19 @@ impl From<erk_renderer::Status> for Status {
     }
 }
 
+/// Why [`App::run`] could not run: no window could be made, the platform's
+/// event loop failed, or the app has no window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunError(pub String);
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RunError {}
+
 /// Input a host gives an app that has no window of its own, or synthetic
 /// input for a test. Positions are in CSS pixels.
 #[derive(Clone, Debug, PartialEq)]
@@ -157,20 +190,44 @@ pub enum Input {
 type ResourceProvider = Box<dyn FnMut(&ResourceRequest, Responder)>;
 type Log = Box<dyn FnMut(LogLevel, &str)>;
 
+/// Where an app's frames go.
+enum Output {
+    /// Frames the host reads; the raster paints on the CPU.
+    Headless {
+        raster: RasterThread,
+        painted: Receiver<Painted>,
+        frame: Option<Frame>,
+    },
+    /// The window, once it is open; its raster draws into it.
+    Window(Option<RasterThread>),
+}
+
 /// One document and its window. See the crate's documentation.
 pub struct App {
     cx: Context,
-    raster: RasterThread,
-    /// The last frame painted, for a windowless app.
-    frame: Option<Frame>,
+    output: Output,
+    config: Config,
+    fonts: Option<Arc<SystemFonts>>,
     resources: Option<ResourceProvider>,
     log: Option<Log>,
-    log_level: LogLevel,
     /// Not `Send`, not `Sync`: the UI thread's alone.
     _ui_thread: PhantomData<*const ()>,
 }
 
 impl App {
+    /// An app with a window, which [`App::run`] opens. `InvalidArgument` for
+    /// an empty viewport.
+    pub fn new(config: Config) -> Result<Self, Status> {
+        if config.width == 0 || config.height == 0 {
+            return Err(Status::InvalidArgument);
+        }
+        Ok(Self::with_output(
+            config,
+            Engine::new(),
+            Output::Window(None),
+        ))
+    }
+
     /// An app without a window: it paints on the CPU into frames the host
     /// reads with [`App::frame`], and takes its input from [`App::input`].
     /// For tests, offscreen rendering and hosts that draw the frames
@@ -191,20 +248,51 @@ impl App {
         let mut engine = Engine::new();
         engine.set_scale(scale);
         engine.resize(width, height);
-        Ok(Self {
-            cx: Context::new(engine, ids::new_app_key()),
-            raster: RasterThread::cpu(),
+        let (sink, painted) = std::sync::mpsc::channel();
+        let raster = RasterThread::cpu(move |frame| {
+            let _ = sink.send(frame);
+        });
+        let output = Output::Headless {
+            raster,
+            painted,
             frame: None,
+        };
+        Ok(Self::with_output(config, engine, output))
+    }
+
+    fn with_output(config: Config, mut engine: Engine, output: Output) -> Self {
+        let fonts = config.system_fonts.then(|| Arc::new(SystemFonts::scan()));
+        if let Some(fonts) = &fonts {
+            engine.set_fonts(fonts.catalogue().clone());
+        }
+        Self {
+            cx: Context::new(engine, ids::new_app_key()),
+            output,
+            config,
+            fonts,
             resources: None,
             log: None,
-            log_level: config.log_level,
             _ui_thread: PhantomData,
-        })
+        }
+    }
+
+    /// Open the window and run until it closes (p1-contract §7: Erk's own
+    /// event loop). A panic in a callback closes the window and comes out of
+    /// here. One window at a time: the platform gives a process one event
+    /// loop.
+    pub fn run(&mut self) -> Result<(), RunError> {
+        if !matches!(self.output, Output::Window(None)) {
+            return Err(RunError(
+                "only an app made with App::new runs a window".to_owned(),
+            ));
+        }
+        window::run(self)
     }
 
     /// Answer the document's resource requests (p1-contract §6): `provide`
     /// is called on the UI thread, between frames, once per URL. Without a
-    /// provider no resource loads.
+    /// provider no resource loads. Font faces come from the system's fonts
+    /// and never reach it.
     pub fn set_resource_provider(
         &mut self,
         provide: impl FnMut(&ResourceRequest, Responder) + 'static,
@@ -212,8 +300,8 @@ impl App {
         self.resources = Some(Box::new(provide));
     }
 
-    /// Where Erk's own messages go (a refused resource, say), as severe as
-    /// the config's `log_level` or more.
+    /// Where Erk's own messages go (a refused resource, how the window
+    /// draws), as severe as the config's `log_level` or more.
     pub fn set_log(&mut self, log: impl FnMut(LogLevel, &str) + 'static) {
         self.log = Some(Box::new(log));
     }
@@ -257,69 +345,105 @@ impl App {
     /// transitions (M9) will, through this.
     pub fn tick(&mut self, now_ns: u64) {
         let _ = now_ns;
+        // A window not yet open has no raster to paint with.
+        if matches!(self.output, Output::Window(None)) {
+            self.cx.drain();
+            self.flush_log();
+            return;
+        }
+        let prepared = self.turn();
+        self.flush_log();
+        let Some(prepared) = prepared else {
+            return;
+        };
+        match &mut self.output {
+            Output::Headless {
+                raster,
+                painted,
+                frame,
+            } => {
+                raster.paint(prepared);
+                while let Ok(done) = painted.recv_timeout(PAINT_PATIENCE) {
+                    if let Painted::Frame(done) = done {
+                        *frame = Some(done);
+                        return;
+                    }
+                }
+                panic!("the raster thread stopped");
+            }
+            Output::Window(Some(raster)) => raster.paint(prepared),
+            Output::Window(None) => unreachable!("checked above"),
+        }
+    }
+
+    /// Handle what arrived, then prepare the frame if something that shows
+    /// has changed. Resource requests go to the system's fonts and the
+    /// host's provider; when answers arrive at once the frame is prepared
+    /// again with them, and the one prepared without them only brings the
+    /// raster's tables up to date.
+    fn turn(&mut self) -> Option<Prepared> {
         for round in 1..=ROUNDS {
             self.cx.drain();
             self.flush_log();
             let (prepared, requests) = self.cx.engine.prepare();
-            let mut answered = false;
             for request in requests {
-                let responder = Responder {
-                    id: request.id,
-                    to: Some(self.cx.sender()),
-                };
-                match &mut self.resources {
-                    Some(provide) => provide(&request, responder),
-                    // No provider, no resource: answered missing at once.
-                    None => {
-                        responder.missing();
-                        answered = true;
-                    }
-                }
+                self.request(&request);
             }
-            answered |= self.cx.collect();
+            let answered = self.cx.collect();
             let last = round == ROUNDS || !answered;
             match prepared {
-                // Answered at once: prepare again with the answers rather
-                // than paint a frame without them. Its table updates still
-                // go to the raster.
-                Some(prepared) if !last => self.raster.skip(prepared),
-                Some(prepared) => {
-                    self.paint(prepared);
-                    break;
-                }
-                None if last => break,
+                Some(prepared) if !last => self.skip(prepared),
+                Some(prepared) => return Some(prepared),
+                None if last => return None,
                 None => {}
             }
         }
-        self.flush_log();
+        None
     }
 
-    fn paint(&mut self, prepared: erk_renderer::Prepared) {
-        self.raster.paint(prepared);
-        while let Some(painted) = self.raster.recv_timeout(PAINT_PATIENCE) {
-            if let Painted::Frame(frame) = painted {
-                self.frame = Some(frame);
-                return;
-            }
+    /// Ask for `request`: a font face of the system's, or the host's
+    /// resource. With no one to answer, it is missing at once.
+    fn request(&mut self, request: &ResourceRequest) {
+        let responder = self.cx.responder(request.id);
+        match (request.kind, &self.fonts, &mut self.resources) {
+            (ResourceKind::Font, Some(fonts), _) => match fonts.data(&request.url) {
+                // The bytes say what kind of font file it is.
+                Some(data) => responder.respond("", data),
+                None => responder.missing(),
+            },
+            (ResourceKind::Font, None, _) | (_, _, None) => responder.missing(),
+            (_, _, Some(provide)) => provide(request, responder),
         }
-        panic!("the raster thread stopped");
+    }
+
+    fn skip(&self, prepared: Prepared) {
+        match &self.output {
+            Output::Headless { raster, .. } | Output::Window(Some(raster)) => raster.skip(prepared),
+            Output::Window(None) => {}
+        }
     }
 
     /// Pass the engine's warnings to the log.
     fn flush_log(&mut self) {
-        let warnings = self.cx.engine.take_warnings();
+        for warning in self.cx.engine.take_warnings() {
+            self.log(LogLevel::Warning, &warning);
+        }
+    }
+
+    pub(crate) fn log(&mut self, level: LogLevel, message: &str) {
         if let Some(log) = &mut self.log
-            && LogLevel::Warning <= self.log_level
+            && level <= self.config.log_level
         {
-            for warning in warnings {
-                log(LogLevel::Warning, &warning);
-            }
+            log(level, message);
         }
     }
 
     /// The last frame a windowless app painted.
     pub fn frame(&self) -> Option<&Frame> {
-        self.frame.as_ref()
+        match &self.output {
+            Output::Headless { frame, .. } => frame.as_ref(),
+            Output::Window(_) => None,
+        }
     }
 }
 

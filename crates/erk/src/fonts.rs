@@ -1,10 +1,11 @@
-//! The demo host's fonts (p1-contract §6.2): the system's, as the platform
-//! lists them (DirectWrite, fontconfig, CoreText, through fontique).
+//! The system's fonts (p1-contract §6.2), as the platform lists them
+//! (DirectWrite, fontconfig, CoreText, through fontique). The embedding
+//! layer scans them; the engine core reads no file.
 //!
-//! The renderer gets the catalogue at once: the family names, and what the
+//! The engine gets the catalogue at once: the family names, and what the
 //! generic families and each writing system's fallback stand for, which the
 //! platform answers without opening a font file. A family's faces are read
-//! only when the renderer asks for one (`font:<family>?weight=..&style=..`):
+//! only when the engine asks for one (`font:<family>?weight=..&style=..`):
 //! listing every face of every family opens every font file and took more
 //! than a second at startup.
 

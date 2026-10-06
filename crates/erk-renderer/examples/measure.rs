@@ -10,9 +10,9 @@
 //! ```
 //!
 //! By default each call is `render_html`: parse, style, lay out and paint.
-//! With `--frames` the page goes to the renderer thread once and each frame
-//! is a repaint of the document it keeps (M2): style, lay out and paint, no
-//! parsing. That is the cost of every state change in M2, the baseline M5's
+//! With `--frames` the page goes to an engine once and each frame is a
+//! repaint of the document it keeps (M2): style, lay out and paint on the
+//! raster thread, no parsing. That is the cost of every state change in M2, the baseline M5's
 //! incremental work is measured against.
 //!
 //! With `--paint` the page is laid out once and only its display list is
@@ -25,7 +25,7 @@
 
 use std::time::{Duration, Instant};
 
-use erk_renderer::{FromRenderer, ToRenderer};
+use erk_renderer::Painted;
 
 const WIDTH: u16 = 800;
 const HEIGHT: u16 = 600;
@@ -91,31 +91,29 @@ fn main() {
     }
 }
 
-/// The first frame after loading `html` on the renderer thread, and `runs`
-/// repaints after it: each `Resize` to the same size makes the thread paint
-/// the document it keeps again.
+/// The first frame after loading `html` into an engine, and `runs` repaints
+/// after it: each resize to the same size makes the engine prepare the
+/// document it keeps again, and the raster thread paint it.
 fn time_frames(html: String, runs: usize) -> (Duration, Vec<Duration>) {
-    let (to, from, renderer) = erk_renderer::spawn();
-    let frame = |message: ToRenderer| {
+    let (sink, painted) = std::sync::mpsc::channel();
+    let raster = erk_renderer::RasterThread::cpu(move |frame| {
+        let _ = sink.send(frame);
+    });
+    let mut engine = erk_renderer::Engine::new();
+    engine.load_html(&html);
+    let mut frame = || {
         let start = Instant::now();
-        to.send(message).expect("the renderer thread runs");
+        engine.resize(WIDTH, HEIGHT);
+        let (prepared, _) = engine.prepare();
+        raster.paint(prepared.expect("a resize prepares a frame"));
         loop {
-            if let FromRenderer::Frame(frame) = from.recv().expect("the renderer thread runs") {
+            if let Painted::Frame(frame) = painted.recv().expect("the raster thread runs") {
                 std::hint::black_box(frame);
                 return start.elapsed();
             }
         }
     };
-    to.send(ToRenderer::Load { html })
-        .expect("the renderer thread runs");
-    let resize = || ToRenderer::Resize {
-        width: WIDTH,
-        height: HEIGHT,
-    };
-    let first = frame(resize());
-    let rest = (0..runs).map(|_| frame(resize())).collect();
-    to.send(ToRenderer::Shutdown)
-        .expect("the renderer thread runs");
-    renderer.join().expect("the renderer thread ends cleanly");
+    let first = frame();
+    let rest = (0..runs).map(|_| frame()).collect();
     (first, rest)
 }

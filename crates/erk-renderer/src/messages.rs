@@ -1,95 +1,11 @@
-//! Everything that crosses between the shell and the renderer.
+//! What the engine and the raster say to their host, and what it gives
+//! them: input, events, resources, fonts, frames.
 //!
-//! These types become IPC messages when the renderer moves into its own
-//! process (M3), so they hold only plain owned data: strings, integers and
-//! byte vectors, nothing shared, nothing borrowed, no engine types. Making
-//! them serializable should then be one derive line. CI keeps this file to
-//! prelude types only (.github/scripts/check-renderer-surface.sh).
-
-/// Messages from the shell to the renderer.
-#[derive(Debug)]
-pub enum ToRenderer {
-    /// Show this document. The host reads files, not the renderer: the
-    /// engine core does no I/O (.github/scripts/check-core-io.sh). Every
-    /// node of the document before it is removed: their ids go stale.
-    Load { html: String },
-    /// The viewport is now `width` × `height` device pixels.
-    Resize { width: u16, height: u16 },
-    /// The screen now has `factor` device pixels per CSS pixel (1 until
-    /// told otherwise; a window moved to a HiDPI screen sends 2).
-    Scale { factor: f32 },
-    /// The fonts the host can provide; until it is sent, every family is
-    /// the embedded Noto Sans. Kept across documents.
-    Fonts(FontCatalog),
-    /// The host's answer to a resource request.
-    Resource(ResourceResponse),
-    /// The host has no resource for request `id`; the page renders
-    /// without it.
-    ResourceMissing { id: u64 },
-    /// Pointer input over the page.
-    Pointer(PointerInput),
-    /// A key went down or up while the page has the keyboard.
-    Key(KeyInput),
-    /// The wheel (or a touchpad) scrolled by `dx`, `dy` CSS pixels at `x`,
-    /// `y`; positive values scroll towards the end of the page.
-    Wheel { dx: f32, dy: f32, x: f32, y: f32 },
-    /// Which node is under the point `x`, `y` (CSS pixels)? Answered with
-    /// `FromRenderer::Inspected` (p1-contract §8.1, `erk_inspect_at`).
-    InspectAt { request: u64, x: f32, y: f32 },
-    /// Draw the developer tools' highlight over `node`'s boxes, or remove it
-    /// (`None`). It is drawn over the page, never added to the document.
-    Highlight { node: Option<u64> },
-    /// The first element inside `scope` (the whole document for `None`)
-    /// matching the CSS selector list `selector`, answered with
-    /// `FromRenderer::QueryResult` (`erk_query`).
-    Query {
-        request: u64,
-        scope: Option<u64>,
-        selector: String,
-    },
-    /// Set `node`'s text as the DOM's `textContent` does (`erk_node_set_text`,
-    /// the first of M4's mutations), answered with `FromRenderer::Done`.
-    SetText {
-        request: u64,
-        node: u64,
-        text: String,
-    },
-    /// Stop the renderer thread.
-    Shutdown,
-}
-
-/// Messages from the renderer to the shell.
-pub enum FromRenderer {
-    /// A newly painted frame of the current document at the current size.
-    Frame(Frame),
-    /// The document names resources the host has not been asked for yet.
-    /// Sent before the frame that is painted without them.
-    Resources(Vec<ResourceRequest>),
-    /// Something happened on the page the host may answer (a click, a
-    /// change of focus).
-    Event(Event),
-    /// The answer to `ToRenderer::InspectAt`: the topmost node there, if any.
-    Inspected { request: u64, node: Option<u64> },
-    /// The answer to `ToRenderer::Query`: the node, if one matches.
-    QueryResult {
-        request: u64,
-        result: Result<Option<u64>, Status>,
-    },
-    /// The answer to a change of the document (`ToRenderer::SetText`).
-    Done {
-        request: u64,
-        result: Result<(), Status>,
-    },
-    /// The pointer should now look like this (the `cursor` property of
-    /// what it is over). Sent when it changes.
-    Cursor(Cursor),
-    /// How a renderer started on a window draws: first thing, and again if
-    /// the GPU path is lost and it falls back.
-    Raster(Raster),
-    /// A frame went to the window on the GPU, `width` × `height` device
-    /// pixels: there is no `Frame` to show, the window already shows it.
-    Presented { width: u16, height: u16 },
-}
+//! The same values cross the C ABI (M3.5) and, should the raster ever move
+//! into a process of its own, a process boundary, so they hold only plain
+//! owned data: strings, integers and byte vectors, nothing shared, nothing
+//! borrowed, no engine types. CI keeps this file to prelude types only
+//! (.github/scripts/check-renderer-surface.sh).
 
 /// What a raster painted ([`crate::RasterThread`]).
 pub enum Painted {

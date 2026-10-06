@@ -1,13 +1,16 @@
 //! Images through the resource protocol (p1-contract §6): requested by URL
 //! and kind, provided by the host, decoded, laid out and painted.
 
+mod support;
+
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use erk_renderer::{
-    Frame, FromRenderer, ResourceKind, ResourceRequest, ResourceResponse, ToRenderer,
-    element_boxes, render_html, render_html_with_resources, spawn,
+    Frame, ResourceKind, ResourceRequest, ResourceResponse, element_boxes, render_html,
+    render_html_with_resources,
 };
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const WIDTH: u16 = 120;
 const HEIGHT: u16 = 80;

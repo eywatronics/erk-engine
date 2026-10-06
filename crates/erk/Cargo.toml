@@ -10,8 +10,15 @@ rust-version.workspace = true
 
 [dependencies]
 # The engine and the raster; the document and the style system stay behind
-# them (p1-contract §1.1).
-erk-renderer = { path = "../erk-renderer" }
+# them (p1-contract §1.1). The raster draws into the window on the GPU.
+erk-renderer = { path = "../erk-renderer", features = ["gpu"] }
+softbuffer = "=0.4.8"
+winit = "=0.30.13"
+# The system's fonts, scanned here and not in the core (p1-contract §6.2):
+# DirectWrite, fontconfig or CoreText. fontconfig is loaded at run time, so
+# Linux builds need no C library; without it only the embedded font remains.
+# Same version Parley uses in the renderer.
+fontique = { version = "=0.11.1", default-features = false, features = ["system", "fontconfig-dlopen"] }
 
 [dev-dependencies]
 png = "0.18"

@@ -5,13 +5,13 @@
 
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 use erk_renderer::Engine;
 
 use crate::Status;
 use crate::events::{self, Event, EventKind, Listener, Listeners, Phase, Subscription};
-use crate::handle::{AppHandle, Message};
+use crate::handle::{AppHandle, Inbox, Message, Responder, Waker};
 use crate::ids::{self, Node};
 
 pub struct Context {
@@ -21,8 +21,8 @@ pub struct Context {
     listeners: Listeners,
     /// Set by [`Context::stop_propagation`] during a dispatch.
     stopped: bool,
-    /// What other threads sent, and the sender handles copy.
-    to: Sender<Message>,
+    /// The way in for other threads, which handles copy, and what they sent.
+    entry: Inbox,
     inbox: Receiver<Message>,
     /// Messages taken off the inbox, not handled yet.
     queued: VecDeque<Message>,
@@ -36,7 +36,10 @@ impl Context {
             key,
             listeners: Listeners::default(),
             stopped: false,
-            to,
+            entry: Inbox {
+                to,
+                waker: Waker::default(),
+            },
             inbox,
             queued: VecDeque::new(),
         }
@@ -142,12 +145,21 @@ impl Context {
     /// A handle any thread may use to reach this app.
     pub fn handle(&self) -> AppHandle {
         AppHandle {
-            to: self.to.clone(),
+            inbox: self.entry.clone(),
         }
     }
 
-    pub(crate) fn sender(&self) -> Sender<Message> {
-        self.to.clone()
+    /// The answer to resource request `id`, for the provider.
+    pub(crate) fn responder(&self, id: u64) -> Responder {
+        Responder {
+            id,
+            inbox: Some(self.entry.clone()),
+        }
+    }
+
+    /// From now on, a message from another thread also calls `wake`.
+    pub(crate) fn wake_with(&self, wake: impl Fn() + Send + Sync + 'static) {
+        self.entry.waker.set(wake);
     }
 
     /// Send `event` through its phases (p1-contract §5): down the path from

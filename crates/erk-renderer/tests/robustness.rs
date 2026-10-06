@@ -7,13 +7,14 @@
 //! goes into `tests/robustness/` and stays there. Deeper, open-ended search
 //! is the fuzz target's job (`fuzz/`).
 
+mod support;
+
 use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use erk_renderer::{
-    FromRenderer, ResourceRequest, ResourceResponse, ToRenderer, render_html_at_scale, spawn,
-};
+use erk_renderer::{ResourceRequest, ResourceResponse, render_html_at_scale};
+use support::protocol::{FromRenderer, ToRenderer, spawn};
 
 const WIDTH: u16 = 320;
 const HEIGHT: u16 = 240;

@@ -25,21 +25,17 @@ mod resources;
 mod scroll;
 mod tables;
 mod text;
-mod thread;
 
 pub use engine::Engine;
 #[cfg(feature = "gpu")]
 pub use gpu::Window;
 pub use list::Prepared;
 pub use messages::{
-    Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FromRenderer, GenericFamilies, Key,
-    KeyInput, KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster,
-    ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox, ToRenderer,
+    Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, GenericFamilies, Key, KeyInput,
+    KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind,
+    ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox,
 };
 pub use raster::RasterThread;
-pub use thread::spawn;
-#[cfg(feature = "gpu")]
-pub use thread::spawn_on_window;
 
 use std::sync::Arc;
 
