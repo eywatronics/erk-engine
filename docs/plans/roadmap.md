@@ -27,7 +27,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M0** | İlk piksel | Bitti |
 | **M0.5** | Mimari sözleşme | Bitti |
 | **M1** | Statik UI | Bitti |
-| **M2** | Etkileşim temeli | Başladı: adım planı ([m2-interaction.md](m2-interaction.md)) |
+| **M2** | Etkileşim temeli | Bitti ([m2-interaction.md](m2-interaction.md)) |
 | **M3** | Kütüphane (Rust API, C-ABI) | Yeni |
 | **M4** | Etkileşimli DOM | Yeni |
 | **M5** | Artımlı render ve formlar | Yeni |
@@ -229,7 +229,7 @@ M2 de adımlara bölünür; her adım kendi PR'ı ([m2-interaction.md](m2-intera
 | M2.5 | GPU yolu (`vello_hybrid`), CPU'ya düşme, ölçüm; host'a çizim için render hedefi (host'un penceresi) | Bitti: pencereye GPU'da çizim, GPU karesi CPU'nunkiyle piksel piksel eşdeğer; GPU yoksa ya da açılırken CPU'da çizim; boyama küçük sayfada 7 kat, büyükte 1,5 kat hızlı |
 | M2.6 | Metin düzenini sağlamlaştırma: inline-boxes, paragraphs, vertical-align farkları, satır içi kutu parçalanması, `white-space` kararı | Bitti: parçalanma ve iç içe arka plan düzeltildi, `<br>` ve `white-space` (nowrap, pre, pre-wrap, pre-line) Chrome'la satır satır aynı; düşük metin skorları glif rasterleştirmesi |
 | M2.7 | `css/css-position` analizi: düşen her test sınıflanır, desteklenen özelliklerdeki hatalar düzeltilir | Bitti: 200 test sınıflandı; esnek kapta statik konum, satır içi `relative`, yuvarlak kırpma düzeltildi; her referans sayfasında her metin satırı Chrome'la 1 px içinde; iki hata gerekçesiyle açık |
-| M2.8 | macOS CI, kabul | Yeni |
+| M2.8 | macOS CI, kabul | Bitti: macOS CI yeşil (CoreText, Metal'de GPU); her kabul maddesi otomatik testli; tam kare 1000 elemanda ~75 ms, M5'in tabanı |
 
 **Bilerek kaba:** artımlı stil ve layout M5'te. M2'de her durum değişikliği
 (hover, kaydırma) tam yeniden stil, layout ve boyama ister. M2'nin kare süresi
