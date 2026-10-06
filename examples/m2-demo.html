@@ -46,8 +46,14 @@
   .serit { display: flex; gap: 8px; padding: 8px; width: 900px; }
   .serit div { flex: 0 0 90px; height: 34px; border-radius: 6px; background: #c7d2fe; }
   .serit div:hover { background: #818cf8; }
-  .kesik { position: relative; margin-top: 10px; height: 40px; overflow: hidden; border-radius: 20px; background: #fde68a; }
-  .kesik .ic { position: absolute; left: 210px; top: 6px; width: 200px; height: 60px; background: #f59e0b; }
+  .haplar { display: flex; gap: 12px; margin-top: 10px; }
+  .hap { flex: 1; }
+  .hap p { margin: 32px 0 0 0; font-size: 11px; color: #64748b; }
+  .cerceve { position: relative; }
+  .cerceve .ic { left: 80px; }
+  .kesik { height: 40px; overflow: hidden; border-radius: 20px; background: #fde68a; }
+  .kesik.konumlu { position: relative; }
+  .ic { position: absolute; left: 90px; top: 6px; width: 90px; height: 60px; background: #f59e0b; opacity: 0.9; }
 
   /* 4. İmleçler */
   .imlecler { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -116,7 +122,16 @@
         <div class="oge">Sekizinci öğe — liste sonu</div>
       </div>
       <div class="yatay"><div class="serit"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
-      <div class="kesik"><div class="ic"></div></div>
+      <div class="haplar">
+        <div class="hap">
+          <div class="kesik konumlu"><div class="ic"></div></div>
+          <p>Hap <b>position: relative</b>: turuncu kutu hapın içine yerleşir ve yuvarlak köşesinden kesilir.</p>
+        </div>
+        <div class="hap">
+          <div class="cerceve"><div class="kesik"><div class="ic"></div></div></div>
+          <p>Hap konumsuz: kutu dıştaki çerçeveye göre yerleşir, hapın kırpmasından kaçar ve taşar.</p>
+        </div>
+      </div>
     </div>
 
     <div class="kart">
