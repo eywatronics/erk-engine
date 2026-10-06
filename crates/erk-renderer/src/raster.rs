@@ -206,6 +206,7 @@ impl Rasterizer {
 
 enum ToRaster {
     Paint(Prepared),
+    Skip(Prepared),
     Shutdown,
 }
 
@@ -263,6 +264,12 @@ impl RasterThread {
         let _ = self.to.send(ToRaster::Paint(prepared));
     }
 
+    /// Do not paint `prepared`, a newer frame will be; its table updates
+    /// still reach the raster, which the next frames rely on.
+    pub fn skip(&self, prepared: Prepared) {
+        let _ = self.to.send(ToRaster::Skip(prepared));
+    }
+
     /// What was painted, if anything is waiting.
     pub fn try_recv(&self) -> Option<Painted> {
         self.from.try_recv().ok()
@@ -307,6 +314,13 @@ fn run(mut rasterizer: Rasterizer, inbox: &Receiver<ToRaster>, outbox: &Sender<P
                     if let Some(older) = newest.replace(prepared) {
                         rasterizer.skip(older);
                     }
+                }
+                ToRaster::Skip(prepared) => {
+                    // Its updates come before any newer frame's.
+                    if let Some(older) = newest.take() {
+                        rasterizer.skip(older);
+                    }
+                    rasterizer.skip(prepared);
                 }
                 ToRaster::Shutdown => return,
             }

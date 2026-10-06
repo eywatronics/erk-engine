@@ -264,7 +264,7 @@ M3 de adımlara bölünür; her adım kendi PR'ı ([m3-library.md](m3-library.md
 |---|---|---|
 | M3.0 | Display list düz veri (`FontId`, `ImageId`), raster ayrı bileşen, sınırın muhafızı | Bitti: raster yalnızca kendi tablolarından çiziyor; her karede yeniden gönderilecek gömülü font hatası bulundu; kare süresi değişmedi |
 | M3.1 | Motor (`Engine`) ve raster iş parçacığı ayrıldı; `erk` crate'i: ekransız `App` (`tick`, `input`), dış id, durum kodları, UI yığını kararı | Bitti: kare 16 MiB'lık yardımcı iş parçacığında, motor en derin belgede 1 MiB yığınla çalışıyor; kare süresi değişmedi |
-| M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Yeni |
+| M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Bitti: abonelikler DOM sırasıyla, `destroy` her yolda bir kez, panik host'a taşınıyor, kaynak hemen ya da başka iş parçacığından yanıtlanıyor |
 | M3.3 | Pencere döngüsü ve font taraması `erk`'e, kabuk `erk`'in ilk kullanıcısı, eski mesaj yolu kalkar | Yeni |
 | M3.4 | Denetim sorguları, aşama süreleri | Yeni |
 | M3.5 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Yeni |

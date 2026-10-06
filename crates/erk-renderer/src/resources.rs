@@ -89,6 +89,8 @@ pub(crate) struct Resources {
     faces: RefCell<FontIds>,
     /// What the raster has been sent.
     sent: Sent,
+    /// Responses refused since the host last asked, and why.
+    warnings: Vec<String>,
 }
 
 /// The font faces a display list names, numbered the first time one does.
@@ -251,15 +253,27 @@ impl Resources {
                         self.next_image += 1;
                         State::Ready(Arc::new(Image { id, pixmap }))
                     }
-                    Err(_) => State::Missing,
+                    Err(reason) => {
+                        self.warnings
+                            .push(format!("the image {url} was refused: {reason}"));
+                        State::Missing
+                    }
                 };
                 self.by_url.insert(url, state);
             }
             Some(Requested::Font(url)) => {
-                self.fonts.complete(&url, &response.mime, &response.data);
+                if let Err(reason) = self.fonts.complete(&url, &response.mime, &response.data) {
+                    self.warnings
+                        .push(format!("the font {url} was refused: {reason}"));
+                }
             }
             None => {}
         }
+    }
+
+    /// The responses refused since the last call, and why.
+    pub(crate) fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
     }
 
     /// The host has no resource for request `id`.

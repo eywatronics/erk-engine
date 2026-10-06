@@ -128,6 +128,17 @@ impl Engine {
         self.changed = true;
     }
 
+    /// Whether `node` is a node of the document.
+    pub fn contains(&self, node: u64) -> bool {
+        self.page.contains(node)
+    }
+
+    /// What went wrong since the last call that the host may want to log:
+    /// responses refused because they were not what was asked for.
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        self.resources.take_warnings()
+    }
+
     /// The document node.
     pub fn root(&self) -> u64 {
         self.page.root().to_bits()
