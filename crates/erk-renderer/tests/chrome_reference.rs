@@ -1006,3 +1006,62 @@ fn erk_boxes_match_chrome() {
     println!("\n{report}");
     assert!(failures.is_empty(), "\n{report}\n{}", failures.join("\n"));
 }
+
+/// The engine's box query (p1-contract §8.1, `erk_node_box`) gives the boxes
+/// `erk_boxes_match_chrome` holds to Chrome's, on every reference page: the
+/// same elements have a box, in the same place, at the same size.
+#[test]
+fn the_box_query_gives_the_boxes_compared_with_chrome() {
+    let mut failures = Vec::new();
+    for (name, path) in pages() {
+        let html = std::fs::read_to_string(&path).unwrap();
+        let expected = erk_renderer::element_boxes(&html, WIDTH, HEIGHT, &mut provide);
+        let mut engine = erk_renderer::Engine::new();
+        engine.load_html(&html);
+        engine.resize(WIDTH, HEIGHT);
+        let (_, requests) = engine.prepare();
+        for request in &requests {
+            match provide(request) {
+                Some(response) => engine.complete_resource(&erk_renderer::ResourceResponse {
+                    id: request.id,
+                    ..response
+                }),
+                None => engine.resource_missing(request.id),
+            }
+        }
+        engine.prepare();
+        // The body and its descendant elements, in document order, counted
+        // as element_boxes counts them.
+        let body = engine.query(None, "body").unwrap().expect("a body");
+        let mut elements = Vec::new();
+        let mut stack = vec![body];
+        while let Some(node) = stack.pop() {
+            if engine.kind(node).unwrap() != erk_renderer::NodeKind::Element {
+                continue;
+            }
+            elements.push(node);
+            let count = engine.child_count(node).unwrap();
+            for index in (0..count).rev() {
+                stack.push(engine.child_at(node, index).unwrap().unwrap());
+            }
+        }
+        for (index, node) in elements.into_iter().enumerate() {
+            let queried = engine.node_box(node).unwrap();
+            let listed = expected.iter().find(|b| b.index == index);
+            let same = match (&queried, listed) {
+                (None, None) => true,
+                (Some(q), Some(l)) => {
+                    [q.x, q.y, q.width, q.height] == [l.x, l.y, l.width, l.height]
+                        && engine.tag(node).unwrap().as_deref() == Some(l.tag.as_str())
+                }
+                _ => false,
+            };
+            if !same {
+                failures.push(format!(
+                    "{name}: element {index}: {queried:?} vs {listed:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

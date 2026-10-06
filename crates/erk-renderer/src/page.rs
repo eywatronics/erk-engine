@@ -9,18 +9,19 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use erk_dom::{Document, ElementData, NodeData, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
-use erk_style::{Interaction, StyleEngine, Styles};
+use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, PointerButton,
-    PointerInput, PointerKind, ResourceRequest, Status,
+    BoxModel, Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, NodeKind,
+    PointerButton, PointerInput, PointerKind, ResourceRequest, Stage, Status,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -52,6 +53,8 @@ pub(crate) struct Page {
     /// The last frame's scroll containers the user can scroll, innermost
     /// last, with how far each can go.
     scrollers: Vec<Scroller>,
+    /// The last frame's element boxes, for the inspection queries.
+    boxes: HashMap<NodeId, BoxModel>,
 }
 
 /// A scroll container of the last frame.
@@ -87,6 +90,7 @@ impl Page {
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
+            boxes: HashMap::new(),
         }
     }
 
@@ -102,7 +106,7 @@ impl Page {
         resources: &mut Resources,
         tables: &mut Tables,
     ) -> (Frame, Vec<ResourceRequest>) {
-        let (list, requests) = self.prepare(width, height, scale, resources);
+        let (list, requests) = self.prepare(width, height, scale, resources, &mut |_| {});
         tables.apply(resources.table_updates(&list));
         let scale = crate::device_scale(scale);
         let pixmap = paint::paint(&list, tables, width, height, scale);
@@ -123,6 +127,7 @@ impl Page {
         height: u16,
         scale: f32,
         resources: &mut Resources,
+        mark: &mut dyn FnMut(Stage),
     ) -> (DisplayList, Vec<ResourceRequest>) {
         let scale = crate::device_scale(scale);
         // The viewport in CSS pixels.
@@ -134,12 +139,15 @@ impl Page {
             .with_device_scale(scale)
             .style_with(doc, &interaction);
         let requests = resources.requests(doc, &styles);
+        mark(Stage::Style);
         let mut text = TextEngine::with_fonts(resources.fonts());
         let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
+        mark(Stage::Layout);
         let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
         let bars = self.bars(self.hover);
         let (mut list, _) =
             DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
+        self.boxes = boxes(doc, &layouts, &scrolling);
         // What the user scrolled, as far as it still goes.
         self.offsets = scrolling
             .scopes
@@ -166,6 +174,7 @@ impl Page {
             );
         }
         self.styles = styles;
+        mark(Stage::DisplayList);
         (list, requests)
     }
 
@@ -570,6 +579,82 @@ impl Page {
         Ok(found.first().copied())
     }
 
+    /// `node`'s parent; the document node has none.
+    pub(crate) fn parent(&self, node: u64) -> Result<Option<NodeId>, Status> {
+        let id = self.node(node)?;
+        Ok(self.doc.node(id).and_then(|node| node.parent()))
+    }
+
+    /// `node`'s child at `index`, in document order.
+    pub(crate) fn child_at(&self, node: u64, index: usize) -> Result<Option<NodeId>, Status> {
+        Ok(self.doc.children(self.node(node)?).nth(index))
+    }
+
+    /// How many children `node` has.
+    pub(crate) fn child_count(&self, node: u64) -> Result<usize, Status> {
+        Ok(self.doc.children(self.node(node)?).count())
+    }
+
+    /// What `node` is.
+    pub(crate) fn kind(&self, node: u64) -> Result<NodeKind, Status> {
+        let id = self.node(node)?;
+        Ok(match self.doc.node(id).map(|node| &node.data) {
+            Some(NodeData::Document) => NodeKind::Document,
+            Some(NodeData::Element(_)) => NodeKind::Element,
+            Some(NodeData::Text(_)) => NodeKind::Text,
+            Some(NodeData::Comment(_)) => NodeKind::Comment,
+            _ => NodeKind::Other,
+        })
+    }
+
+    /// An element's tag name, as HTML lowercases it; `None` for a node that
+    /// is not an element.
+    pub(crate) fn tag(&self, node: u64) -> Result<Option<String>, Status> {
+        let id = self.node(node)?;
+        Ok(self
+            .doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .map(|element| element.name.local.to_string()))
+    }
+
+    /// An element's attributes as written, in order; none for other nodes.
+    pub(crate) fn attributes(&self, node: u64) -> Result<Vec<(String, String)>, Status> {
+        let id = self.node(node)?;
+        Ok(self
+            .doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .map(|element| {
+                element
+                    .attrs
+                    .iter()
+                    .map(|attr| (attr.name.local.to_string(), attr.value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// `node`'s box in the last frame; `None` for a node without one (a
+    /// text node, an inline element, one not displayed, one not yet laid
+    /// out).
+    pub(crate) fn node_box(&self, node: u64) -> Result<Option<BoxModel>, Status> {
+        Ok(self.boxes.get(&self.node(node)?).cloned())
+    }
+
+    /// `node`'s computed style in the last frame, as `name: value;` lines in
+    /// the order of their names; `None` for a node without a style.
+    pub(crate) fn computed_style(&self, node: u64) -> Result<Option<String>, Status> {
+        let id = self.node(node)?;
+        Ok(self.styles.computed(id).map(|style| {
+            let mut out = String::new();
+            for (name, value) in serialized(&style) {
+                out.push_str(&format!("{name}: {value};\n"));
+            }
+            out
+        }))
+    }
+
     /// Whether `node` is a node of the document.
     pub(crate) fn contains(&self, node: u64) -> bool {
         self.node(node).is_ok()
@@ -617,6 +702,141 @@ impl Page {
         let id = NodeId::from_bits(bits).ok_or(Status::InvalidArgument)?;
         self.doc.node(id).map(|_| id).ok_or(Status::StaleNode)
     }
+}
+
+/// The box of every element laid out, where the last frame placed it: in
+/// CSS pixels relative to the viewport, scrolled as painted. Walked without
+/// recursion: the document may be as deep as the parser allows.
+fn boxes(
+    doc: &Document,
+    layouts: &layout::Layouts,
+    scrolling: &Scrolling,
+) -> HashMap<NodeId, BoxModel> {
+    let sides = |rect: &taffy::Rect<f32>| [rect.top, rect.right, rect.bottom, rect.left];
+    let mut boxes = HashMap::new();
+    let mut stack = vec![doc.root()];
+    while let Some(id) = stack.pop() {
+        // Only elements are laid out under their own id: a text node's
+        // anonymous box (a line, a flex item) is not the node's.
+        if let Some(layout) = layouts.get(id) {
+            let (x, y) = scrolling.position(id).unwrap_or_default();
+            boxes.insert(
+                id,
+                BoxModel {
+                    x,
+                    y,
+                    width: layout.size.width,
+                    height: layout.size.height,
+                    margin: sides(&layout.margin),
+                    border: sides(&layout.border),
+                    padding: sides(&layout.padding),
+                },
+            );
+        }
+        stack.extend(doc.children(id));
+    }
+    boxes
+}
+
+/// The properties the inspection query reports, in the order of their
+/// names: the longhands Erk computes and uses (docs/css-support.md). Stylo
+/// offers no walk over every longhand, and most of the rest would report
+/// values Erk ignores.
+const INSPECTED: &[&str] = &[
+    "align-items",
+    "align-self",
+    "background-color",
+    "background-image",
+    "background-position-x",
+    "background-position-y",
+    "background-repeat",
+    "background-size",
+    "border-bottom-color",
+    "border-bottom-left-radius",
+    "border-bottom-right-radius",
+    "border-bottom-style",
+    "border-bottom-width",
+    "border-left-color",
+    "border-left-style",
+    "border-left-width",
+    "border-right-color",
+    "border-right-style",
+    "border-right-width",
+    "border-top-color",
+    "border-top-left-radius",
+    "border-top-right-radius",
+    "border-top-style",
+    "border-top-width",
+    "bottom",
+    "box-shadow",
+    "box-sizing",
+    "color",
+    "column-gap",
+    "cursor",
+    "display",
+    "flex-basis",
+    "flex-direction",
+    "flex-grow",
+    "flex-shrink",
+    "flex-wrap",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "height",
+    "justify-content",
+    "left",
+    "letter-spacing",
+    "line-height",
+    "margin-bottom",
+    "margin-left",
+    "margin-right",
+    "margin-top",
+    "max-height",
+    "max-width",
+    "min-height",
+    "min-width",
+    "opacity",
+    "overflow-x",
+    "overflow-y",
+    "padding-bottom",
+    "padding-left",
+    "padding-right",
+    "padding-top",
+    "pointer-events",
+    "position",
+    "right",
+    "row-gap",
+    "text-align",
+    "text-decoration-line",
+    "text-indent",
+    "text-transform",
+    "text-wrap-mode",
+    "top",
+    "vertical-align",
+    "visibility",
+    "white-space-collapse",
+    "width",
+    "word-spacing",
+    "z-index",
+];
+
+/// The computed value of each property in [`INSPECTED`] that Stylo knows,
+/// serialized as `getComputedStyle` does.
+fn serialized(style: &ComputedValues) -> Vec<(&'static str, String)> {
+    use erk_style::style::properties::{PropertyDeclarationId, PropertyId};
+    INSPECTED
+        .iter()
+        .filter_map(|&name| {
+            let id = PropertyId::parse_enabled_for_all_content(name)
+                .ok()?
+                .longhand_id()?;
+            Some((
+                name,
+                style.computed_value_to_string(PropertyDeclarationId::Longhand(id)),
+            ))
+        })
+        .collect()
 }
 
 /// The hit regions of `items` in paint order, each cut to the clips around

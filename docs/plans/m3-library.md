@@ -185,11 +185,11 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.4: Denetim sorguları ve aşama süreleri
 
-- [ ] `parent`, `child_at`, `box` (border box ve margin, border, padding;
+- [x] `parent`, `child_at`, `box` (border box ve margin, border, padding;
   kutusuz düğümde `NotFound`), `computed_style` (`ad: değer;` satırları),
   `inspect_at`, `highlight` (§8.1). Testler Chrome'un kutu geometrisiyle aynı
   referans sayfalarından.
-- [ ] Aşama süreleri (`FrameTimings`: stil, layout, display list, raster) ve
+- [x] Aşama süreleri (`FrameTimings`: stil, layout, display list, raster) ve
   `last_frame_timings`: ölçümü `erk` yapar, çekirdeğe saat girmez
   (`check-core-io.sh` zaten yasaklıyor; test süreleri sıfırdan büyük ve
   toplamı karenin süresini aşmıyor).
@@ -304,4 +304,17 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | Muhafızlar | CI: `erk-shell`'in projeden tek bağımlılığı `erk`, `erk`'in tek bağımlılığı `erk-renderer` (`cargo tree --depth 1`). Kasıtlı ihlaller: kabuğa `erk-renderer`, kabuğa `erk` yerine `erk-style`, `erk`'e `erk-dom`: üçü de yakalandı (`--target all --all-features` platforma ya da özelliğe göre eklenen bağımlılığı da görüyor). `check-renderer-surface.sh` yeni yüzeyle; `erk` ve kabuk `render_html` ailesini çağıramaz (ihlal yakalandı); mesaj tiplerinin `impl`'leri `messages.rs` dışında olamaz (`Painted` için ihlal yakalandı). Kabuğun motor yasağı (M3.1) bağımlılık denetiminin altında kaldığı için kaldırıldı |
 | Elle doğrulama | Release kabuk M2 demosunu pencerede açıyor, GPU'da çiziyor (`erk: drawing on the GPU: NVIDIA GeForce GTX 1650 (Dx12)`); ekran görüntüsü sistem fontlarıyla eskisiyle aynı |
 | Yaşayan mutasyon (M3.2) | Atlanacak karenin çizilmesi pencerede görüntüsüz bir kare olarak görünürdü; pencere testi otomatik değil, bu yüzden hâlâ testle yakalanmıyor. Pencereli otomatik test M3.6'nın kabulünde yeniden düşünülür |
+| Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M3.4
+
+| Konu | Not |
+|---|---|
+| Ağaç | `parent`, `child_at`, `child_count`, `kind` (belge, eleman, metin, yorum, diğer), `tag`, `attributes` (yazıldığı sırayla). Eski düğüm her sorguda `StaleNode` (test) |
+| Kutu | Son karenin her elemanının kenarlık kutusu, kaydırılmış ve `relative` kaymasıyla, görüntü alanına göre CSS pikseli; margin, border ve padding üst, sağ, alt, sol (Taffy'nin `Layout`'u). Kare hazırlanırken özyinelemesiz bir yürüyüşle toplanıyor. Kutusuz düğümde ve ilk kareden önce `NotFound`. **Chrome'a bağ:** renderer'da yeni bir test, her referans sayfasında her elemanın sorgulanan kutusunun `erk_boxes_match_chrome`'un Chrome'la karşılaştırdığı kutuyla aynı olduğunu (aynı elemanlarda var, aynı yerde, aynı boyutta) doğruluyor. Elle yazılmış bir sayfada margin/border/padding ve kaydırmanın etkisi ayrıca sınanıyor |
+| Hesaplanmış stil | Erk'in kullandığı 76 longhand, ad sırasıyla, `computed_value_to_string` ile `getComputedStyle`'ın biçiminde (`color: rgb(255, 0, 0);`, `padding-left: 20px;` 1em'den). Stylo'da bütün longhand'leri dolaşan bir API yok; liste `page.rs`'te, gerekçesiyle |
+| `inspect_at`, `highlight` | `erk`'te; vurgu açıkken ve kapalıyken belge, hesaplanmış stil ve kutu aynı, yalnızca kare farklı (p1-contract §11'in muhafızı, `erk` düzeyinde de) |
+| Aşama süreleri | Motor `prepare_marked` ile her aşamanın sonunu (stil, layout, display list) bildiriyor; saati `erk` okuyor (`check-core-io.sh` çekirdekte yasaklıyor). Raster süresi kareyi raster'a verişten "çizildi" bildirimine kadar. `last_frame_timings`: kare numarası 1'den, aşamalar sıfırdan büyük, toplamları `tick`'in duvar saatini aşmıyor, değişiklik yoksa aynı kalıyor (test) |
+| Sayaç testi | Düğmelerin yeri artık kutu sorgusundan (M3.3'ün sabit koordinatları kalktı) |
+| Mutasyonlar | Kenarların sırası, kaydırmanın yok sayılması, ebeveynin hep boş dönmesi, stil işaretinin kaybı, eski düğüme vurgunun kabulü, kare sayacının ilerlememesi, özelliklerin sırasının bozulması, kutu sorgusunda genişliğin kenarlıksız alınması: hepsi yakalandı. **Yaşayan ve kaldırılan:** kutuları yalnızca elemanlarla sınırlayan denetim; metin düğümleri (esnek kapta anonim öğe olanlar dahil, testi eklendi) layout'ta hiç kendi kimlikleriyle kutu almıyor, denetim ölü koddu |
 | Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |

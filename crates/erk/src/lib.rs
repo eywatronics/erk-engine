@@ -52,14 +52,14 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use erk_renderer::{Engine, Painted, Prepared, RasterThread};
+use erk_renderer::{Engine, Painted, Prepared, RasterThread, Stage};
 
 pub use context::Context;
 pub use erk_renderer::{
-    Frame, Key, KeyInput, KeyState, PointerButton, PointerInput, PointerKind, ResourceKind,
-    ResourceRequest,
+    BoxModel, Frame, Key, KeyInput, KeyState, NodeKind, PointerButton, PointerInput, PointerKind,
+    ResourceKind, ResourceRequest,
 };
 pub use events::{Event, EventKind, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};
@@ -187,6 +187,19 @@ pub enum Input {
     },
 }
 
+/// How long the stages of a frame took (p1-contract §8.1), measured by
+/// this crate around the engine's stages: the core reads no clock.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrameTimings {
+    /// The frame's number, from 1.
+    pub frame: u64,
+    pub style_ns: u64,
+    pub layout_ns: u64,
+    pub display_list_ns: u64,
+    /// From handing the frame to the raster until it reports it painted.
+    pub raster_ns: u64,
+}
+
 type ResourceProvider = Box<dyn FnMut(&ResourceRequest, Responder)>;
 type Log = Box<dyn FnMut(LogLevel, &str)>;
 
@@ -210,6 +223,11 @@ pub struct App {
     fonts: Option<Arc<SystemFonts>>,
     resources: Option<ResourceProvider>,
     log: Option<Log>,
+    /// The frame with the raster, and when it went there.
+    painting: Option<(FrameTimings, Instant)>,
+    /// The last frame painted.
+    timings: Option<FrameTimings>,
+    frames: u64,
     /// Not `Send`, not `Sync`: the UI thread's alone.
     _ui_thread: PhantomData<*const ()>,
 }
@@ -272,6 +290,9 @@ impl App {
             fonts,
             resources: None,
             log: None,
+            painting: None,
+            timings: None,
+            frames: 0,
             _ui_thread: PhantomData,
         }
     }
@@ -353,9 +374,10 @@ impl App {
         }
         let prepared = self.turn();
         self.flush_log();
-        let Some(prepared) = prepared else {
+        let Some((prepared, timings)) = prepared else {
             return;
         };
+        self.painting = Some((timings, Instant::now()));
         match &mut self.output {
             Output::Headless {
                 raster,
@@ -366,6 +388,7 @@ impl App {
                 while let Ok(done) = painted.recv_timeout(PAINT_PATIENCE) {
                     if let Painted::Frame(done) = done {
                         *frame = Some(done);
+                        self.painted();
                         return;
                     }
                 }
@@ -381,11 +404,28 @@ impl App {
     /// host's provider; when answers arrive at once the frame is prepared
     /// again with them, and the one prepared without them only brings the
     /// raster's tables up to date.
-    fn turn(&mut self) -> Option<Prepared> {
+    fn turn(&mut self) -> Option<(Prepared, FrameTimings)> {
         for round in 1..=ROUNDS {
             self.cx.drain();
             self.flush_log();
-            let (prepared, requests) = self.cx.engine.prepare();
+            let start = Instant::now();
+            let mut ends = [Duration::ZERO; 3];
+            let (prepared, requests) = self.cx.engine.prepare_marked(&mut |stage| {
+                let at = match stage {
+                    Stage::Style => 0,
+                    Stage::Layout => 1,
+                    Stage::DisplayList => 2,
+                };
+                ends[at] = start.elapsed();
+            });
+            let nanos = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+            let timings = FrameTimings {
+                frame: 0,
+                style_ns: nanos(ends[0]),
+                layout_ns: nanos(ends[1].saturating_sub(ends[0])),
+                display_list_ns: nanos(ends[2].saturating_sub(ends[1])),
+                raster_ns: 0,
+            };
             for request in requests {
                 self.request(&request);
             }
@@ -393,7 +433,7 @@ impl App {
             let last = round == ROUNDS || !answered;
             match prepared {
                 Some(prepared) if !last => self.skip(prepared),
-                Some(prepared) => return Some(prepared),
+                Some(prepared) => return Some((prepared, timings)),
                 None if last => return None,
                 None => {}
             }
@@ -436,6 +476,23 @@ impl App {
         {
             log(level, message);
         }
+    }
+
+    /// The raster has painted the frame it was given: its timings are
+    /// complete.
+    pub(crate) fn painted(&mut self) {
+        if let Some((mut timings, sent)) = self.painting.take() {
+            self.frames += 1;
+            timings.frame = self.frames;
+            timings.raster_ns = u64::try_from(sent.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            self.timings = Some(timings);
+        }
+    }
+
+    /// How long the last painted frame's stages took (p1-contract §8.1,
+    /// `erk_last_frame_timings`); `None` before the first.
+    pub fn last_frame_timings(&self) -> Option<FrameTimings> {
+        self.timings
     }
 
     /// The last frame a windowless app painted.

@@ -495,7 +495,7 @@ mod tests {
     fn both(width: u16, height: u16, scale: f32) -> (Vec<u8>, Vec<u8>) {
         let mut page = Page::parse(PAGE);
         let mut resources = PageResources::default();
-        let (_, requests) = page.prepare(width, height, scale, &mut resources);
+        let (_, requests) = page.prepare(width, height, scale, &mut resources, &mut |_| {});
         for request in requests {
             let data = if request.url.contains("logo") {
                 LOGO
@@ -508,7 +508,7 @@ mod tests {
                 data: data.to_vec(),
             });
         }
-        let (list, _) = page.prepare(width, height, scale, &mut resources);
+        let (list, _) = page.prepare(width, height, scale, &mut resources, &mut |_| {});
         let mut tables = Tables::default();
         tables.apply(resources.table_updates(&list));
         let cpu = crate::paint::paint(&list, &tables, width, height, crate::device_scale(scale));

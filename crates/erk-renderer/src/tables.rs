@@ -89,16 +89,16 @@ mod tests {
     fn a_face_goes_to_the_raster_once() {
         let mut page = Page::parse(TEXT);
         let mut resources = Resources::default();
-        let (list, _) = page.prepare(200, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(200, 100, 1.0, &mut resources, &mut |_| {});
         let first = resources.table_updates(&list);
         // Regular and bold.
         assert_eq!(kinds(&first), ["font", "font"]);
-        let (list, _) = page.prepare(150, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(150, 100, 1.0, &mut resources, &mut |_| {});
         assert!(resources.table_updates(&list).is_empty());
         // A new document keeps the faces the raster has.
         page.load(TEXT);
         resources.new_document();
-        let (list, _) = page.prepare(200, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(200, 100, 1.0, &mut resources, &mut |_| {});
         assert!(resources.table_updates(&list).is_empty());
     }
 
@@ -106,23 +106,23 @@ mod tests {
     fn a_replaced_documents_images_leave_the_raster() {
         let mut page = Page::parse(IMAGE);
         let mut resources = Resources::default();
-        let (_, requests) = page.prepare(100, 100, 1.0, &mut resources);
+        let (_, requests) = page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
         resources.complete(&ResourceResponse {
             id: requests[0].id,
             mime: "image/png".to_owned(),
             data: tiny_png(),
         });
         let mut tables = Tables::default();
-        let (list, _) = page.prepare(100, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
         let updates = resources.table_updates(&list);
         assert_eq!(kinds(&updates), ["font", "image"]);
         tables.apply(updates);
         assert_eq!(tables.len(), (1, 1));
-        let (list, _) = page.prepare(100, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
         assert!(resources.table_updates(&list).is_empty(), "sent once");
         page.load("<p>Erk</p>");
         resources.new_document();
-        let (list, _) = page.prepare(100, 100, 1.0, &mut resources);
+        let (list, _) = page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
         let updates = resources.table_updates(&list);
         assert_eq!(kinds(&updates), ["forget"]);
         tables.apply(updates);
@@ -135,7 +135,7 @@ mod tests {
         // the engine's pixels.
         let mut page = Page::parse(IMAGE);
         let mut resources = Resources::default();
-        let (_, requests) = page.prepare(60, 40, 1.0, &mut resources);
+        let (_, requests) = page.prepare(60, 40, 1.0, &mut resources, &mut |_| {});
         resources.complete(&ResourceResponse {
             id: requests[0].id,
             mime: "image/png".to_owned(),
@@ -149,7 +149,7 @@ mod tests {
             "the image is painted"
         );
         // Without its table entry the image is left out, not painted wrong.
-        let (list, _) = page.prepare(60, 40, 1.0, &mut resources);
+        let (list, _) = page.prepare(60, 40, 1.0, &mut resources, &mut |_| {});
         let pixmap = crate::paint::paint(&list, &Tables::default(), 60, 40, 1.0);
         assert_eq!(&pixmap.data_as_u8_slice()[..4], &[255, 255, 255, 255]);
     }

@@ -302,12 +302,13 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
     fn user_event(&mut self, _: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Painted(Painted::Frame(frame)) => {
+                self.app.painted();
                 self.frame = Some(frame);
                 if let Some(state) = &self.window {
                     state.window.request_redraw();
                 }
             }
-            UserEvent::Painted(Painted::Presented { .. }) => {}
+            UserEvent::Painted(Painted::Presented { .. }) => self.app.painted(),
             UserEvent::Painted(Painted::Raster(Raster::Gpu { adapter })) => {
                 self.app
                     .log(LogLevel::Info, &format!("drawing on the GPU: {adapter}"));

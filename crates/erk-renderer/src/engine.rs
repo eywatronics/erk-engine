@@ -13,7 +13,8 @@ use erk_dom::NodeId;
 
 use crate::list::Prepared;
 use crate::messages::{
-    Cursor, Event, FontCatalog, KeyInput, PointerInput, ResourceRequest, ResourceResponse, Status,
+    BoxModel, Cursor, Event, FontCatalog, KeyInput, NodeKind, PointerInput, ResourceRequest,
+    ResourceResponse, Stage, Status,
 };
 use crate::page::Page;
 use crate::resources::Resources;
@@ -164,6 +165,47 @@ impl Engine {
         self.page.text(node)
     }
 
+    /// `node`'s parent; the document node has none.
+    pub fn parent(&self, node: u64) -> Result<Option<u64>, Status> {
+        Ok(self.page.parent(node)?.map(NodeId::to_bits))
+    }
+
+    /// `node`'s child at `index`, in document order.
+    pub fn child_at(&self, node: u64, index: usize) -> Result<Option<u64>, Status> {
+        Ok(self.page.child_at(node, index)?.map(NodeId::to_bits))
+    }
+
+    /// How many children `node` has.
+    pub fn child_count(&self, node: u64) -> Result<usize, Status> {
+        self.page.child_count(node)
+    }
+
+    /// What `node` is.
+    pub fn kind(&self, node: u64) -> Result<NodeKind, Status> {
+        self.page.kind(node)
+    }
+
+    /// An element's tag name; `None` for other nodes.
+    pub fn tag(&self, node: u64) -> Result<Option<String>, Status> {
+        self.page.tag(node)
+    }
+
+    /// An element's attributes, in order; none for other nodes.
+    pub fn attributes(&self, node: u64) -> Result<Vec<(String, String)>, Status> {
+        self.page.attributes(node)
+    }
+
+    /// `node`'s box in the last frame, if it has one.
+    pub fn node_box(&self, node: u64) -> Result<Option<BoxModel>, Status> {
+        self.page.node_box(node)
+    }
+
+    /// `node`'s computed style in the last frame, as `name: value;` lines;
+    /// `None` for a node without a style.
+    pub fn computed_style(&self, node: u64) -> Result<Option<String>, Status> {
+        self.page.computed_style(node)
+    }
+
     /// What the pointer should look like over the last frame.
     pub fn cursor(&self) -> Cursor {
         self.page.cursor()
@@ -180,6 +222,16 @@ impl Engine {
     /// layout and the display list run on a helper thread with
     /// [`FRAME_STACK`]; this waits for it.
     pub fn prepare(&mut self) -> (Option<Prepared>, Vec<ResourceRequest>) {
+        self.prepare_marked(&mut |_| {})
+    }
+
+    /// [`Engine::prepare`], calling `mark` as each stage ends, on the
+    /// thread that runs them: the embedding layer times the stages, the
+    /// core reads no clock (p1-contract §8.1).
+    pub fn prepare_marked(
+        &mut self,
+        mark: &mut (dyn FnMut(Stage) + Send),
+    ) -> (Option<Prepared>, Vec<ResourceRequest>) {
         let Some((width, height)) = self.size.filter(|_| self.changed) else {
             return (None, Vec::new());
         };
@@ -189,7 +241,9 @@ impl Engine {
             std::thread::Builder::new()
                 .name("erk-frame".to_owned())
                 .stack_size(FRAME_STACK)
-                .spawn_scoped(scope, || page.prepare(width, height, scale, resources))
+                .spawn_scoped(scope, || {
+                    page.prepare(width, height, scale, resources, mark)
+                })
                 .expect("a frame thread starts")
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic))

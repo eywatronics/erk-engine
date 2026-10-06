@@ -293,6 +293,16 @@ okunur sorgularıyla bakar; aynı API'yi host da kullanabilir.
   öznitelikler, hesaplanmış stil (özellik adı ve değeri, metin olarak),
   kutu modeli (konum, boyut, margin, border, padding; CSS pikseli). Hepsi
   UI iş parçacığından, eski id'de `ERK_ERR_STALE_NODE`.
+  **M3.4'te koda inen biçim:** ağaç için taslaktaki `parent` ve
+  `child_at`'e ek olarak çocuk sayısı ve düğümün türü (belge, eleman,
+  metin, yorum, diğer); etiket ve öznitelikler ayrı sorgular. Kutu ve
+  hesaplanmış stil son karenindir: ilk kareden önce, kutusuz düğümde
+  (metin, satır içi eleman, gösterilmeyen) `ERK_ERR_NOT_FOUND`. Hesaplanmış
+  stil Erk'in kullandığı longhand'lerin ad sırasıyla `ad: değer;`
+  satırları; Stylo bütün longhand'leri dolaşmanın yolunu vermiyor ve
+  kalanlar Erk'in yok saydığı değerler olurdu. C-ABI'deki karşılıkları
+  (`erk_node_child_count`, `erk_node_kind`, `erk_node_tag`,
+  `erk_node_attributes`) M3.5'te, taslağa ekleme olarak gelir.
 - **Seçme ve vurgu** (M2): `erk_inspect_at(app, x, y, &node)` hit-test'in
   sonucunu döndürür; `erk_highlight(app, node)` seçili düğümün kutularını bir
   kaplamayla çizer. Kaplama display list'e eklenir, belgeye değil: DOM'da ve
