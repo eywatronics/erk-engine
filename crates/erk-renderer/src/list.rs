@@ -147,3 +147,18 @@ pub(crate) enum TableUpdate {
     /// No list will paint this image again (its document is gone).
     ForgetImage(ImageId),
 }
+
+/// One frame's work for the raster: the table updates it needs first, then
+/// the list, for a `width` × `height` target of device pixels at `scale`
+/// device pixels per CSS pixel. Made by the engine on the UI thread, moved
+/// to the raster whole.
+pub struct Prepared {
+    pub(crate) updates: Vec<TableUpdate>,
+    pub(crate) list: DisplayList,
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) scale: f32,
+    /// Whether some of the document's resources were still unanswered:
+    /// a later frame will show them.
+    pub(crate) pending: bool,
+}

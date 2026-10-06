@@ -91,6 +91,18 @@ pub enum FromRenderer {
     Presented { width: u16, height: u16 },
 }
 
+/// What a raster painted ([`crate::RasterThread`]).
+pub enum Painted {
+    /// A frame painted on the CPU, with its pixels.
+    Frame(Frame),
+    /// A frame went to the window on the GPU, `width` × `height` device
+    /// pixels: the window already shows it.
+    Presented { width: u16, height: u16 },
+    /// How the raster draws from now on: first thing on a window, and
+    /// again if the GPU path is lost.
+    Raster(Raster),
+}
+
 /// How the renderer draws.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Raster {

@@ -228,8 +228,9 @@ golden images and the reference tests always use vello_cpu.
 
 ```
 crates/
+  erk/           the Rust API: an app, its document, its raster (M3)
   erk-shell/     window, event loop, the demo host
-  erk-renderer/  layout, display list, paint; the renderer thread
+  erk-renderer/  the engine (layout, display list) and the raster
   erk-style/     CSS styling with Stylo
   erk-dom/       arena DOM and HTML parsing
 docs/

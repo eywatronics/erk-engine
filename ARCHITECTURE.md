@@ -87,9 +87,9 @@ plain data, but is not planned.
 |---|---|---|
 | `erk-dom` | Arena DOM and the html5ever tree sink. Depends on no other `erk-*` crate | M0 |
 | `erk-style` | Stylo adapter and style engine. A named `unsafe` exception, because Stylo's `TElement` requires five `unsafe fn`s | M0 |
-| `erk-renderer` | Layout, display list, paint; the renderer thread and its messages | M0 |
+| `erk-renderer` | The engine (document, input, style, layout, display list) on the caller's thread, the raster on its own; the M0 renderer thread and its messages until the shell moves onto `erk` | M0, split in M3.1 |
 | `erk-shell` | Window, event loop, the demo host. Does not depend on `erk-dom` or `erk-style` | M0 |
-| `erk` | Idiomatic Rust embedding API | M3 |
+| `erk` | Idiomatic Rust embedding API: an app, its document on the UI thread, its raster | M3 (windowless app in M3.1) |
 | `erk-ffi` | The same API as a C ABI (`erk.h`); a named `unsafe` exception | M3 |
 | `erk-python` | Python package over the C ABI | M6 |
 
