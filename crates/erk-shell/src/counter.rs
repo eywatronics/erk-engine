@@ -42,11 +42,6 @@ mod tests {
 
     const PAGE: &str = include_str!("../../../examples/counter.html");
 
-    /// The buttons' middles at 800 × 600, from their layout boxes. M3.4's
-    /// box query will let the test ask for them.
-    const DECREMENT: (f32, f32) = (358.5, 282.0);
-    const INCREMENT: (f32, f32) = (443.5, 282.0);
-
     fn decode(png_bytes: &[u8]) -> (u32, u32, Vec<u8>) {
         let decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
         let mut reader = decoder.read_info().expect("valid PNG");
@@ -54,6 +49,14 @@ mod tests {
         let info = reader.next_frame(&mut pixels).expect("PNG frame");
         pixels.truncate(info.buffer_size());
         (info.width, info.height, pixels)
+    }
+
+    /// The middle of the element `selector` finds, where the last frame put
+    /// it.
+    fn middle(app: &App, selector: &str) -> (f32, f32) {
+        let node = app.query(None, selector).unwrap().unwrap();
+        let found = app.node_box(node).unwrap();
+        (found.x + found.width / 2.0, found.y + found.height / 2.0)
     }
 
     fn counter() -> App {
@@ -74,8 +77,9 @@ mod tests {
     #[test]
     fn clicks_count_and_the_page_shows_the_number() {
         let mut app = counter();
+        let (increment, decrement) = (middle(&app, "#increment"), middle(&app, "#decrement"));
         // Up three times, down once: 2.
-        for (turn, (x, y)) in [INCREMENT, INCREMENT, INCREMENT, DECREMENT]
+        for (turn, (x, y)) in [increment, increment, increment, decrement]
             .into_iter()
             .enumerate()
         {
@@ -124,7 +128,8 @@ mod tests {
     #[test]
     fn a_click_beside_the_buttons_counts_nothing() {
         let mut app = counter();
-        app.click(INCREMENT.0 + 200.0, INCREMENT.1);
+        let (x, y) = middle(&app, "#increment");
+        app.click(x + 200.0, y);
         let count = app.query(None, "#count").unwrap().unwrap();
         assert_eq!(app.text(count).unwrap(), "0");
     }

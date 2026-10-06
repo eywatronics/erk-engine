@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::mpsc::Receiver;
 
-use erk_renderer::Engine;
+use erk_renderer::{BoxModel, Engine, NodeKind};
 
 use crate::Status;
 use crate::events::{self, Event, EventKind, Listener, Listeners, Phase, Subscription};
@@ -80,6 +80,82 @@ impl Context {
     /// `node`'s text as the DOM's `textContent` reads it.
     pub fn text(&self, node: Node) -> Result<String, Status> {
         Ok(self.engine.text(self.inward(node))?)
+    }
+
+    /// `node`'s parent; `None` for the document node.
+    pub fn parent(&self, node: Node) -> Result<Option<Node>, Status> {
+        let parent = self.engine.parent(self.inward(node))?;
+        Ok(parent.and_then(|id| self.outward(id)))
+    }
+
+    /// `node`'s child at `index`, in document order; `None` past the last.
+    pub fn child_at(&self, node: Node, index: usize) -> Result<Option<Node>, Status> {
+        let child = self.engine.child_at(self.inward(node), index)?;
+        Ok(child.and_then(|id| self.outward(id)))
+    }
+
+    /// How many children `node` has.
+    pub fn child_count(&self, node: Node) -> Result<usize, Status> {
+        Ok(self.engine.child_count(self.inward(node))?)
+    }
+
+    /// What `node` is: the document, an element, text, a comment.
+    pub fn kind(&self, node: Node) -> Result<NodeKind, Status> {
+        Ok(self.engine.kind(self.inward(node))?)
+    }
+
+    /// An element's tag name, lowercase as HTML parses it; `None` for a node
+    /// that is not an element.
+    pub fn tag(&self, node: Node) -> Result<Option<String>, Status> {
+        Ok(self.engine.tag(self.inward(node))?)
+    }
+
+    /// An element's attributes, as written, in order.
+    pub fn attributes(&self, node: Node) -> Result<Vec<(String, String)>, Status> {
+        Ok(self.engine.attributes(self.inward(node))?)
+    }
+
+    /// `node`'s box in the last frame (p1-contract §8.1): the border box in
+    /// CSS pixels relative to the viewport, and its margin, border and
+    /// padding. `NotFound` for a node without one: text, an inline
+    /// element, one not displayed, or any node before the first frame.
+    pub fn node_box(&self, node: Node) -> Result<BoxModel, Status> {
+        self.engine
+            .node_box(self.inward(node))?
+            .ok_or(Status::NotFound)
+    }
+
+    /// `node`'s computed style in the last frame, as `name: value;` lines,
+    /// one per property Erk uses, in the order of their names. `NotFound`
+    /// for a node without a style.
+    pub fn computed_style(&self, node: Node) -> Result<String, Status> {
+        self.engine
+            .computed_style(self.inward(node))?
+            .ok_or(Status::NotFound)
+    }
+
+    /// The topmost node at `x`, `y` (CSS pixels) in the last frame, as a
+    /// click there would find it (p1-contract §8.1, `erk_inspect_at`).
+    pub fn inspect_at(&self, x: f32, y: f32) -> Option<Node> {
+        self.engine.inspect_at(x, y).and_then(|id| self.outward(id))
+    }
+
+    /// Draw the developer tools' highlight over `node`'s boxes from the next
+    /// frame on, or none. It is drawn over the page, never added to the
+    /// document.
+    pub fn highlight(&mut self, node: Option<Node>) -> Result<(), Status> {
+        let id = match node {
+            Some(node) => {
+                let id = self.inward(node);
+                if !self.engine.contains(id) {
+                    return Err(Status::StaleNode);
+                }
+                Some(id)
+            }
+            None => None,
+        };
+        self.engine.highlight(id);
+        Ok(())
     }
 
     /// Call `callback` when an event of `kind` reaches `node` at its target

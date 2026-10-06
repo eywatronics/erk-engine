@@ -313,3 +313,40 @@ pub struct ElementBox {
     pub width: f32,
     pub height: f32,
 }
+
+/// An element's box in the last frame (p1-contract §8.1, `ErkBox`): its
+/// border box in CSS pixels relative to the viewport, and the widths of its
+/// margin, border and padding, each top, right, bottom, left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoxModel {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub margin: [f32; 4],
+    pub border: [f32; 4],
+    pub padding: [f32; 4],
+}
+
+/// What a node is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeKind {
+    Document,
+    Element,
+    Text,
+    Comment,
+    /// A doctype, a processing instruction, a template's fragment.
+    Other,
+}
+
+/// A stage of preparing a frame, reported as it ends: the embedding layer
+/// times them, the core reads no clock (p1-contract §8.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Styles computed, and resource requests found.
+    Style,
+    /// Boxes laid out and text shaped.
+    Layout,
+    /// The display list built.
+    DisplayList,
+}

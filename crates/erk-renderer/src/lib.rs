@@ -31,9 +31,10 @@ pub use engine::Engine;
 pub use gpu::Window;
 pub use list::Prepared;
 pub use messages::{
-    Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, GenericFamilies, Key, KeyInput,
-    KeyState, Modifiers, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind,
-    ResourceRequest, ResourceResponse, ScriptFallback, Status, TextBox,
+    BoxModel, Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, GenericFamilies, Key,
+    KeyInput, KeyState, Modifiers, NodeKind, Painted, PointerButton, PointerInput, PointerKind,
+    Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Stage, Status,
+    TextBox,
 };
 pub use raster::RasterThread;
 
@@ -168,7 +169,7 @@ pub fn paint_repeatedly(
 ) -> Result<String, String> {
     let mut page = Page::parse(html);
     let mut resources = Resources::default();
-    let (list, _) = page.prepare(width, height, 1.0, &mut resources);
+    let (list, _) = page.prepare(width, height, 1.0, &mut resources, &mut |_| {});
     let mut tables = tables::Tables::default();
     tables.apply(resources.table_updates(&list));
     if gpu {
