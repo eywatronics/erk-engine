@@ -318,7 +318,7 @@ M4 de adımlara bölünür; her adım kendi PR'ı ([m4-interactive-dom.md](m4-in
 | M4.1 | Toplu `Mutation`, `query_all`, klavye olayları | Bitti: `erk_apply` ve `ERK_NEW_NODE`, tuş olayları host'a; C-ABI 0.4 |
 | M4.2 | `Mutation` fuzz'ı, 10 bin döngü bellek testi | Bitti: fuzz bağlanmamış kapsamlı sorguda bir panik buldu (düzeltildi); 10 bin döngüde yığın büyümesi 0 bayt |
 | M4.3 | `linear-gradient`, `radial-gradient` | Bitti: tekrarlayanlar, ara noktalar, elipsler, döşeme; Chrome skoru %99,72, CPU ve GPU aynı |
-| M4.4 | 2D `transform`, hit-test ters dönüşümle | Yeni |
+| M4.4 | 2D `transform`, hit-test ters dönüşümle | Bitti: bireysel özellikler, origin, iç içe dönüşüm, kapsayan blok; Chrome skoru %99,00 |
 | M4.5 | TodoMVC, kabul | Yeni |
 
 **Karar (plan):** girdi, değişiklik ve gönderim olayları form denetimleri

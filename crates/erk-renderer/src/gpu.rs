@@ -486,7 +486,7 @@ mod tests {
     /// A page with what the display list holds: backgrounds, rounded
     /// borders of several colours, a shadow, translucency, a clip, text,
     /// images (one repeated), gradients (linear, repeating, an elliptic
-    /// radial one) and the highlight.
+    /// radial one), a transform and the highlight.
     const PAGE: &str = r#"<body style="margin: 0; background: #f1f5f9; font-family: 'Noto Sans'; font-size: 16px">
       <div style="margin: 10px; padding: 8px; background: #fff; border: 3px solid; border-color: #2563eb #16a34a #dc2626 #f59e0b; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.3)">Merhaba, <b>dünya</b>! Çizim GPU'da.</div>
       <div style="opacity: 0.5; margin: 10px; height: 30px; background: #7c3aed"></div>
@@ -494,7 +494,7 @@ mod tests {
       <img src="logo.png" style="margin: 10px; width: 64px">
       <div style="margin: 10px; height: 40px; background: url(checker.png) repeat"></div>
       <div style="display: flex; gap: 10px; margin: 10px; height: 50px">
-        <div style="flex: 1; background: linear-gradient(30deg, #7c3aed, #22d3ee 70%, #fde047)"></div>
+        <div style="flex: 1; transform: rotate(8deg) scale(0.9); background: linear-gradient(30deg, #7c3aed, #22d3ee 70%, #fde047)"></div>
         <div style="flex: 1; background: repeating-linear-gradient(45deg, #334155 0 6px, #e2e8f0 6px 12px)"></div>
         <div style="flex: 1; border-radius: 12px; background: radial-gradient(ellipse at 30% 40%, #fff, #059669 60%, #064e3b)"></div>
       </div>

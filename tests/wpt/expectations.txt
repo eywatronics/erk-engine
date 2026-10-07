@@ -1305,7 +1305,7 @@ css/css-flexbox/flexbox-safe-overflow-position-002.html PASS
 css/css-flexbox/flexbox-safe-overflow-position-003.html PASS
 css/css-flexbox/flexbox-safe-overflow-position-004.html PASS
 css/css-flexbox/flexbox-safe-overflow-position-005.html PASS
-css/css-flexbox/flexbox-safe-overflow-position-006.html PASS
+css/css-flexbox/flexbox-safe-overflow-position-006.html FAIL  # lowered: passed only because translate was ignored before M4.4: it cancelled Erk's misplacement of the -webkit-box item (Erk applies align-self: safe center, which should have no effect on -webkit-box; -webkit-box-align: end is not honoured), now 10px off
 css/css-flexbox/flexbox-single-line-clamp-1.html PASS
 css/css-flexbox/flexbox-single-line-clamp-2.html PASS
 css/css-flexbox/flexbox-single-line-clamp-3.html PASS
@@ -1826,7 +1826,7 @@ css/css-position/position-absolute-dynamic-static-position-floats-004.html FAIL
 css/css-position/position-absolute-dynamic-static-position-inline.html FAIL  # lowered: the test switches the element to display: block with script, which Erk does not run; it passed only while static positions were ignored
 css/css-position/position-absolute-dynamic-static-position-margin-001.html FAIL
 css/css-position/position-absolute-dynamic-static-position-margin-002.html FAIL
-css/css-position/position-absolute-dynamic-static-position-table-cell.html PASS
+css/css-position/position-absolute-dynamic-static-position-table-cell.html FAIL  # lowered: passed only because translate was ignored before M4.4; the test sets top: auto from a script, which Erk never runs, so with top: 0 and the translate applied the red cell shows
 css/css-position/position-absolute-dynamic-static-position.html FAIL
 css/css-position/position-absolute-fieldset.html PASS
 css/css-position/position-absolute-fit-content.html FAIL

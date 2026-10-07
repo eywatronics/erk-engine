@@ -28,12 +28,12 @@ use crate::resources::Resources;
 use crate::scroll::{Offsets, Scrolling};
 use crate::tables::Tables;
 use crate::text::{EmbeddedFontMetrics, TextEngine};
+use crate::transform::Matrix;
 
 pub(crate) struct Page {
     doc: Document,
-    /// The last frame's hit regions, in paint order, and whether each is a
-    /// line of text.
-    hits: Vec<(NodeId, Rect, bool)>,
+    /// The last frame's hit regions, in paint order.
+    hits: Vec<HitRegion>,
     /// Where the pointer is, while it is over the page.
     pointer_at: Option<(f32, f32)>,
     /// The last frame's styles: which elements are shown, for the focus.
@@ -175,8 +175,9 @@ impl Page {
             list.items.extend(
                 self.hits
                     .iter()
-                    .filter(|(hit, _, _)| *hit == node)
-                    .map(|(_, frame, _)| DisplayItem::Highlight(*frame)),
+                    .filter(|hit| hit.node == node)
+                    .filter_map(HitRegion::frame)
+                    .map(DisplayItem::Highlight),
             );
         }
         self.styles = styles;
@@ -261,13 +262,8 @@ impl Page {
             .hits
             .iter()
             .rev()
-            .find(|(_, frame, _)| {
-                x >= frame.x
-                    && y >= frame.y
-                    && x < frame.x + frame.width
-                    && y < frame.y + frame.height
-            })
-            .map(|(node, _, text)| (*node, *text));
+            .find(|hit| hit.contains((x, y)))
+            .map(|hit| (hit.node, hit.text));
         let in_viewport = x >= 0.0 && y >= 0.0 && x < self.viewport.0 && y < self.viewport.1;
         hit.or_else(|| {
             in_viewport
@@ -976,29 +972,87 @@ fn serialized(style: &ComputedValues) -> Vec<(&'static str, String)> {
         .collect()
 }
 
+/// Where a node takes pointer input: rectangles the point must be in, each
+/// in the coordinates of the transforms around it (its own region and the
+/// clips around it), and whether it is a line of text.
+struct HitRegion {
+    node: NodeId,
+    within: Vec<(Matrix, Rect)>,
+    text: bool,
+}
+
+impl HitRegion {
+    fn contains(&self, point: (f32, f32)) -> bool {
+        self.within.iter().all(|(matrix, rect)| {
+            crate::transform::unapply(matrix, point).is_some_and(|(x, y)| {
+                x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height
+            })
+        })
+    }
+
+    /// The region as a box on the page, for the highlight: its own
+    /// rectangle, clipped, unless a transform moves it.
+    fn frame(&self) -> Option<Rect> {
+        match self.within.as_slice() {
+            [(matrix, rect)] if *matrix == crate::transform::IDENTITY => Some(*rect),
+            _ => None,
+        }
+    }
+}
+
+/// `rect` added to `within`: intersected with the last rectangle if they
+/// are in the same coordinates, after it if not. `None` if nothing is left.
+fn narrowed(within: &[(Matrix, Rect)], matrix: Matrix, rect: Rect) -> Option<Vec<(Matrix, Rect)>> {
+    let mut out = within.to_vec();
+    match out.last_mut() {
+        Some((last, outer)) if *last == matrix => *outer = intersect(outer, &rect),
+        _ => out.push((matrix, rect)),
+    }
+    let (_, last) = out.last().expect("one was just added");
+    (last.width > 0.0 && last.height > 0.0).then_some(out)
+}
+
 /// The hit regions of `items` in paint order, each cut to the clips around
-/// it; a region clipped away entirely is gone.
-fn hits(items: &[DisplayItem]) -> Vec<(NodeId, Rect, bool)> {
-    let mut clips: Vec<Rect> = Vec::new();
+/// it, through the transforms around it; a region clipped away entirely is
+/// gone.
+fn hits(items: &[DisplayItem]) -> Vec<HitRegion> {
+    let mut transforms: Vec<Matrix> = vec![crate::transform::IDENTITY];
+    // The constraints of the clips open, innermost last; `None` for a clip
+    // that leaves nothing.
+    let mut clips: Vec<Option<Vec<(Matrix, Rect)>>> = vec![Some(Vec::new())];
     let mut hits = Vec::new();
     for item in items {
+        let matrix = *transforms.last().expect("the page's own");
         match item {
+            DisplayItem::PushTransform(local) => {
+                transforms.push(crate::transform::then(local, &matrix));
+            }
+            DisplayItem::PopTransform => {
+                if transforms.len() > 1 {
+                    transforms.pop();
+                }
+            }
             // A rounded clip is taken as its rectangle: a point in a cut-off
             // corner still finds what is under it.
             DisplayItem::PushClip { frame, .. } => {
-                let clip = clips.last().map_or(*frame, |outer| intersect(outer, frame));
-                clips.push(clip);
+                let outer = clips.last().cloned().flatten();
+                clips.push(outer.and_then(|outer| narrowed(&outer, matrix, *frame)));
             }
             DisplayItem::PopClip => {
-                clips.pop();
+                if clips.len() > 1 {
+                    clips.pop();
+                }
             }
             DisplayItem::Hit { node, frame, text } => {
-                let frame = clips.last().map_or(*frame, |clip| intersect(clip, frame));
-                if frame.width > 0.0
-                    && frame.height > 0.0
+                if let Some(Some(within)) = clips.last()
+                    && let Some(within) = narrowed(within, matrix, *frame)
                     && let Some(node) = NodeId::from_bits(*node)
                 {
-                    hits.push((node, frame, *text));
+                    hits.push(HitRegion {
+                        node,
+                        within,
+                        text: *text,
+                    });
                 }
             }
             _ => {}

@@ -82,12 +82,25 @@ const GEOMETRY_TOLERANCE: f32 = 1.0;
 
 /// Added to a copy of each page when capturing Chrome's geometry: once the
 /// fonts have loaded, it writes the border box of the body and every element
-/// in it, in document order, into a `<pre>`. Only the capture tool runs this,
+/// in it, in document order, into a `<pre>`. Boxes are measured before
+/// transforms, as Erk's box query gives them: every transform becomes
+/// `translate(0)`, which moves nothing and keeps the containing block it
+/// made. The screenshot is taken without this script, transforms and all. Only the capture tool runs this,
 /// in Chrome; Erk never runs scripts. The first line reports the viewport:
 /// with --dump-dom, Chrome's viewport is the window minus its frame, unlike
 /// with --screenshot.
 const GEOMETRY_SCRIPT: &str = r#"<script id="erk-geometry-script">
 window.addEventListener('load', () => document.fonts.ready.then(() => {
+  // Measured before transforms, as Erk's box query gives boxes (M4.4):
+  // translate(0) moves nothing and keeps the containing block a transform
+  // makes, so the layout stays as it was.
+  for (const e of document.querySelectorAll('*')) {
+    const s = getComputedStyle(e);
+    if (s.transform !== 'none' || s.translate !== 'none' || s.rotate !== 'none' || s.scale !== 'none') {
+      e.style.setProperty('transform', 'translate(0)', 'important');
+      for (const p of ['translate', 'rotate', 'scale']) e.style.setProperty(p, 'none', 'important');
+    }
+  }
   const elements = [document.body, ...document.body.querySelectorAll('*')]
     .filter((e) => e.id !== 'erk-geometry-script');
   const lines = elements.map((e, i) => {
@@ -108,9 +121,19 @@ window.addEventListener('load', () => document.fonts.ready.then(() => {
 /// `<pre>`. Text nodes are numbered in document order, counting only those
 /// that hold more than white space and are not inside `<script>`,
 /// `<style>` or `<template>`: the numbering `erk_renderer::text_boxes`
-/// uses.
+/// uses. Lines are measured before transforms, as boxes are.
 const TEXT_SCRIPT: &str = r#"<script id="erk-text-script">
 window.addEventListener('load', () => document.fonts.ready.then(() => {
+  // Measured before transforms, as Erk's box query gives boxes (M4.4):
+  // translate(0) moves nothing and keeps the containing block a transform
+  // makes, so the layout stays as it was.
+  for (const e of document.querySelectorAll('*')) {
+    const s = getComputedStyle(e);
+    if (s.transform !== 'none' || s.translate !== 'none' || s.rotate !== 'none' || s.scale !== 'none') {
+      e.style.setProperty('transform', 'translate(0)', 'important');
+      for (const p of ['translate', 'rotate', 'scale']) e.style.setProperty(p, 'none', 'important');
+    }
+  }
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => node.parentElement.closest('script, style, template')
       ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,

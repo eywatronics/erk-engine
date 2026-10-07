@@ -263,6 +263,12 @@ impl DisplayList {
                 DisplayItem::PopOpacity => {
                     let _ = writeln!(out, "end opacity");
                 }
+                DisplayItem::PushTransform(matrix) => {
+                    let _ = writeln!(out, "transform {matrix:?}");
+                }
+                DisplayItem::PopTransform => {
+                    let _ = writeln!(out, "end transform");
+                }
                 DisplayItem::PushClip { frame, radii } => {
                     let _ = write!(
                         out,
@@ -326,14 +332,36 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
     let (below, above): (Vec<Layer>, Vec<Layer>) =
         context.layers.into_iter().partition(|layer| layer.z < 0);
     // An element below 1 opacity is composited as one group.
-    let opacity = walk
-        .styles
-        .computed(id)
+    let style = walk.styles.computed(id);
+    let opacity = style
+        .as_ref()
         .map_or(1.0, |style| style.get_effects().opacity);
+    // A transform applies to the border box and everything in it; one that
+    // cannot be undone hides them all (CSS Transforms 1 §6). An element
+    // without a box of its own (an inline one) is not transformable.
+    let matrix = style
+        .as_ref()
+        .zip(walk.layouts.get(id))
+        .and_then(|(style, layout)| {
+            let (x, y) = walk.scrolling.position(id).unwrap_or_default();
+            let frame = Frame {
+                x,
+                y,
+                width: layout.size.width,
+                height: layout.size.height,
+            };
+            crate::transform::matrix(style, frame)
+        });
+    if matrix.is_some_and(|matrix| !crate::transform::invertible(&matrix)) {
+        return Vec::new();
+    }
     let scope = walk.scrolling.scope(id);
     let mut items = Vec::new();
     if opacity < 1.0 {
         items.push((scope, DisplayItem::PushOpacity(opacity.max(0.0))));
+    }
+    if let Some(matrix) = matrix {
+        items.push((scope, DisplayItem::PushTransform(matrix)));
     }
     for layer in below {
         items.extend(stacking_context(walk, layer.id));
@@ -342,6 +370,9 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
     items.append(&mut context.inline);
     for layer in above {
         items.extend(stacking_context(walk, layer.id));
+    }
+    if matrix.is_some() {
+        items.push((scope, DisplayItem::PopTransform));
     }
     if opacity < 1.0 {
         items.push((scope, DisplayItem::PopOpacity));
@@ -475,12 +506,14 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         return;
     };
     let style = walk.styles.computed(id);
-    // A positioned element, or one below 1 opacity, paints as a unit; an
-    // unpositioned one with opacity as if positioned with z-index 0 (CSS
-    // Color 4 §9).
+    // A positioned element, or one below 1 opacity or transformed, paints
+    // as a unit; an unpositioned one with opacity or a transform as if
+    // positioned with z-index 0 (CSS Color 4 §9, CSS Transforms 1 §3).
     if !context_root
         && let Some(style) = &style
-        && (crate::layout::is_positioned(style) || style.get_effects().opacity < 1.0)
+        && (crate::layout::is_positioned(style)
+            || style.get_effects().opacity < 1.0
+            || crate::transform::transforms(style))
     {
         let z = if crate::layout::is_positioned(style) {
             style.clone_z_index().integer_or(0)

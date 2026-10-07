@@ -229,8 +229,24 @@ pub(crate) fn paint_list(
     ctx.set_color(list.canvas);
     ctx.fill_rect(&page);
 
+    // The transforms of the groups the painter is in, outermost first: each
+    // composed with those around it.
+    let mut transforms: Vec<Affine> = vec![Affine::IDENTITY];
+    let base = Affine::scale(scale);
     for item in &list.items {
         match item {
+            DisplayItem::PushTransform([a, b, c, d, e, f]) => {
+                let local = Affine::new([a, b, c, d, e, f].map(|v| f64::from(*v)));
+                let current = *transforms.last().expect("the page's own") * local;
+                transforms.push(current);
+                ctx.set_transform(base * current);
+            }
+            DisplayItem::PopTransform => {
+                if transforms.len() > 1 {
+                    transforms.pop();
+                }
+                ctx.set_transform(base * *transforms.last().expect("the page's own"));
+            }
             DisplayItem::Rect {
                 x,
                 y,

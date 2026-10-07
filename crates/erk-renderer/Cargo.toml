@@ -13,6 +13,9 @@ rust-version.workspace = true
 [dependencies]
 erk-dom = { path = "../erk-dom" }
 erk-style = { path = "../erk-style" }
+# Stylo's transform matrices take an euclid reference box. Same version
+# Stylo uses, already in the tree.
+euclid = "=0.22.14"
 # No system fonts: M0 renders with the embedded Noto Sans so that output is
 # identical on every machine.
 parley = { version = "=0.11.1", default-features = false, features = ["std"] }

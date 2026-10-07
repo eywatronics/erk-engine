@@ -795,6 +795,7 @@ version = "0.1.0"
 dependencies = [
  "erk-dom",
  "erk-style",
+ "euclid",
  "fearless_simd",
  "icu_casemap",
  "icu_locale_core",
