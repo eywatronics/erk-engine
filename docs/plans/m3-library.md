@@ -350,3 +350,39 @@ Kapanış notları:
 - **README** yeni API'yle: Rust ve C örnekleri, "Erk erken aşamada" notu ve sınırlamalar listesi (düğüm oluşturma M4, form denetimleri M5). ARCHITECTURE.md M3.3'te güncellenmişti.
 - **Sözleşme ABI v0.2**: M3'te değişen her şey gerekçesiyle p1-contract'ta (§1.1, §4, §5, §6, §8.1, §10).
 - Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi.
+
+### M2 ile M3'ün performansı
+
+Aynı makinede (Windows, NVIDIA GTX 1650), aynı ölçüm aracıyla (`measure`,
+800 × 600, 30 karenin medyanı, release): M2'nin son hali (`e4934c1`) ile
+M3'ün son hali (`549a001`) yan yana, 2026-10-07.
+
+| Sayfa | Ölçüm | M2 | M3 |
+|---|---|---|---|
+| nodes-1000 | Tam kare (stil, layout, display list, CPU boyama) | 67,18 ms | 66,49 ms |
+| nodes-1000 | Yalnızca CPU boyama (vello_cpu) | 14,92 ms | 15,55 ms |
+| nodes-1000 | Yalnızca GPU boyama (vello_hybrid) | 7,85 ms | 7,82 ms |
+| long-page | Tam kare | 28,24 ms | 27,54 ms |
+| long-page | CPU boyama | 14,68 ms | 13,48 ms |
+| long-page | GPU boyama | 8,71 ms | 8,76 ms |
+| settings | Tam kare | 10,55 ms | 9,77 ms |
+| settings | CPU boyama | 7,10 ms | 9,04 ms |
+| settings | GPU boyama | 1,74 ms | 1,38 ms |
+
+- **Sonuç: fark yok.** Bütün farklar ölçüm gürültüsü içinde. Tek göze batan
+  satır (`settings` CPU boyaması, +%27) beşer kez dönüşümlü tekrarlandı: M2
+  7,22–9,35 ms, M3 7,36–8,38 ms; iki sürüm aynı aralıkta.
+- **M3'ün mimari değişikliklerinin bedeli ölçülemeyecek kadar küçük:**
+  display list'in düz veriye dönmesi (font ve görüntü baytları raster'a
+  bir kez gidiyor, karede yalnızca numaralar), belgenin UI iş parçacığına
+  inip yalnızca raster'ın kendi iş parçacığında kalması, display list'in
+  iş parçacıkları arasında kopyalanmadan taşınması, kare için belge ve
+  kaynakların kare iş parçacığına taşınıp geri gelmesi.
+- **M3.1'deki kare başına iş parçacığı** (0,19 ms açma maliyeti ve Stylo'nun
+  kare başına ~13 KB sızıntısı) M3.5'te kalktı; tek, kalıcı kare iş
+  parçacığıyla M3 tam karede M2'den hafifçe hızlı bile çıkıyor, ama fark
+  yine gürültü içinde.
+- **Hızlanma M3'ün işi değildi.** M3 aynı işi yeni bir sınırla yapıyor; tam
+  kare 1000 elemanlı sayfada hâlâ ~67 ms, çünkü her değişiklik tam yeniden
+  stil ve layout ister. Kare süresini düşürmek M5'in artımlı render'ının
+  hedefi; bu tablo onun tabanı olarak M2.8'inkinin yerini alır.

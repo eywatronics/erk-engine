@@ -1,0 +1,125 @@
+# Erk Engine M4 (Etkileşimli DOM) Uygulama Planı
+
+**Hedef:** Host belgeyi yalnızca okumuyor, kuruyor: düğüm oluşturuyor,
+ekliyor, taşıyor, siliyor, öznitelik, sınıf ve satır içi stil değiştiriyor;
+klavye olaylarını alıyor. Modern arayüzlerin ilk aradığı iki görsel özellik
+geliyor: gradyanlar ve 2D `transform`. Kabul: Rust host'lu bir TodoMVC
+çalışıyor, 10 bin oluştur/sil döngüsünde bellek büyümüyor, `Mutation`
+fuzz'ı yeşil.
+
+**Mimari:** M3'ün sınırı değişmez: belge UI iş parçacığında motorun
+(`Engine`), raster ayrı iş parçacığında. Değişiklikler anında uygulanır,
+kare `tick`'te hazırlanır; artımlı stil ve layout M5'te, M4'te her değişiklik
+yine tam yeniden hesap ister. Arenada silme, serbest liste ve nesil artışı
+M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
+
+**Teknoloji:** M3'teki sürümler. Gradyanlar vello'nun gradyan fırçaları,
+`transform` vello'nun `Affine`'i: yeni bağımlılık yok.
+
+## Kararlar
+
+1. **Değişiklik API'si iki biçimde.** Tek tek çağrılar (`create_element`,
+   `append`, `set_attr`, …) Rust'ta ve C'de; toplu `Mutation` dizisi
+   (`apply`) bağlamalar için (Python, Go: M6), çünkü sınırı geçmek her çağrıda
+   bir maliyet. İkisi aynı motor işlevlerine iner; toplu dizi sırayla
+   uygulanır, ilk hatada durur ve kaçıncı değişiklikte durduğunu söyler.
+   İç içe işlem (transaction) ve birleştirme M5'in günlüğüyle
+   (p2-incremental) gelir.
+2. **Bağlanmamış düğümler host'undur.** `create_*` belgeye bağlı olmayan bir
+   düğüm verir; host onu ekler ya da `remove` ile bırakır. Belge değişince
+   (`load_html`) bağlı olmayanlar da gider (arena aynı). Bağlanmamış düğüm
+   çizilmez, olay almaz, kutusu yoktur.
+3. **Girdi, değişiklik ve gönderim olayları M5'e kalır.** Yol haritası M4'te
+   tıklama, girdi, değişiklik, gönderim, klavye ve odak olaylarını sayıyor;
+   girdi, değişiklik ve gönderim form denetimleri olmadan oluşamaz (M5). M4'te
+   klavye (`KEY_DOWN`, `KEY_UP`: odaktaki elemana, yoksa gövdeye; kabarır) ve
+   M2/M3'ün tıklama ve odak olayları.
+4. **TodoMVC'nin metin girişi host'ta.** Gerçek `<input>` M5'te. M4'ün
+   TodoMVC'si yeni görevi odaklanabilir bir alana klavye olaylarından host'un
+   kurduğu metinle yazar: hem klavye olaylarını uçtan uca sınar hem M5'e
+   kadar dürüst kalır.
+
+## Açık sorular
+
+- **`transform`'un hit-test'e ve kırpmaya etkisi:** dönen bir elemanın isabet
+  bölgesi döndürülmüş dikdörtgen. M2.3'ün kırpma kapsamları eksene hizalı;
+  döndürülmüş bir kaydırma kabının çocuklarının kırpması M4.4'te ölçülür ve
+  ya yapılır ya gerekçesiyle sınır olarak yazılır.
+- **Bellek ölçümü:** "10 bin döngüde bellek büyümüyor" bir sayım ister:
+  sayaçlı bir global allocator test ikilisinde mi, yoksa arena ve yan
+  tabloların boyutları mı? M4.2'de ikisi de denenir.
+
+## Genel kısıtlar
+
+- **Sözleşme önce:** API p1-contract'ın M4'e bıraktığı çağrılar
+  (`erk_node_create`, `erk_text_create`, `erk_node_append`,
+  `erk_node_insert_before`, `erk_node_remove`, `erk_node_set_attr`,
+  `erk_node_remove_attr`); sapan her şey önce sözleşmede, gerekçesiyle.
+  ABI v0.3.
+- **Adım başına PR**, `main`'den (`m4/...`). Render'ı değiştiren adımlar
+  (gradyan, transform) Chrome skor tablosunu commit gövdesine yazar ve kendi
+  referans sayfasıyla gelir.
+- **Test disiplini:** her değişiklik testle başlar; her yeni test bir
+  mutasyonla, her yeni muhafız kasıtlı ve eşdeğer ihlallerle denenir.
+
+---
+
+### M4.0: Düğüm oluşturma, taşıma, silme, öznitelikler
+
+- [ ] Motor, `erk` ve C-ABI: `create_element(tag)`, `create_text(text)`,
+  `append(parent, child)`, `insert_before(parent, child, before)`,
+  `remove(node)`, `set_attr`, `remove_attr`, `attr`; kolaylık olarak sınıf
+  (`add_class`, `remove_class`, `has_class`) ve satır içi stil özelliği
+  (`set_style_property`). Geçersiz ağaç (bir düğümü kendi içine eklemek,
+  belge düğümünü taşımak, `before`'un ebeveyni farklı) `InvalidArgument`.
+- [ ] Silinen alt ağaçların abonelikleri biter (`destroy` bir kez); eski
+  id'ler her çağrıda `StaleNode`.
+- [ ] Öznitelik değişikliği stile yansır (`class`, `id`, `style`,
+  `[attr]` seçicileri) ve bir sonraki karede görünür.
+- [ ] `erk.h`'ye yeni işlevler; C örneği ve §11 testleri genişler.
+
+### M4.1: Toplu değişiklik, `query_all`, klavye olayları
+
+- [ ] `Mutation` dizisi ve `apply` (karar 1); C'de `erk_apply`.
+- [ ] `query_all(scope, selector)`.
+- [ ] Klavye olayları (karar 3): `KEY_DOWN`/`KEY_UP`, tuş ve karakter
+  olayla birlikte; Tab, Enter ve Space'in M2 davranışları sürer.
+
+### M4.2: Fuzz ve bellek
+
+- [ ] `Mutation` dizilerinin fuzz'ı: rastgele değişiklikler, eski id'ler,
+  kendi içine ekleme, kareler arasında; panik yok. CI'ın fuzz job'larına
+  ikinci hedef olarak.
+- [ ] 10 bin oluştur/sil döngüsünde bellek büyümüyor (açık soruya göre).
+
+### M4.3: Gradyanlar
+
+- [ ] `linear-gradient`, `radial-gradient` (`background-image`, renk
+  durakları, açılar ve yönler); display list'te gradyan öğesi; CPU ve GPU
+  aynı. Chrome referans sayfası.
+
+### M4.4: 2D `transform`
+
+- [ ] `translate`, `scale`, `rotate` (ve `transform-origin`): boyama dönüşümü;
+  hit-test ters dönüşümle; kutu sorgusu dönüşmemiş kutuyu verir (Chrome'un
+  `offsetTop`'u gibi, `getBoundingClientRect` değil: gerekçesiyle). Chrome
+  referans sayfası.
+
+### M4.5: TodoMVC ve kabul
+
+- [ ] Rust host'lu TodoMVC (`crates/erk/examples/todomvc.rs`): görev ekleme,
+  tamamlama, silme, filtreler, sayaç; altın görüntülü uçtan uca test
+  (ekransız).
+- [ ] 10 bin döngü bellek testi ve fuzz yeşil; `roadmap.md`'de M4 "Bitti".
+
+### M4 kabulü
+
+- [ ] Rust host'lu bir TodoMVC çalışıyor (otomatik test).
+- [ ] 10 bin oluştur/sil döngüsünde bellek büyümüyor (test).
+- [ ] `Mutation` fuzz'ı yeşil.
+
+---
+
+## Yürütme Notları
+
+(Her adımın bulguları, düzeltilen varsayımları ve kararları buraya yazılır.)
