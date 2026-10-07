@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::Context;
 use crate::ids::Node;
 
-pub use erk_renderer::{EventKind, Modifiers};
+pub use erk_renderer::{EventKind, Key, Modifiers};
 
 /// Where an event is on its way when a callback gets it; the numbers are
 /// `erk.h`'s `ERK_PHASE_*`.
@@ -35,6 +35,8 @@ pub struct Event {
     pub x: f32,
     pub y: f32,
     pub modifiers: Modifiers,
+    /// The key of a key event.
+    pub key: Option<Key>,
 }
 
 /// A subscription, to cancel with [`Context::off`].
@@ -119,7 +121,10 @@ impl Listeners {
 }
 
 /// Whether `kind` goes back up the path after its target. Focus and blur
-/// do not bubble (UI Events §5.2.2); a click does.
+/// do not bubble (UI Events §5.2.2); clicks and keys do.
 pub(crate) fn bubbles(kind: EventKind) -> bool {
-    matches!(kind, EventKind::Click)
+    matches!(
+        kind,
+        EventKind::Click | EventKind::KeyDown | EventKind::KeyUp
+    )
 }

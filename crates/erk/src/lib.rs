@@ -74,12 +74,12 @@ use std::time::{Duration, Instant};
 
 use erk_renderer::{Engine, Painted, Prepared, RasterThread, Stage};
 
-pub use context::Context;
+pub use context::{BatchError, Context, Mutation, Ref};
 pub use erk_renderer::{
-    BoxModel, Frame, Key, KeyInput, KeyState, NodeKind, PointerButton, PointerInput, PointerKind,
+    BoxModel, Frame, KeyInput, KeyState, NodeKind, PointerButton, PointerInput, PointerKind,
     ResourceKind, ResourceRequest,
 };
-pub use events::{Event, EventKind, Modifiers, Phase, Subscription};
+pub use events::{Event, EventKind, Key, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};
 pub use ids::Node;
 

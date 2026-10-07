@@ -382,6 +382,45 @@ impl Page {
     /// focused link or button and Space released on a focused button click
     /// it, as browsers do. Keyboard clicks are at 0, 0.
     pub(crate) fn key(&mut self, input: &KeyInput) -> Vec<Event> {
+        // The key itself first, at the focused element or else the body, as
+        // DOM's keydown and keyup; then what the key does by default.
+        let mut events = Vec::new();
+        if let Some(target) = self.key_target() {
+            let kind = match input.state {
+                KeyState::Down => EventKind::KeyDown,
+                KeyState::Up => EventKind::KeyUp,
+            };
+            let mut event = self.event(kind, target, (0.0, 0.0), input.modifiers);
+            event.key = Some(input.key.clone());
+            events.push(event);
+        }
+        events.extend(self.key_action(input));
+        events
+    }
+
+    /// Where a key event goes: the focused element, else the body, else
+    /// the root element.
+    fn key_target(&self) -> Option<NodeId> {
+        if let Some(focused) = self.focus.filter(|node| self.doc.node(*node).is_some()) {
+            return Some(focused);
+        }
+        let html = self.doc.children(self.doc.root()).find(|child| {
+            self.doc
+                .node(*child)
+                .is_some_and(|node| node.as_element().is_some())
+        })?;
+        let body = self.doc.children(html).find(|child| {
+            self.doc
+                .node(*child)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| element.name.local == local_name!("body"))
+        });
+        Some(body.unwrap_or(html))
+    }
+
+    /// What a key does by default: Tab moves the focus, Enter and Space
+    /// activate the focused link or button.
+    fn key_action(&mut self, input: &KeyInput) -> Vec<Event> {
         let focused = self.focus.filter(|node| self.doc.node(*node).is_some());
         match (&input.key, input.state) {
             (Key::Tab, KeyState::Down) => {
@@ -471,6 +510,7 @@ impl Page {
             x,
             y,
             modifiers,
+            key: None,
         }
     }
 
@@ -576,13 +616,22 @@ impl Page {
         scope: Option<u64>,
         selector: &str,
     ) -> Result<Option<NodeId>, Status> {
+        Ok(self.query_all(scope, selector)?.first().copied())
+    }
+
+    /// Every element inside `scope` (the document for `None`) matching the
+    /// selector list `selector`, in document order.
+    pub(crate) fn query_all(
+        &self,
+        scope: Option<u64>,
+        selector: &str,
+    ) -> Result<Vec<NodeId>, Status> {
         let scope = match scope {
             None => self.doc.root(),
             Some(bits) => self.node(bits)?,
         };
-        let found = erk_style::query(&self.doc, scope, selector, &self.interaction())
-            .map_err(|_| Status::InvalidArgument)?;
-        Ok(found.first().copied())
+        erk_style::query(&self.doc, scope, selector, &self.interaction())
+            .map_err(|_| Status::InvalidArgument)
     }
 
     /// `node`'s parent; the document node has none.

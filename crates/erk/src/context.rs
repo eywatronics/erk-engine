@@ -14,6 +14,52 @@ use crate::events::{self, Event, EventKind, Listener, Listeners, Phase, Subscrip
 use crate::handle::{AppHandle, Inbox, Message, Responder, Waker};
 use crate::ids::{self, Node};
 
+/// A node a mutation names: one the host has, or one an earlier mutation of
+/// the same batch created (its position in the batch).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ref {
+    Node(Node),
+    New(usize),
+}
+
+/// One change of a batch ([`Context::apply`]); each does what the method of
+/// the same name does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mutation {
+    CreateElement(String),
+    CreateText(String),
+    Append {
+        parent: Ref,
+        child: Ref,
+    },
+    InsertBefore {
+        parent: Ref,
+        child: Ref,
+        before: Option<Ref>,
+    },
+    Remove(Ref),
+    SetText(Ref, String),
+    SetAttr(Ref, String, String),
+    RemoveAttr(Ref, String),
+    AddClass(Ref, String),
+    RemoveClass(Ref, String),
+}
+
+/// Why a batch stopped: the mutation at `index` failed with `status`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatchError {
+    pub index: usize,
+    pub status: Status,
+}
+
+impl std::fmt::Display for BatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "mutation {} failed: {}", self.index, self.status)
+    }
+}
+
+impl std::error::Error for BatchError {}
+
 pub struct Context {
     pub(crate) engine: Engine,
     /// The key this app's node ids are mixed with (p1-contract §2).
@@ -65,6 +111,72 @@ impl Context {
         let scope = scope.map(|node| self.inward(node));
         let found = self.engine.query(scope, selector)?;
         Ok(found.and_then(|id| self.outward(id)))
+    }
+
+    /// Every element inside `scope` (the whole document for `None`)
+    /// matching the CSS selector list `selector`, in document order.
+    pub fn query_all(&self, scope: Option<Node>, selector: &str) -> Result<Vec<Node>, Status> {
+        let scope = scope.map(|node| self.inward(node));
+        let found = self.engine.query_all(scope, selector)?;
+        Ok(found
+            .into_iter()
+            .filter_map(|id| self.outward(id))
+            .collect())
+    }
+
+    /// Apply `mutations` in order (M4 plan, decision 1): one call for many
+    /// changes, as the bindings want. A mutation may name the node an
+    /// earlier one in the batch created ([`Ref::New`]). Returns the nodes
+    /// the batch created, by position (`None` for the mutations that create
+    /// nothing). The first that fails stops the batch, and the error says
+    /// which it was; the ones before it stay applied: transactions come
+    /// with M5's journal.
+    pub fn apply(&mut self, mutations: &[Mutation]) -> Result<Vec<Option<Node>>, BatchError> {
+        let mut created: Vec<Option<Node>> = Vec::with_capacity(mutations.len());
+        for (index, mutation) in mutations.iter().enumerate() {
+            let fail = |status| BatchError { index, status };
+            let made = self.apply_one(mutation, &created).map_err(fail)?;
+            created.push(made);
+        }
+        Ok(created)
+    }
+
+    fn apply_one(
+        &mut self,
+        mutation: &Mutation,
+        created: &[Option<Node>],
+    ) -> Result<Option<Node>, Status> {
+        let node = |reference: &Ref| match *reference {
+            Ref::Node(node) => Ok(node),
+            Ref::New(at) => created
+                .get(at)
+                .copied()
+                .flatten()
+                .ok_or(Status::InvalidArgument),
+        };
+        match mutation {
+            Mutation::CreateElement(tag) => return self.create_element(tag).map(Some),
+            Mutation::CreateText(text) => return Ok(Some(self.create_text(text))),
+            Mutation::Append { parent, child } => self.append(node(parent)?, node(child)?)?,
+            Mutation::InsertBefore {
+                parent,
+                child,
+                before,
+            } => {
+                let before = before.as_ref().map(node).transpose()?;
+                self.insert_before(node(parent)?, node(child)?, before)?;
+            }
+            Mutation::Remove(target) => self.remove(node(target)?)?,
+            Mutation::SetText(target, text) => self.set_text(node(target)?, text)?,
+            Mutation::SetAttr(target, name, value) => self.set_attr(node(target)?, name, value)?,
+            // Removing an attribute that is not there is no error, as in DOM.
+            Mutation::RemoveAttr(target, name) => {
+                self.remove_attr(node(target)?, name)?;
+            }
+            Mutation::AddClass(target, class) => self.add_class(node(target)?, class)?,
+            Mutation::RemoveClass(target, class) => self.remove_class(node(target)?, class)?,
+        }
+        Ok(None)
     }
 
     /// Set `node`'s text as the DOM's `textContent` does: an element's
@@ -390,6 +502,7 @@ impl Context {
             x: event.x,
             y: event.y,
             modifiers: event.modifiers,
+            key: event.key.clone(),
         };
         for id in self.listeners.at(node, event.kind, capture) {
             // Ended by an earlier callback: not called (DOM's removed flag).

@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 3
+#define ERK_ABI_VERSION 4
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -108,6 +108,26 @@
 #define ERK_PHASE_TARGET 2
 
 #define ERK_PHASE_BUBBLE 3
+
+#define ERK_MUTATION_CREATE_ELEMENT 1
+
+#define ERK_MUTATION_CREATE_TEXT 2
+
+#define ERK_MUTATION_APPEND 3
+
+#define ERK_MUTATION_INSERT_BEFORE 4
+
+#define ERK_MUTATION_REMOVE 5
+
+#define ERK_MUTATION_SET_TEXT 6
+
+#define ERK_MUTATION_SET_ATTR 7
+
+#define ERK_MUTATION_REMOVE_ATTR 8
+
+#define ERK_MUTATION_ADD_CLASS 9
+
+#define ERK_MUTATION_REMOVE_CLASS 10
 
 #define ERK_NODE_DOCUMENT 1
 
@@ -253,6 +273,37 @@ typedef struct {
 typedef uint64_t ErkNodeId;
 
 /*
+ One change of a batch for `erk_apply`. `node`, `parent` and `before` are
+ node ids or `ERK_NEW_NODE + i`.
+
+ - `ERK_MUTATION_CREATE_ELEMENT`: `value` is the tag.
+ - `ERK_MUTATION_CREATE_TEXT`: `value` is the text.
+ - `ERK_MUTATION_APPEND`: `node` into `parent`, last.
+ - `ERK_MUTATION_INSERT_BEFORE`: `node` into `parent` before `before`
+   (`ERK_NODE_NONE`: last).
+ - `ERK_MUTATION_REMOVE`: `node` and everything in it.
+ - `ERK_MUTATION_SET_TEXT`: `node`'s text to `value`.
+ - `ERK_MUTATION_SET_ATTR`: attribute `name` of `node` to `value`.
+ - `ERK_MUTATION_REMOVE_ATTR`: attribute `name` of `node`.
+ - `ERK_MUTATION_ADD_CLASS`, `ERK_MUTATION_REMOVE_CLASS`: class `value`.
+ */
+typedef struct {
+  /*
+   `sizeof(ErkMutation)`: also the stride of the array.
+   */
+  uint32_t struct_size;
+  /*
+   `ERK_MUTATION_*`.
+   */
+  uint32_t kind;
+  ErkNodeId node;
+  ErkNodeId parent;
+  ErkNodeId before;
+  ErkStr name;
+  ErkStr value;
+} ErkMutation;
+
+/*
  An event, valid only during the callback.
  */
 typedef struct {
@@ -277,9 +328,13 @@ typedef struct {
    */
   uint32_t modifiers;
   /*
-   Input events.
+   Key events: the character typed, for `ERK_KEY_CHARACTER`.
    */
   ErkStr text;
+  /*
+   Key events: `ERK_KEY_*`.
+   */
+  uint32_t key;
 } ErkEvent;
 
 typedef void (*ErkEventFn)(void *user_data, ErkApp *app, const ErkEvent *event);
@@ -364,6 +419,13 @@ typedef struct {
  No node.
  */
 #define ERK_NODE_NONE 0
+
+/*
+ A node an earlier mutation of the same batch created, by its position:
+ `ERK_NEW_NODE + i` names what mutation `i` created. No real node id is
+ this small: a node id's upper half is its generation, never 0.
+ */
+#define ERK_NEW_NODE 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -501,6 +563,32 @@ ErkStatus erk_node_remove_class(ErkApp *app, ErkNodeId node_id, ErkStr class_);
  `*out` is 1 if element `node`'s classes hold `class`, else 0.
  */
 ErkStatus erk_node_has_class(ErkApp *app, ErkNodeId node_id, ErkStr class_, uint32_t *out);
+
+/*
+ Every element inside `scope` (`ERK_NODE_NONE`: the document) matching
+ `selector`, in document order, into `out`: all of them or none.
+ `*len` is always how many there are; `ERK_ERR_BUFFER_TOO_SMALL` when
+ `cap` is less.
+ */
+ErkStatus erk_query_all(ErkApp *app,
+                        ErkNodeId scope,
+                        ErkStr selector,
+                        ErkNodeId *out,
+                        size_t cap,
+                        size_t *len);
+
+/*
+ Apply `count` mutations in order, in one call (p1-contract §10). The ids
+ the batch created go to `created` (`count` entries, `ERK_NODE_NONE` for
+ mutations that create nothing; may be NULL). The first that fails stops
+ the batch: its position goes to `*failed_at` (may be NULL) and its
+ status is returned; the ones before it stay applied.
+ */
+ErkStatus erk_apply(ErkApp *app,
+                    const ErkMutation *mutations,
+                    size_t count,
+                    ErkNodeId *created,
+                    size_t *failed_at);
 
 /*
  Call `fn(user_data, app, event)` when an event of `kind` reaches `node`

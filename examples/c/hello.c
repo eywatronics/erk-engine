@@ -45,7 +45,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 3u));
+  CHECK(erk_abi_version() == ((0u << 16) | 4u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -85,6 +85,34 @@ int main(void) {
   CHECK(found == note);
   /* Into itself: refused. */
   CHECK(erk_node_append(app, note, note) == ERK_ERR_INVALID_ARGUMENT);
+
+  /* The same in one call: a list of two items, the second naming the
+   * first's element by its position in the batch. */
+  ErkMutation batch[5];
+  memset(batch, 0, sizeof batch);
+  for (size_t i = 0; i < 5; i++) {
+    batch[i].struct_size = sizeof batch[i];
+  }
+  batch[0].kind = ERK_MUTATION_CREATE_ELEMENT;
+  batch[0].value = str("ul");
+  batch[1].kind = ERK_MUTATION_CREATE_ELEMENT;
+  batch[1].value = str("li");
+  batch[2].kind = ERK_MUTATION_SET_TEXT;
+  batch[2].node = ERK_NEW_NODE + 1;
+  batch[2].value = str("toplu");
+  batch[3].kind = ERK_MUTATION_APPEND;
+  batch[3].parent = ERK_NEW_NODE + 0;
+  batch[3].node = ERK_NEW_NODE + 1;
+  batch[4].kind = ERK_MUTATION_APPEND;
+  batch[4].parent = body;
+  batch[4].node = ERK_NEW_NODE + 0;
+  ErkNodeId created[5];
+  size_t failed_at = 0;
+  CHECK(erk_apply(app, batch, 5, created, &failed_at) == ERK_OK);
+  ErkNodeId items[2] = {ERK_NODE_NONE, ERK_NODE_NONE};
+  size_t count = 0;
+  CHECK(erk_query_all(app, ERK_NODE_NONE, str("ul > li"), items, 2, &count) == ERK_OK);
+  CHECK(count == 1 && items[0] == created[1] && created[3] == ERK_NODE_NONE);
 
   /* A buffer too small is not written; *len says what is needed. */
   char small[4] = {'-', '-', '-', '-'};
