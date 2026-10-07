@@ -227,21 +227,21 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.6: Kabul
 
-- [ ] Rust örneği (`crates/erk/examples/hello.rs`) ve C örneği CI'da
+- [x] Rust örneği (`crates/erk/examples/hello.rs`) ve C örneği CI'da
   derlenip bir sayfa açıyor ve bir tık olayı alıyor.
-- [ ] `README.md` ve `ARCHITECTURE.md` yeni API'yle; p1-contract ABI v0.2:
+- [x] `README.md` ve `ARCHITECTURE.md` yeni API'yle; p1-contract ABI v0.2:
   M3'te değişen her şey gerekçesiyle (`tick`/`input`'un öne alınması, M4'e
   kalan çağrılar, yığın kararı).
-- [ ] Her muhafız kasıtlı ihlalle denenmiş; `roadmap.md`'de M3 "Bitti",
+- [x] Her muhafız kasıtlı ihlalle denenmiş; `roadmap.md`'de M3 "Bitti",
   `CLAUDE.md`'nin kural tablosu yeni kurallarla.
 
 ### M3 kabulü
 
-- [ ] Rust ve C örnek uygulamaları CI'da derlenip bir sayfa açıyor ve bir tık
+- [x] Rust ve C örnek uygulamaları CI'da derlenip bir sayfa açıyor ve bir tık
   olayı alıyor.
-- [ ] Yanlış iş parçacığından çağrı ve eski `NodeId` hata kodu döndürüyor
+- [x] Yanlış iş parçacığından çağrı ve eski `NodeId` hata kodu döndürüyor
   (test).
-- [ ] Her muhafız kasıtlı bir ihlalle denenmiş.
+- [x] Her muhafız kasıtlı bir ihlalle denenmiş.
 
 ---
 
@@ -335,3 +335,18 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | clippy | Dışa açılan işlevlerin ham işaretçi okuması (`not_unsafe_ptr_arg_deref`) crate düzeyinde gerekçesiyle izinli: çağıran C, sözleşme başlığın; `cx()`/`app()`'in `&self`'ten `&mut` vermesi (`mut_from_ref`) `UnsafeCell` ve korumanın tek iş parçacığı garantisiyle gerekçeli |
 | **CI'ın bulduğu sızıntı (M3.1'in hatası)** | Linux'ta AddressSanitizer'lı C örneği, Stylo'nun (`erk_style`) bir iş parçacığında ayırdığı 4 × 6800 baytın serbest bırakılmadığını buldu. Stylo bloom filtresini ve stil paylaşım önbelleğini iş parçacığına özel depoda bilerek sızdırıyor (`Box::leak`, ömrü süreç kadar olan çalışan iş parçacıkları için). M3.1'in her kare için açtığı kapsamlı iş parçacığı bu yüzden kare başına ~13 KB bırakıyordu: saniyede 60 karede saatte ~3 GB. Ekransız testler ve fuzz (`render_html` iş parçacığı açmıyor) görmüyordu. **Düzeltme:** süreçte tek, hiç durmayan bir kare iş parçacığı (16 MiB yığın); sayfa ve kaynakları kare için oraya taşınıp geri geliyor, aşama işaretleri kanalla dönüyor ve `mark` çağıranın iş parçacığında çalışıyor (`Send` gerekmiyor). Stylo'nun önbellekleri bir kez oluşup yeniden kullanılıyor; süreç sonunda iş parçacığı canlı olduğu için sızıntı sayılmıyor. Kare başına iş parçacığı açma maliyeti (0,19 ms) de gitti. Test: iki motorun bütün kareleri aynı iş parçacığında, çağıranınkinden farklı; mutasyon (her çağrıda yeni iş parçacığı) yakalandı. 1 MiB yığın testi geçiyor. p1-contract §4 güncellendi |
 | Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M3.6 ve M3 kabulü
+
+| Madde | Kanıt |
+|---|---|
+| Rust ve C örnekleri CI'da derlenip bir sayfa açıyor ve bir tık olayı alıyor | `crates/erk/examples/hello.rs` (`cargo run -p erk --example hello`) ve `examples/c/hello.c` CI'ın `rust-checks` job'ında üç işletim sisteminde; ikisi de pencere açmadan sayfayı yükleyip düğmeyi kutusundan bulup tıklıyor, olayı alıp sayfayı değiştiriyor, değişmezse sıfırdan farklı çıkış koduyla bitiyor. C örneği Linux'ta AddressSanitizer'la (M3.5'te bir sızıntıyı bu yakaladı). `hello.rs --window` aynı sayfayı pencerede açıyor (elle) |
+| Yanlış iş parçacığından çağrı ve eski `NodeId` hata kodu döndürüyor | Rust'ta yanlış iş parçacığından çağrı derlenmiyor (`App` `Send` değil, derlenmemesi gereken doctest); C-ABI'de `WRONG_THREAD`, belge değişmeden (`erk-ffi` testi). Eski id: başka uygulamanın, yok edilmiş uygulamanın ve değişen belgenin id'leri her iki API'de `StaleNode`/`ERK_ERR_STALE_NODE` |
+| Her muhafız kasıtlı bir ihlalle denenmiş | M3.0: `list.rs` düz veri (9 ihlal); M3.1: kabuğun motoru kullanmaması (3); M3.3: kabuk yalnızca `erk`'e, `erk` yalnızca `erk-renderer`'a bağımlı (3), `render_html` ailesi ve `impl`'ler (2); M3.5: `check-ffi.sh` (7, eşdeğer yazımlar dahil), lint istisna listesi `erk-style erk-ffi`. Ayrıntılar adımların notlarında |
+
+Kapanış notları:
+
+- **Yaşayan mutasyon (M3.2):** atlanacak karenin çizilmesi pencerede kısa bir görüntüsüz kare olarak görünürdü; pencereli otomatik test yok, bu yüzden hâlâ testle yakalanmıyor. Pencere testleri ekran sunucusu ve GPU olmadan anlamlı değil; M7'nin (geliştirici araçları) ya da M9'un (kompozitör) konusu olarak bırakıldı.
+- **README** yeni API'yle: Rust ve C örnekleri, "Erk erken aşamada" notu ve sınırlamalar listesi (düğüm oluşturma M4, form denetimleri M5). ARCHITECTURE.md M3.3'te güncellenmişti.
+- **Sözleşme ABI v0.2**: M3'te değişen her şey gerekçesiyle p1-contract'ta (§1.1, §4, §5, §6, §8.1, §10).
+- Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi.

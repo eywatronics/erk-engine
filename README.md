@@ -18,8 +18,10 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 
 *Rendered by Erk, not a browser: `cargo run -p erk-renderer --example png`.*
 
-> **Erk is early.** It renders static pages to a window or a PNG. It cannot
-> yet be embedded through an API, and does not yet react to input. See
+> **Erk is early.** It renders pages to a window or a PNG, reacts to input
+> (pointer, wheel, keyboard focus), and can be embedded from Rust or C: load
+> a page, find nodes, change their text, subscribe to events. It cannot yet
+> create or remove nodes (M4) or show form controls (M5). See
 > [current limitations](#current-limitations).
 
 ## Why Erk?
@@ -76,7 +78,7 @@ host application (Rust; C, Python, Go planned)   logic, state, files
         │   ▲
         │   │  node ids, batched mutations, events
         ▼   │
-erk (Rust API) ── erk-ffi (C ABI, erk.h)          planned: M3
+erk (Rust API) ── erk-ffi (C ABI, erk.h)
         │
 engine core: erk-dom · erk-style · erk-renderer   no I/O, no clock
         │
@@ -90,44 +92,53 @@ and the embedding contract, [p1-contract.md](docs/design/p1-contract.md)
 
 ## Example
 
-What works today: render a page to a PNG
-([`crates/erk-renderer/examples/png.rs`](crates/erk-renderer/examples/png.rs)).
+A host loads a page, finds a node, subscribes to clicks on it and changes
+the page from the callback
+([`crates/erk/examples/hello.rs`](crates/erk/examples/hello.rs)):
 
 ```rust
-use erk_renderer::render_html;
+use erk::{App, Config, EventKind};
 
-const PAGE: &str = r#"<!DOCTYPE html>
-<style>
-  body { margin: 24px; font-family: "Noto Sans"; color: #1f2933 }
-  .tag { background: #bfdbfe; padding: 2px 8px }
-  .button { display: inline-block; background: #1d4ed8; color: #fff; padding: 6px 14px }
-</style>
-<p>Erk paints <span class="tag">HTML and CSS</span> without a browser.</p>
-<p>Inline blocks sit on the baseline: <span class="button">Save</span></p>"#;
-
-fn main() {
-    let frame = render_html(PAGE, 480, 140);
-    let png = frame.to_png().expect("the frame has pixels");
-    std::fs::write("erk.png", png).expect("erk.png can be written");
-}
+let mut app = App::new(Config { title: "Hello".to_owned(), ..Config::default() })?;
+app.load_html(r#"<button id="b">Click</button><p id="label">Not yet.</p>"#);
+let button = app.query(None, "#b")?.expect("the page has a button");
+let label = app.query(None, "#label")?.expect("the page has a label");
+app.on(button, EventKind::Click, move |cx, _event| {
+    cx.set_text(label, "Clicked.").unwrap();
+})?;
+app.run()?;
 ```
 
-Or open a file in a window:
+The same from C, through `include/erk.h`
+([`examples/c/hello.c`](examples/c/hello.c)):
+
+```c
+ErkApp *app;
+erk_app_create(&config, &app);
+erk_load_html(app, page);
+erk_query(app, ERK_NODE_NONE, selector, &button);
+erk_on(app, button, ERK_EVENT_CLICK, on_click, user_data, on_destroy, &subscription);
+erk_app_run(app);
+erk_app_destroy(app);
+```
+
+Both examples also run without a window (`App::headless`,
+`ERK_APP_HEADLESS`), clicking the button themselves; CI runs them on
+Linux, Windows and macOS.
 
 ```sh
-cargo run -p erk-shell -- examples/merhaba.html
+cargo run -p erk --example hello              # without a window
+cargo run -p erk --example hello -- --window  # in a window
+cargo run -p erk-shell -- examples/m2-demo.html
 ```
-
-The embedding API arrives in M3. Its shape is set by the
-[contract](docs/design/p1-contract.md): the host loads a document, finds
-nodes, subscribes to events and sends batched mutations. A counter, the
-first interactive demo, is the acceptance test of M2.
 
 ## Current limitations
 
 Today Erk does **not**:
 
-- offer an embedding API or C ABI (M3), or handle input and events (M2, M4);
+- create, move or remove nodes, or change attributes, from the host (M4);
+- show form controls (`input`, `textarea`, `select`), or style `button` as
+  a native control (M5);
 - decode images other than PNG and JPEG, or load stylesheets and fonts
   from the host (later);
 - draw dotted, dashed or double borders (drawn solid), or inset shadows;

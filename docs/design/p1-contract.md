@@ -46,10 +46,10 @@ Sonuçları:
 - Layout'un maliyeti UI iş parçacığındadır; host'un olay işleyicileriyle aynı
   iş parçacığı. Artımlı stil ve layout (M5) bu yüzden önemli; M2'ye kadar
   tam yeniden hesaplama bilerek kabul edilir.
-- `erk-renderer`'ın bugünkü `spawn()`/`ToRenderer::Load` yolu M0'ın demo
-  yoludur. M3'te ayrıştırma, stil ve layout `erk` tarafına geçer, iş parçacığı
-  raster'a iner. `check-renderer-surface.sh` o PR'da yeni sınıra göre yeniden
-  yazılır.
+- M0'ın `spawn()`/`ToRenderer::Load` yolu M3'te kalktı: belge, stil ve
+  layout `erk-renderer`'ın motorunda (`Engine`) çağıranın iş parçacığında,
+  iş parçacığı yalnızca raster'ın (`RasterThread`); `check-renderer-surface.sh`
+  bu sınırı denetliyor (M3.1, M3.3).
 
 ### 1.2 Süreç içi, tek belge, tek pencere
 
