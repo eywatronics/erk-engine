@@ -200,7 +200,7 @@ pub struct FrameTimings {
     pub raster_ns: u64,
 }
 
-type ResourceProvider = Box<dyn FnMut(&ResourceRequest, Responder)>;
+type ResourceProvider = Box<dyn FnMut(&mut Context, &ResourceRequest, Responder)>;
 type Log = Box<dyn FnMut(LogLevel, &str)>;
 
 /// Where an app's frames go.
@@ -311,12 +311,12 @@ impl App {
     }
 
     /// Answer the document's resource requests (p1-contract §6): `provide`
-    /// is called on the UI thread, between frames, once per URL. Without a
-    /// provider no resource loads. Font faces come from the system's fonts
-    /// and never reach it.
+    /// is called on the UI thread, between frames, once per URL, and may use
+    /// the document as any callback may. Without a provider no resource
+    /// loads. Font faces come from the system's fonts and never reach it.
     pub fn set_resource_provider(
         &mut self,
-        provide: impl FnMut(&ResourceRequest, Responder) + 'static,
+        provide: impl FnMut(&mut Context, &ResourceRequest, Responder) + 'static,
     ) {
         self.resources = Some(Box::new(provide));
     }
@@ -452,7 +452,7 @@ impl App {
                 None => responder.missing(),
             },
             (ResourceKind::Font, None, _) | (_, _, None) => responder.missing(),
-            (_, _, Some(provide)) => provide(request, responder),
+            (_, _, Some(provide)) => provide(&mut self.cx, request, responder),
         }
     }
 

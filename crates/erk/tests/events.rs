@@ -359,7 +359,7 @@ fn a_resource_answered_at_once_is_in_the_same_tick() {
     .unwrap();
     let asked = Rc::new(RefCell::new(Vec::new()));
     let seen = asked.clone();
-    app.set_resource_provider(move |request, responder| {
+    app.set_resource_provider(move |_, request, responder| {
         seen.borrow_mut().push((request.url.clone(), request.kind));
         responder.respond("image/png", red_png());
     });
@@ -384,7 +384,7 @@ fn a_resource_answered_from_another_thread_shows_on_a_later_tick() {
     .unwrap();
     let waiting = Rc::new(RefCell::new(Vec::new()));
     let queue = waiting.clone();
-    app.set_resource_provider(move |_, responder| queue.borrow_mut().push(responder));
+    app.set_resource_provider(move |_, _, responder| queue.borrow_mut().push(responder));
     app.load_html(IMAGE);
     app.tick(0);
     assert_eq!(pixel(&app, 10, 10), [0x12, 0x34, 0x56]);
@@ -414,7 +414,7 @@ fn a_response_of_the_wrong_kind_is_refused_and_logged() {
         ..Config::default()
     })
     .unwrap();
-    app.set_resource_provider(|_, responder| {
+    app.set_resource_provider(|_, _, responder| {
         responder.respond("text/css", b"body { color: red }".to_vec());
     });
     let logged = Rc::new(RefCell::new(Vec::new()));
@@ -439,7 +439,7 @@ fn a_quieter_log_level_hides_warnings() {
         ..Config::default()
     })
     .unwrap();
-    app.set_resource_provider(|_, responder| responder.respond("text/css", Vec::new()));
+    app.set_resource_provider(|_, _, responder| responder.respond("text/css", Vec::new()));
     let logged = Rc::new(Cell::new(0));
     let log = logged.clone();
     app.set_log(move |_, _| log.set(log.get() + 1));

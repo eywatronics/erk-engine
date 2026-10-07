@@ -62,6 +62,32 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked --verbose
 
+      # The C ABI from C (M3.5, p1-contract §11): hello.c opens a page
+      # without a window, clicks a button and gets the event, and checks
+      # that strings are copied, buffers filled whole or not at all and
+      # destroy called once. On Linux under AddressSanitizer, which also
+      # reports leaks at exit.
+      - name: The C example builds and runs (Linux, AddressSanitizer)
+        if: runner.os == 'Linux'
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer \
+            -Iinclude examples/c/hello.c -Ltarget/debug -lerk_ffi \
+            -Wl,-rpath,"$PWD/target/debug" -o target/debug/hello
+          ./target/debug/hello
+      - name: The C example builds and runs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -Iinclude examples/c/hello.c \
+            -Ltarget/debug -lerk_ffi -Wl,-rpath,"$PWD/target/debug" -o target/debug/hello
+          ./target/debug/hello
+      - name: The C example builds and runs (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -Iinclude examples/c/hello.c \
+            target/debug/erk_ffi.dll.lib -o target/debug/hello.exe
+          ./target/debug/hello.exe
+
   # Architecture guards. Each one arrives in the same pull request as the thing
   # it protects; see docs/design/p0-verification.md for the schedule and the
   # deliberate violation each was tested with.
@@ -107,7 +133,7 @@ jobs:
       # inside the unsafe fns they are allowed.
       - name: Every crate inherits the workspace lints
         run: |
-          exceptions="erk-style"
+          exceptions="erk-style erk-ffi"
           fail=0
           for f in crates/*/Cargo.toml; do
             crate=$(basename "$(dirname "$f")")
@@ -125,6 +151,13 @@ jobs:
 
       - name: erk-style's unsafe code is exactly the five TElement signatures
         run: bash .github/scripts/check-style-unsafe-surface.sh
+
+      # erk-ffi, the other unsafe exception: every exported function goes
+      # through the guard (thread, poison, reentrancy, catch_unwind), and
+      # every allow of unsafe code gives its reason. erk.h is checked by a
+      # test that generates it.
+      - name: The C ABI goes through its guard
+        run: bash .github/scripts/check-ffi.sh
 
       # The cargo tree checks resolve every target and every feature, so a
       # dependency declared only for Windows or behind an optional feature

@@ -128,6 +128,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | `render_html` hiçbir girdide paniklemez | Gömülü motor host'unun verdiği her belgeyi çizer; bozuk bir sayfa uygulamayı düşürmemeli | `tests/robustness.rs` (sabit tohumlu üreteç, `tests/robustness/` korpusu, 5000 düzey iç içelik); CI `fuzz` job'ları: sabit nightly ile cargo-fuzz, beşer dakika, paralel: `fuzz (none)` sanitizer'sız (saniyede ~67 girdi, panikler) ve `fuzz (address)` AddressSanitizer'la (~9, sızıntı ve bellek hataları); çöken girdi artifact olarak saklanır ve korpusa girer (kasıtlı bir panikle doğrulandı) | M1.3, M1 |
 | İkili boyutu bütçenin altında | Gömülü bir motorun boyutu ürünün boyutu; bütçe ölçümden konur, gerekçesiz yükselmez | CI `size` job'ı (`check-size-budget.sh`): Linux yayın ikilisi `.github/size-budget.txt`'teki tavanın altında; yükseltme `# raised:` gerekçesi ister | M1.0 |
 | CSS matrisindeki her "Supported" satırın testi var | `css-support.md` host geliştiricisine verilen söz; testsiz bir "Supported" söz değildir | CI `guards` (`check-css-support.sh`): her Supported satır var olan bir testi adlandırır | M1.0 |
+| C-ABI korumadan geçer, `erk.h` güncel | Panik C'ye geçerse tanımsız davranış; UI iş parçacığı dışından gelen çağrı belgeyi bozar; elle değişen başlık ABI'den sapar | `check-ffi.sh`: `erk-ffi`'nin dışa açılan her işlevi `guard`/`guard_free`/`subscribe`'dan geçer, her `unsafe` izni `// SAFETY:` gerekçeli. `erk-ffi`'nin testi `include/erk.h`'yi cbindgen ile üretip karşılaştırır; C örneği (`examples/c/hello.c`) üç işletim sisteminde, Linux'ta AddressSanitizer'la derlenip çalışır | M3.5 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
 ## Kural takvimi
@@ -138,18 +139,17 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | Taş | Gelen kural |
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
-| M3 | `unsafe` istisnası: `erk-ffi` (C-ABI); üretilen `erk.h` depodakiyle aynı; C örneği CI'da derlenip çalışır |
-| M3 | FFI'dan panik sızmaz; eski `NodeId` ve yanlış iş parçacığı hata kodu döner |
 | M4 | `Mutation` dizileri fuzz'lanır |
 | M5 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı; artımlı her yol tam yeniden hesapla aynı display list'i verir (fuzz) |
 | M6 | Çekirdek crate'ler, `erk` ve `erk-ffi` hiçbir JS motoruna bağımlı değil; `erk-script` projeden yalnızca `erk`'e bağımlı (`cargo tree`) |
 
 ## unsafe ve C/C++ politikası
 
-- `unsafe` yalnızca adıyla listelenmiş crate'lerde bulunur. Bugün liste tek
-  kalem: **`erk-style`**, FFI değil ama Stylo'nun trait imzası yüzünden; M3'te
-  **`erk-ffi`** eklenir (C-ABI ham işaretçi ister; `#[unsafe(no_mangle)]`). Beş
-  `unsafe fn` imzası, gövdeleri güvenli. İstisna crate'i workspace lint'ini
+- `unsafe` yalnızca adıyla listelenmiş crate'lerde bulunur. Bugün liste iki
+  kalem: **`erk-style`**, FFI değil ama Stylo'nun trait imzası yüzünden (beş
+  `unsafe fn` imzası, gövdeleri güvenli); ve **`erk-ffi`** (M3.5), çünkü C-ABI
+  C'nin verdiği ham işaretçileri okur ve `#[unsafe(no_mangle)]` ile dışa
+  açar. İstisna crate'i workspace lint'ini
   devralmaz, kendi `[lints]` tablosunda `unsafe_code = "deny"` ve
   `unsafe_op_in_unsafe_fn = "forbid"` yazar ve izni öğe bazında
   `#[allow(unsafe_code)]` ile, gerekçe yorumuyla verir.

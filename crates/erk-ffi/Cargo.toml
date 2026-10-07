@@ -1,0 +1,36 @@
+[package]
+name = "erk-ffi"
+description = "Erk Engine's C ABI: the erk crate's API as erk.h and a shared library."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+# erk_ffi, not erk: the workspace has an `erk` crate and an `erk` binary,
+# whose outputs (erk.pdb on Windows) a library of the same name would
+# overwrite. Packaging names the shipped library erk (M8).
+name = "erk_ffi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+erk = { path = "../erk" }
+
+[dev-dependencies]
+# Generates erk.h in a test that compares it with the committed copy; a
+# build tool, never part of what ships.
+cbindgen = { version = "0.29", default-features = false }
+
+# The second crate that does not inherit the workspace lints: a C ABI
+# dereferences the raw pointers C hands it and exports unmangled symbols,
+# both unsafe code. `deny` with an allow on each item that needs it, each
+# with its reason; unsafe operations must sit in explicit blocks even in
+# unsafe fns. CI checks every exported function goes through the guard.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

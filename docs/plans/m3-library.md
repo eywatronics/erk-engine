@@ -67,8 +67,8 @@ aracı olarak; çalışma anı bağımlılığı değil, indirme izni o adımda 
 
 - ~~UI iş parçacığının yığını~~ ve ~~display list'in sınırdan geçişi~~:
   M3.1'de ölçüldü ve karara bağlandı (yürütme notları).
-- **Windows'ta C örneğinin derleyicisi** (MSVC `cl` ya da `clang`): CI'da
-  hangisinin kurulumsuz çalıştığı M3.4'te denenir.
+- ~~Windows'ta C örneğinin derleyicisi~~: M3.5'te karara bağlandı (yürütme
+  notları).
 
 ## Genel kısıtlar
 
@@ -196,21 +196,21 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 
 ### M3.5: C-ABI (`erk-ffi`)
 
-- [ ] `erk-ffi` (`cdylib` ve `staticlib`): M3.1–M3.4'ün API'si sözleşmenin
+- [x] `erk-ffi` (`cdylib` ve `staticlib`): M3.1–M3.4'ün API'si sözleşmenin
   imzalarıyla; `ErkStr` girdisi çağrı dönmeden kopyalanır, küçük çıktılar
   çağıranın tamponuna (`BUFFER_TOO_SMALL`, yarım yazma yok), büyükler
   `ErkString` ve `erk_string_free`. `erk_abi_version` 0.2.
-- [ ] Her `extern "C"` gövdesi ortak bir koruma sarmalayıcısından geçer:
+- [x] Her `extern "C"` gövdesi ortak bir koruma sarmalayıcısından geçer:
   iş parçacığı denetimi (`WRONG_THREAD`), yeniden girme (`REENTRANT`),
   `catch_unwind` (`PANIC`, ardından `POISONED`, yalnızca `erk_app_destroy`
   çalışır).
-- [ ] `struct_size`: kısa bir yapıyla çağrı eksik alanları varsayılan sayar
+- [x] `struct_size`: kısa bir yapıyla çağrı eksik alanları varsayılan sayar
   (test).
-- [ ] `erk.h` cbindgen ile üretilir, depoda durur.
-- [ ] `examples/c/hello.c`: ekransız uygulama, sayfa yükler, düğümü sorgular,
+- [x] `erk.h` cbindgen ile üretilir, depoda durur.
+- [x] `examples/c/hello.c`: ekransız uygulama, sayfa yükler, düğümü sorgular,
   tıka abone olur, sentetik tık gönderir, olayı alır. CI'da üç işletim
   sisteminde derlenip çalışır; Linux'ta AddressSanitizer ile.
-- [ ] **Muhafızlar** (proje kuralları, M3 takvimi):
+- [x] **Muhafızlar** (proje kuralları, M3 takvimi):
   - `unsafe` yalnızca `erk-style` ve `erk-ffi`'de: istisna listesi iki
     crate; `erk-ffi` workspace lint'ini devralmaz, `unsafe_code = "deny"` ve
     `unsafe_op_in_unsafe_fn = "forbid"` yazar, izni öğe bazında gerekçeyle.
@@ -220,7 +220,7 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
   - C örneği CI'da derlenip çalışır.
   - Her biri kasıtlı bir ihlalle ve eşdeğer ihlallerle denenir (sarmalayıcısız
     bir `extern "C"`, başka bir dosyada `unsafe`, elle düzenlenmiş `erk.h`).
-- [ ] Testler (p1-contract §11): başka iş parçacığından çağrı
+- [x] Testler (p1-contract §11): başka iş parçacığından çağrı
   `WRONG_THREAD` döner ve hiçbir şey yapmaz; `erk_app_post` çalışır; girdi
   dizesi çağrıdan hemen sonra ezilir, belge etkilenmez; `destroy` sayaçlı
   test C'den de.
@@ -318,3 +318,20 @@ crates/erk-shell/                   ince host: argümanlar, dosya sağlayıcıs�
 | Sayaç testi | Düğmelerin yeri artık kutu sorgusundan (M3.3'ün sabit koordinatları kalktı) |
 | Mutasyonlar | Kenarların sırası, kaydırmanın yok sayılması, ebeveynin hep boş dönmesi, stil işaretinin kaybı, eski düğüme vurgunun kabulü, kare sayacının ilerlememesi, özelliklerin sırasının bozulması, kutu sorgusunda genişliğin kenarlıksız alınması: hepsi yakalandı. **Yaşayan ve kaldırılan:** kutuları yalnızca elemanlarla sınırlayan denetim; metin düğümleri (esnek kapta anonim öğe olanlar dahil, testi eklendi) layout'ta hiç kendi kimlikleriyle kutu almıyor, denetim ölü koddu |
 | Skorlar | Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M3.5
+
+| Konu | Not |
+|---|---|
+| İnceleme raporu | `m3_rewind_architecture_review.md`: M3.0–M3.4'ün özeti, yapılacak madde yok. İki not: FFI hazırlığı (bu adım) ve `ROUNDS = 4`/`PAINT_PATIENCE = 60 s`'in yeterli bulunması; ikisi de değişiklik istemiyor |
+| `erk-ffi` | `cdylib`, `staticlib` ve testler için `rlib`; kütüphanenin adı `erk_ffi` (aynı adlı `erk` crate'i ve `erk` ikilisi Windows'ta `.pdb`'yi ezerdi; dağıtımda `erk` adı M8'in). 31 dışa açık işlev, `ERK_ABI_VERSION` 0.2. Sözleşmenin v0.1 taslağından farklar p1-contract §10'da |
+| Koruma | `guard`: boş işaretçi, iş parçacığı (`WRONG_THREAD`, hiçbir şey yapmadan), zehir (`POISONED`), döngü çağrılarında yeniden girme (`REENTRANT`), `catch_unwind` (`PANIC` ve zehirlenme). `guard_free` uygulamasız çağrılar için. Uygulama bir `UnsafeCell`'de; callback çalışırken çağrılar callback'in aldığı `Context`'e gidiyor (`current`), böylece C'den callback içinde yapılan sorgu ve değişiklikler belgenin dışarıda tutulan `&mut`'ıyla çakışmıyor. Her iş parçacığından çağrılabilen iki işlev (`erk_app_post`, `erk_resource_complete`) yalnızca `AppHandle`'a ve bekleyen yanıt tablosuna (`Mutex`) dokunuyor |
+| Rust API'sinde değişiklik | Kaynak sağlayıcısı artık `&mut Context` de alıyor: C'nin `ErkResourceFn`'i uygulama işaretçisini alıyor ve sözleşme callback içinde sorgu ve değişikliğe izin veriyor; Rust host'u da aynısını yapabilmeli |
+| `destroy` | Başarısız bir `erk_on` (eski düğüm, bilinmeyen tür) `user_data`'yı almıyor, `destroy`'u çağırmıyor: C API'lerinin alışılmış kuralı, sözleşmeye yazıldı. Düğüm denetimi abonelik kurulmadan önce yapılıyor |
+| `erk.h` | `crates/erk-ffi/tests/header.rs` cbindgen'i (dev-dependency, MPL-2.0, `deny.toml`'da gerekçesiyle) çalıştırıp `include/erk.h`'yle karşılaştırıyor; `ERK_BLESS=1` yazıyor. `usize` `size_t` olarak çıkıyor (sözleşme) |
+| C örneği | `examples/c/hello.c`: ekransız uygulama, gömülü font; sayfayı yükleyip girdi dizesini hemen eziyor (belge etkilenmiyor), küçük tamponda `BUFFER_TOO_SMALL` ve tamponun değişmediği, düğmenin kutusundan tık, callback içinde değişiklik ve `erk_app_tick`'in `REENTRANT` dönmesi, kare, yeni belgeyle eski id'nin eskimesi ve aboneliğin `destroy`'unun bir kez çalışması. Yerelde MSVC (`/W4 /WX /utf-8`) ile derlenip "ok". **Windows derleyicisi kararı:** CI'da `clang` (GitHub'ın Windows imajında kurulu, `vcvars` istemiyor); Linux'ta `gcc` AddressSanitizer'la, macOS'ta `clang` |
+| Testler (p1-contract §11) | `src/tests.rs`, işlevleri C gibi çağırarak: başka iş parçacığından beş çağrı `WRONG_THREAD` ve belge değişmiyor; başka iş parçacığından `post` UI iş parçacığında, `tick`'ten önce değil, `destroy` bir kez; uygulamalar arası ve yok edilmiş uygulamanın id'si `STALE_NODE`, 0 `INVALID_ARGUMENT`; enjekte edilen panik `PANIC`, ardından `POISONED`, `destroy` çalışıyor; geçersiz UTF-8 ve boş işaretçili uzunluk `INVALID_ARGUMENT`; kısa `ErkConfig`'in alanları okunmuyor, kısa `ErkBox`'ın alanları yazılmıyor; `destroy` `erk_off`'ta, düğüm silinince, uygulama yok edilince bir kez, başarısız `erk_on`'da hiç; kaynak başka iş parçacığından yanıtlanıyor, ikinci yanıt `NOT_FOUND` |
+| Muhafızlar | Lint istisna listesi `erk-style erk-ffi`. `check-ffi.sh`: dışa açılan her işlev korumadan geçer (`erk_abi_version` sabit döndürdüğü için hariç), `subscribe`'ın kendisi de; her `unsafe` izni `// SAFETY:` gerekçeli (aynı satırda ya da hemen üstteki yorum bloğunda). Kasıtlı ihlaller: korumasız bir işlev, gerekçesiz bir izin, korumasız `subscribe`, gerekçesi bir blok uzakta olan izin; eşdeğer yazımlar `allow(clippy::…, unsafe_code)`, `expect(unsafe_code)`, `#![allow(unsafe_code)]`: hepsi yakalandı. **İlk sürümün iki kusuru:** birleşik yazımı (`allow(unsafe_code, …)`) görmüyordu, ve erken çıkan boru hatları (`awk … exit`, `grep -q`) Git Bash'te SIGPIPE'ta ara sıra kilitleniyordu; denetimler dosyayı tek geçişte okuyan awk'lara çevrildi |
+| clippy | Dışa açılan işlevlerin ham işaretçi okuması (`not_unsafe_ptr_arg_deref`) crate düzeyinde gerekçesiyle izinli: çağıran C, sözleşme başlığın; `cx()`/`app()`'in `&self`'ten `&mut` vermesi (`mut_from_ref`) `UnsafeCell` ve korumanın tek iş parçacığı garantisiyle gerekçeli |
+| **CI'ın bulduğu sızıntı (M3.1'in hatası)** | Linux'ta AddressSanitizer'lı C örneği, Stylo'nun (`erk_style`) bir iş parçacığında ayırdığı 4 × 6800 baytın serbest bırakılmadığını buldu. Stylo bloom filtresini ve stil paylaşım önbelleğini iş parçacığına özel depoda bilerek sızdırıyor (`Box::leak`, ömrü süreç kadar olan çalışan iş parçacıkları için). M3.1'in her kare için açtığı kapsamlı iş parçacığı bu yüzden kare başına ~13 KB bırakıyordu: saniyede 60 karede saatte ~3 GB. Ekransız testler ve fuzz (`render_html` iş parçacığı açmıyor) görmüyordu. **Düzeltme:** süreçte tek, hiç durmayan bir kare iş parçacığı (16 MiB yığın); sayfa ve kaynakları kare için oraya taşınıp geri geliyor, aşama işaretleri kanalla dönüyor ve `mark` çağıranın iş parçacığında çalışıyor (`Send` gerekmiyor). Stylo'nun önbellekleri bir kez oluşup yeniden kullanılıyor; süreç sonunda iş parçacığı canlı olduğu için sızıntı sayılmıyor. Kare başına iş parçacığı açma maliyeti (0,19 ms) de gitti. Test: iki motorun bütün kareleri aynı iş parçacığında, çağıranınkinden farklı; mutasyon (her çağrıda yeni iş parçacığı) yakalandı. 1 MiB yığın testi geçiyor. p1-contract §4 güncellendi |
+| Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |

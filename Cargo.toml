@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/erk",          # the Rust API: an app, its document on the UI thread, its raster
+    "crates/erk-ffi",      # the same API as a C ABI, erk.h (a named unsafe exception)
     "crates/erk-shell",    # window, event loop, messaging with the renderer
     "crates/erk-renderer", # layout, display list, paint; the renderer thread
     "crates/erk-dom",      # arena DOM and HTML parsing

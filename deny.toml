@@ -34,6 +34,8 @@ allow = [
     "CC0-1.0",
     # Stylo and its servo crates. File-level copyleft: modified MPL files stay
     # open, the application around them does not. Erk does not patch them.
+    # Also cbindgen, which generates erk.h in a test (2026-10-07): a
+    # dev-dependency, never in what ships.
     "MPL-2.0",
     # The Noto fonts embedded in erk-renderer: free to embed and redistribute.
     "OFL-1.1",

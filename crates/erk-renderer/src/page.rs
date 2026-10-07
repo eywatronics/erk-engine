@@ -77,6 +77,12 @@ impl Page {
         *self = Self::with_document(doc);
     }
 
+    /// A page with an empty document, standing in for one that is away
+    /// being prepared on the frame thread.
+    pub(crate) fn empty() -> Self {
+        Self::with_document(Document::new())
+    }
+
     fn with_document(doc: Document) -> Self {
         Self {
             doc,

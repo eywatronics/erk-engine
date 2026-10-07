@@ -267,7 +267,7 @@ M3 de adımlara bölünür; her adım kendi PR'ı ([m3-library.md](m3-library.md
 | M3.2 | Olaylar (capture, target, bubble), callback ömrü, `post`, kaynak sağlayıcısı, log | Bitti: abonelikler DOM sırasıyla, `destroy` her yolda bir kez, panik host'a taşınıyor, kaynak hemen ya da başka iş parçacığından yanıtlanıyor |
 | M3.3 | Pencere döngüsü ve font taraması `erk`'e, kabuk `erk`'in ilk kullanıcısı, eski mesaj yolu kalkar | Bitti: kabuk projeden yalnızca `erk`'e bağımlı, pencere GPU'da; sayaç altın görüntüsü yeni yolda aynı |
 | M3.4 | Denetim sorguları, aşama süreleri | Bitti: ağaç, etiket, öznitelik, kutu, hesaplanmış stil; kutu sorgusu her referans sayfasında Chrome'la karşılaştırılan kutularla aynı; süreleri `erk` ölçüyor |
-| M3.5 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Yeni |
+| M3.5 | `erk-ffi` C-ABI, üretilen `erk.h`, panik sınırı, `unsafe` istisnası, C örneği CI'da | Bitti: 31 işlev tek korumadan geçiyor; C örneği sayfa açıp tık alıyor; sözleşmenin §11 testleri ABI'den |
 | M3.6 | Kabul: Rust ve C örnekleri CI'da, ABI v0.2 | Yeni |
 
 **Karar (plan):** M3'ün API'si motorun bugün yaptıklarıyla sınırlı; düğüm
