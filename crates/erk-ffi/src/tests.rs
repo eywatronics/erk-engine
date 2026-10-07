@@ -56,8 +56,246 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_3() {
-    assert_eq!(erk_abi_version(), 3);
+fn the_abi_version_is_0_4() {
+    assert_eq!(erk_abi_version(), 4);
+}
+
+fn change(kind: u32, node: ErkNodeId, parent: ErkNodeId, name: &str, value: &str) -> ErkMutation {
+    ErkMutation {
+        struct_size: size_of::<ErkMutation>() as u32,
+        kind,
+        node,
+        parent,
+        before: ERK_NODE_NONE,
+        name: s(name),
+        value: s(value),
+    }
+}
+
+#[test]
+fn a_batch_is_applied_from_c_and_names_what_it_made() {
+    let app = app_with(PAGE);
+    let body = query(app, "body");
+    let new = |at: u64| ERK_NEW_NODE + at;
+    let mut batch = [
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "ul"),
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "li"),
+        change(ERK_MUTATION_SET_TEXT, new(1), 0, "", "iki"),
+        change(ERK_MUTATION_APPEND, new(1), new(0), "", ""),
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "li"),
+        change(ERK_MUTATION_CREATE_TEXT, 0, 0, "", "bir"),
+        change(ERK_MUTATION_APPEND, new(5), new(4), "", ""),
+        change(ERK_MUTATION_INSERT_BEFORE, new(4), new(0), "", ""),
+        change(ERK_MUTATION_SET_ATTR, new(0), 0, "id", "liste"),
+        change(ERK_MUTATION_ADD_CLASS, new(4), 0, "", "ilk"),
+        change(ERK_MUTATION_APPEND, new(0), body, "", ""),
+    ];
+    batch[7].before = new(1);
+    let mut created = [7u64; 11];
+    let mut failed_at = 99;
+    assert_eq!(
+        erk_apply(
+            app,
+            batch.as_ptr(),
+            batch.len(),
+            created.as_mut_ptr(),
+            &mut failed_at
+        ),
+        ERK_OK
+    );
+    assert_eq!(failed_at, 99, "untouched on success");
+    let list = query(app, "#liste");
+    assert_eq!(created[0], list);
+    assert_eq!(query(app, "li.ilk"), created[4]);
+    assert_eq!(created[3], ERK_NODE_NONE);
+    assert_eq!(text_of(app, list).unwrap(), "biriki");
+
+    // query_all: all of them, or the count when they do not fit.
+    let mut found = [ERK_NODE_NONE; 2];
+    let mut len = 0;
+    assert_eq!(
+        erk_query_all(
+            app,
+            list,
+            s("li"),
+            found.as_mut_ptr(),
+            found.len(),
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!((len, found), (2, [created[4], created[1]]));
+    let mut one = [ERK_NODE_NONE; 1];
+    assert_eq!(
+        erk_query_all(app, ERK_NODE_NONE, s("li"), one.as_mut_ptr(), 1, &mut len),
+        ERK_ERR_BUFFER_TOO_SMALL
+    );
+    assert_eq!((len, one), (2, [ERK_NODE_NONE]));
+    assert_eq!(
+        erk_query_all(
+            app,
+            ERK_NODE_NONE,
+            s(".yok"),
+            std::ptr::null_mut(),
+            0,
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!(len, 0);
+
+    // The first failure stops it and says where; the ones before stay.
+    let failing = [
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "p"),
+        change(ERK_MUTATION_APPEND, new(0), body, "", ""),
+        // The body into its own paragraph.
+        change(ERK_MUTATION_APPEND, body, new(0), "", ""),
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "hr"),
+    ];
+    assert_eq!(
+        erk_apply(
+            app,
+            failing.as_ptr(),
+            failing.len(),
+            std::ptr::null_mut(),
+            &mut failed_at
+        ),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(failed_at, 2);
+    assert_eq!(
+        erk_query_all(
+            app,
+            ERK_NODE_NONE,
+            s("hr"),
+            std::ptr::null_mut(),
+            0,
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!(len, 0, "nothing after the failure ran");
+    // A kind it does not know is refused before anything runs.
+    let unknown = [
+        change(ERK_MUTATION_CREATE_ELEMENT, 0, 0, "", "hr"),
+        change(99, 0, 0, "", ""),
+    ];
+    assert_eq!(
+        erk_apply(
+            app,
+            unknown.as_ptr(),
+            2,
+            std::ptr::null_mut(),
+            &mut failed_at
+        ),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(failed_at, 1);
+    assert_eq!(
+        erk_query_all(
+            app,
+            ERK_NODE_NONE,
+            s("hr"),
+            std::ptr::null_mut(),
+            0,
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!(len, 0);
+    // A stale node is stale in a batch too.
+    let stale = [change(ERK_MUTATION_REMOVE, list, 0, "", "")];
+    assert_eq!(
+        erk_apply(
+            app,
+            stale.as_ptr(),
+            1,
+            std::ptr::null_mut(),
+            std::ptr::null_mut()
+        ),
+        ERK_OK
+    );
+    assert_eq!(
+        erk_apply(app, stale.as_ptr(), 1, std::ptr::null_mut(), &mut failed_at),
+        ERK_ERR_STALE_NODE
+    );
+    assert_eq!(failed_at, 0);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+/// The key and text of the last key event a subscription saw.
+#[derive(Default)]
+struct LastKey {
+    key: AtomicU32,
+    kind: AtomicU32,
+    typed: std::sync::Mutex<String>,
+}
+
+#[allow(unsafe_code)] // SAFETY: a C callback; dereferences the test's LastKey and Erk's event.
+unsafe extern "C" fn remember_key(user_data: *mut c_void, _: *mut ErkApp, event: *const ErkEvent) {
+    // SAFETY: the test passes a live LastKey and Erk a live event whose
+    // text it lends for the call.
+    let (last, event) = unsafe { (&*user_data.cast::<LastKey>(), &*event) };
+    // SAFETY: as above.
+    let typed = unsafe { std::slice::from_raw_parts(event.text.ptr.cast::<u8>(), event.text.len) };
+    last.key.store(event.key, Ordering::SeqCst);
+    last.kind.store(event.kind, Ordering::SeqCst);
+    *last.typed.lock().unwrap() = String::from_utf8(typed.to_vec()).unwrap();
+}
+
+#[test]
+fn a_key_event_names_its_key_and_what_it_typed() {
+    let app = app_with(PAGE);
+    let last = LastKey::default();
+    let mut subscription = 0;
+    let user_data = std::ptr::from_ref(&last).cast_mut().cast();
+    for kind in [ERK_EVENT_KEY_DOWN, ERK_EVENT_KEY_UP] {
+        assert_eq!(
+            erk_on(
+                app,
+                query(app, "body"),
+                kind,
+                Some(remember_key),
+                user_data,
+                None,
+                &mut subscription
+            ),
+            ERK_OK
+        );
+    }
+    let key = |kind, key, text| ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key,
+        text: s(text),
+        modifiers: 0,
+    };
+    let seen = || {
+        (
+            last.kind.load(Ordering::SeqCst),
+            last.key.load(Ordering::SeqCst),
+            last.typed.lock().unwrap().clone(),
+        )
+    };
+    assert_eq!(
+        erk_app_input(app, &key(ERK_INPUT_KEY_DOWN, ERK_KEY_CHARACTER, "ğ")),
+        ERK_OK
+    );
+    assert_eq!(
+        seen(),
+        (ERK_EVENT_KEY_DOWN, ERK_KEY_CHARACTER, "ğ".to_owned())
+    );
+    assert_eq!(
+        erk_app_input(app, &key(ERK_INPUT_KEY_UP, ERK_KEY_ESCAPE, "")),
+        ERK_OK
+    );
+    assert_eq!(seen(), (ERK_EVENT_KEY_UP, ERK_KEY_ESCAPE, String::new()));
+    assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 
 #[test]

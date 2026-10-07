@@ -656,7 +656,11 @@ fn tab_walks_the_focus_order_and_shift_tab_walks_it_back() {
     // With nothing focused, Shift+Tab starts from the end.
     let (mut fresh, _) = Session::open(STATES);
     let button = fresh.query("button");
-    let events = fresh.events(tab(true));
+    let events: Vec<Event> = fresh
+        .events(tab(true))
+        .into_iter()
+        .filter(|event| !is_key(event))
+        .collect();
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(
         (events[0].kind, events[0].target),
@@ -701,25 +705,62 @@ fn enter_and_space_click_the_focused_link_or_button_as_browsers_do() {
     assert_eq!(clicks(page.events(enter())), ["button"]);
     assert!(clicks(page.events(space_down())).is_empty());
     assert_eq!(clicks(page.events(space_up())), ["button"]);
-    // Other keys do nothing.
+    // Other keys do nothing but report themselves.
     let other = vec![
         key(Key::Escape, KeyState::Down, false),
         key(Key::Character("a".to_owned()), KeyState::Down, false),
         key(Key::Other, KeyState::Down, false),
     ];
-    assert!(page.events(other).is_empty());
+    assert!(page.events(other).iter().all(is_key));
+}
+
+/// Whether `event` reports a key rather than what the key did.
+fn is_key(event: &Event) -> bool {
+    matches!(event.kind, EventKind::KeyDown | EventKind::KeyUp)
 }
 
 #[test]
-fn keys_with_nothing_to_focus_do_nothing() {
+fn keys_with_nothing_to_focus_do_nothing_but_report_themselves() {
     let (mut page, _) = Session::new();
+    let body = page.select(None, "body").unwrap().unwrap();
     let keys = vec![
         key(Key::Tab, KeyState::Down, false),
         key(Key::Tab, KeyState::Down, true),
         key(Key::Enter, KeyState::Down, false),
         key(Key::Space, KeyState::Up, false),
     ];
-    assert!(page.events(keys).is_empty());
+    let events = page.events(keys);
+    assert_eq!(events.len(), 4, "{events:?}");
+    assert!(
+        events
+            .iter()
+            .all(|event| is_key(event) && event.target == body)
+    );
+}
+
+#[test]
+fn a_key_event_comes_before_what_the_key_does_and_names_its_key() {
+    let (mut page, _) = Session::open(STATES);
+    let first = page.query("first");
+    let events = page.events(vec![key(Key::Tab, KeyState::Down, false)]);
+    let kinds: Vec<EventKind> = events.iter().map(|event| event.kind).collect();
+    assert_eq!(kinds, [EventKind::KeyDown, EventKind::Focus]);
+    assert_eq!(events[0].key, Some(Key::Tab));
+    // The next key goes to the focused element.
+    let typed = page.events(vec![key(
+        Key::Character("ş".to_owned()),
+        KeyState::Up,
+        false,
+    )]);
+    assert_eq!(typed.len(), 1);
+    assert_eq!(
+        (typed[0].kind, typed[0].target, typed[0].key.clone()),
+        (
+            EventKind::KeyUp,
+            first,
+            Some(Key::Character("ş".to_owned()))
+        )
+    );
 }
 
 /// The pixels of `frame` outside `x`, `y`, `width` × `height` (the boxes a

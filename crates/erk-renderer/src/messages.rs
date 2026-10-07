@@ -157,12 +157,18 @@ pub struct Event {
     pub x: f32,
     pub y: f32,
     pub modifiers: Modifiers,
+    /// The key of a key event.
+    pub key: Option<Key>,
 }
 
 /// The kinds of p1-contract §10, numbered the same.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     Click = 1,
+    /// A key went down, at the focused element or the body.
+    KeyDown = 5,
+    /// A key came up.
+    KeyUp = 6,
     /// `target` received the focus.
     Focus = 7,
     /// `target` lost the focus.

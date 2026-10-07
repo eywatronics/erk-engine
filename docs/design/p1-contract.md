@@ -1,7 +1,7 @@
 # Erk Engine — P1: Gömme sözleşmesi (M0.5)
 
 - **Tarih:** 2026-09-30
-- **Durum:** ABI v0.3 (M4.0), v0.2 M3.5'te koda indi (`crates/erk-ffi`,
+- **Durum:** ABI v0.4 (M4.1), v0.2 M3.5'te koda indi (`crates/erk-ffi`,
   `include/erk.h`, §10). Değişiklik önce bu belgede, gerekçesiyle yapılır;
   M4–M5 boyunca öğrenilenlerle v0.3 diye ilerler; 1.0'a (M8) kadar kırıcı
   değişiklik hakkı saklıdır.
@@ -388,6 +388,19 @@ gerekçeli bir daraltma:
   adı `ERK_ERR_INVALID_ARGUMENT`. Oluşturulan düğüm belgeye bağlı değildir:
   çizilmez, sorguda bulunmaz, kutusu yoktur; aboneliği eklenince çalışır.
   `erk_text_create` adının yerine taslaktaki gibi kaldı.
+- **v0.4 (M4.1):** toplu değişiklik `erk_apply(app, mutations, count,
+  created, failed_at)`: `ErkMutation` (`struct_size` dizinin adımı da;
+  `ERK_MUTATION_*`), bir değişiklik aynı topluluğun önceki bir
+  değişikliğinin oluşturduğu düğümü `ERK_NEW_NODE + i` ile adlandırır
+  (gerçek bir düğüm id'sinin üst yarısı nesildir, 0 olmaz). İlk başarısız
+  değişiklik topluluğu durdurur, sırası `*failed_at`'a yazılır, öncekiler
+  uygulanmış kalır: işlem (transaction) M5'in günlüğüyle. Bilinmeyen bir tür
+  hiçbir şey uygulanmadan reddedilir. `erk_query_all` (hepsi ya da hiçbiri,
+  `*len` her zaman sayı). Tuş olayları: `erk_on` artık `ERK_EVENT_KEY_DOWN`
+  ve `ERK_EVENT_KEY_UP` kabul ediyor (odaktaki elemana, yoksa gövdeye;
+  kabarcıklanır); `ErkEvent`'in sonuna `key` (`ERK_KEY_*`) eklendi, `text`
+  yazılan karakter. Girdi, değişiklik ve gönderim M5'te kalıyor.
+  `ErkEvent`'e alan eklemek kırıcı: sürüm 4.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

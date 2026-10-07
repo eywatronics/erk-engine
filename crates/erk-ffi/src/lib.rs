@@ -39,15 +39,15 @@ use std::thread::ThreadId;
 
 use erk::{
     App, AppHandle, Config, Context, Event, EventKind, Input, Key, KeyInput, KeyState, LogLevel,
-    Modifiers, Node, NodeKind, Phase, PointerButton, PointerInput, PointerKind, ResourceKind,
-    Responder, Status, Subscription,
+    Modifiers, Mutation, Node, NodeKind, Phase, PointerButton, PointerInput, PointerKind, Ref,
+    ResourceKind, Responder, Status, Subscription,
 };
 
 // ---- Versions, status codes --------------------------------------------------
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 3;
+pub const ERK_ABI_VERSION: u32 = 4;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -263,8 +263,54 @@ pub struct ErkEvent {
     pub y: f64,
     /// `ERK_MOD_*` bits.
     pub modifiers: u32,
-    /// Input events.
+    /// Key events: the character typed, for `ERK_KEY_CHARACTER`.
     pub text: ErkStr,
+    /// Key events: `ERK_KEY_*`.
+    pub key: u32,
+}
+
+// ---- Mutations ---------------------------------------------------------------
+
+pub const ERK_MUTATION_CREATE_ELEMENT: u32 = 1;
+pub const ERK_MUTATION_CREATE_TEXT: u32 = 2;
+pub const ERK_MUTATION_APPEND: u32 = 3;
+pub const ERK_MUTATION_INSERT_BEFORE: u32 = 4;
+pub const ERK_MUTATION_REMOVE: u32 = 5;
+pub const ERK_MUTATION_SET_TEXT: u32 = 6;
+pub const ERK_MUTATION_SET_ATTR: u32 = 7;
+pub const ERK_MUTATION_REMOVE_ATTR: u32 = 8;
+pub const ERK_MUTATION_ADD_CLASS: u32 = 9;
+pub const ERK_MUTATION_REMOVE_CLASS: u32 = 10;
+
+/// A node an earlier mutation of the same batch created, by its position:
+/// `ERK_NEW_NODE + i` names what mutation `i` created. No real node id is
+/// this small: a node id's upper half is its generation, never 0.
+pub const ERK_NEW_NODE: ErkNodeId = 1;
+
+/// One change of a batch for `erk_apply`. `node`, `parent` and `before` are
+/// node ids or `ERK_NEW_NODE + i`.
+///
+/// - `ERK_MUTATION_CREATE_ELEMENT`: `value` is the tag.
+/// - `ERK_MUTATION_CREATE_TEXT`: `value` is the text.
+/// - `ERK_MUTATION_APPEND`: `node` into `parent`, last.
+/// - `ERK_MUTATION_INSERT_BEFORE`: `node` into `parent` before `before`
+///   (`ERK_NODE_NONE`: last).
+/// - `ERK_MUTATION_REMOVE`: `node` and everything in it.
+/// - `ERK_MUTATION_SET_TEXT`: `node`'s text to `value`.
+/// - `ERK_MUTATION_SET_ATTR`: attribute `name` of `node` to `value`.
+/// - `ERK_MUTATION_REMOVE_ATTR`: attribute `name` of `node`.
+/// - `ERK_MUTATION_ADD_CLASS`, `ERK_MUTATION_REMOVE_CLASS`: class `value`.
+#[repr(C)]
+pub struct ErkMutation {
+    /// `sizeof(ErkMutation)`: also the stride of the array.
+    pub struct_size: u32,
+    /// `ERK_MUTATION_*`.
+    pub kind: u32,
+    pub node: ErkNodeId,
+    pub parent: ErkNodeId,
+    pub before: ErkNodeId,
+    pub name: ErkStr,
+    pub value: ErkStr,
 }
 
 // ---- Inspection --------------------------------------------------------------
@@ -1127,6 +1173,145 @@ pub extern "C" fn erk_node_has_class(
     })
 }
 
+/// Every element inside `scope` (`ERK_NODE_NONE`: the document) matching
+/// `selector`, in document order, into `out`: all of them or none.
+/// `*len` is always how many there are; `ERK_ERR_BUFFER_TOO_SMALL` when
+/// `cap` is less.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; writes at most `cap` ids into the caller's array.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_query_all(
+    app: *mut ErkApp,
+    scope: ErkNodeId,
+    selector: ErkStr,
+    out: *mut ErkNodeId,
+    cap: usize,
+    len: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let scope = (scope != ERK_NODE_NONE).then(|| node(scope)).transpose()?;
+        let found = app.cx().query_all(scope, &text(selector)?).abi()?;
+        put(len, found.len())?;
+        if cap < found.len() {
+            return Err(ERK_ERR_BUFFER_TOO_SMALL);
+        }
+        if found.is_empty() {
+            return Ok(());
+        }
+        if out.is_null() {
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        }
+        for (at, node) in found.iter().enumerate() {
+            // SAFETY: the caller gives `cap` writable ids at `out`, and `at`
+            // is below `found.len()`, at most `cap`.
+            unsafe { out.add(at).write(node.to_raw()) };
+        }
+        Ok(())
+    })
+}
+
+/// A node id or a reference to what an earlier mutation created.
+fn reference(id: ErkNodeId) -> Result<Ref, ErkStatus> {
+    // No generation in the upper half: not a node id, a batch position.
+    if id != ERK_NODE_NONE && id >> 32 == 0 {
+        let at = usize::try_from(id - ERK_NEW_NODE).map_err(|_| ERK_ERR_INVALID_ARGUMENT)?;
+        return Ok(Ref::New(at));
+    }
+    Ok(Ref::Node(node(id)?))
+}
+
+/// The mutation `raw` describes, its fields read within its struct_size.
+fn mutation(raw: *const ErkMutation) -> Result<Mutation, ErkStatus> {
+    let none = ErkStr {
+        ptr: std::ptr::null(),
+        len: 0,
+    };
+    let kind = field!(raw, ErkMutation, kind, 0);
+    let target = || reference(field!(raw, ErkMutation, node, ERK_NODE_NONE));
+    let parent = || reference(field!(raw, ErkMutation, parent, ERK_NODE_NONE));
+    let name = || text(field!(raw, ErkMutation, name, none));
+    let value = || text(field!(raw, ErkMutation, value, none));
+    Ok(match kind {
+        ERK_MUTATION_CREATE_ELEMENT => Mutation::CreateElement(value()?),
+        ERK_MUTATION_CREATE_TEXT => Mutation::CreateText(value()?),
+        ERK_MUTATION_APPEND => Mutation::Append {
+            parent: parent()?,
+            child: target()?,
+        },
+        ERK_MUTATION_INSERT_BEFORE => {
+            let before = field!(raw, ErkMutation, before, ERK_NODE_NONE);
+            Mutation::InsertBefore {
+                parent: parent()?,
+                child: target()?,
+                before: (before != ERK_NODE_NONE)
+                    .then(|| reference(before))
+                    .transpose()?,
+            }
+        }
+        ERK_MUTATION_REMOVE => Mutation::Remove(target()?),
+        ERK_MUTATION_SET_TEXT => Mutation::SetText(target()?, value()?),
+        ERK_MUTATION_SET_ATTR => Mutation::SetAttr(target()?, name()?, value()?),
+        ERK_MUTATION_REMOVE_ATTR => Mutation::RemoveAttr(target()?, name()?),
+        ERK_MUTATION_ADD_CLASS => Mutation::AddClass(target()?, value()?),
+        ERK_MUTATION_REMOVE_CLASS => Mutation::RemoveClass(target()?, value()?),
+        _ => return Err(ERK_ERR_INVALID_ARGUMENT),
+    })
+}
+
+/// Apply `count` mutations in order, in one call (p1-contract §10). The ids
+/// the batch created go to `created` (`count` entries, `ERK_NODE_NONE` for
+/// mutations that create nothing; may be NULL). The first that fails stops
+/// the batch: its position goes to `*failed_at` (may be NULL) and its
+/// status is returned; the ones before it stay applied.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; reads `count` mutations and writes `count` ids.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_apply(
+    app: *mut ErkApp,
+    mutations: *const ErkMutation,
+    count: usize,
+    created: *mut ErkNodeId,
+    failed_at: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        if count == 0 {
+            return Ok(());
+        }
+        if mutations.is_null() {
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        }
+        // SAFETY: every element starts with its struct_size, the array's
+        // stride.
+        let stride = unsafe { (*mutations).struct_size } as usize;
+        if stride < offset_of!(ErkMutation, node) {
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        }
+        let report = |at: usize, status: ErkStatus| -> ErkStatus {
+            if !failed_at.is_null() {
+                // SAFETY: the caller gives a writable size_t when not NULL.
+                unsafe { failed_at.write(at) };
+            }
+            status
+        };
+        let mut batch = Vec::with_capacity(count);
+        for at in 0..count {
+            // SAFETY: the caller gives `count` mutations `stride` bytes
+            // apart.
+            let raw = unsafe { mutations.cast::<u8>().add(at * stride) }.cast::<ErkMutation>();
+            batch.push(mutation(raw).map_err(|status| report(at, status))?);
+        }
+        let made = match app.cx().apply(&batch) {
+            Ok(made) => made,
+            Err(failed) => return Err(report(failed.index, status(failed.status))),
+        };
+        if !created.is_null() {
+            for (at, node) in made.into_iter().enumerate() {
+                // SAFETY: the caller gives `count` writable ids at `created`.
+                unsafe { created.add(at).write(raw(node)) };
+            }
+        }
+        Ok(())
+    })
+}
+
 /// The `ERK_MOD_*` bits of `modifiers`.
 fn modifier_bits(modifiers: Modifiers) -> u32 {
     [
@@ -1143,9 +1328,11 @@ fn modifier_bits(modifiers: Modifiers) -> u32 {
 fn kind_of(kind: u32) -> Result<EventKind, ErkStatus> {
     match kind {
         ERK_EVENT_CLICK => Ok(EventKind::Click),
+        ERK_EVENT_KEY_DOWN => Ok(EventKind::KeyDown),
+        ERK_EVENT_KEY_UP => Ok(EventKind::KeyUp),
         ERK_EVENT_FOCUS => Ok(EventKind::Focus),
         ERK_EVENT_BLUR => Ok(EventKind::Blur),
-        // Input, change, submit and keys come with forms (M5).
+        // Input, change and submit come with forms (M5).
         _ => Err(ERK_ERR_INVALID_ARGUMENT),
     }
 }
@@ -1198,7 +1385,18 @@ fn subscribe(
                 x: f64::from(event.x),
                 y: f64::from(event.y),
                 modifiers: modifier_bits(event.modifiers),
-                text: lent(""),
+                text: match &event.key {
+                    Some(Key::Character(typed)) => lent(typed),
+                    _ => lent(""),
+                },
+                key: match &event.key {
+                    None | Some(Key::Other) => ERK_KEY_OTHER,
+                    Some(Key::Tab) => ERK_KEY_TAB,
+                    Some(Key::Enter) => ERK_KEY_ENTER,
+                    Some(Key::Space) => ERK_KEY_SPACE,
+                    Some(Key::Escape) => ERK_KEY_ESCAPE,
+                    Some(Key::Character(_)) => ERK_KEY_CHARACTER,
+                },
             };
             #[allow(unsafe_code)] // SAFETY: the app outlives its subscriptions.
             let shared = unsafe { &*target.1 };

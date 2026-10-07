@@ -236,6 +236,17 @@ impl Engine {
             .map(|node| node.map(NodeId::to_bits))
     }
 
+    /// Every element inside `scope` (the document for `None`) matching the
+    /// CSS selector list `selector`, in document order.
+    pub fn query_all(&self, scope: Option<u64>, selector: &str) -> Result<Vec<u64>, Status> {
+        Ok(self
+            .page
+            .query_all(scope, selector)?
+            .into_iter()
+            .map(NodeId::to_bits)
+            .collect())
+    }
+
     /// Set `node`'s text as `textContent` does.
     pub fn set_text(&mut self, node: u64, text: &str) -> Result<(), Status> {
         let result = self.page.set_text(node, text);
