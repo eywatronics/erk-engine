@@ -103,7 +103,8 @@ does not lay out or paint is not supported.
 | `background-image: url()` with `background-size` (`cover`, `contain`, lengths, `auto`), `background-position`, `background-repeat`; several layers; clipped to the border box and its radii | Supported | `a_background_image_repeats_from_the_padding_box`, `background_position_and_no_repeat_place_one_copy`, `background_size_cover_fills_the_box`. The space and round keywords tile like repeat |
 | `background-origin`, `background-clip`, `background-attachment`, `object-fit`, `object-position` | Later | Origin is the padding box, clip the border box |
 | GIF, WebP, SVG images, `data:` URLs | Later | |
-| Gradients (`linear-gradient`, `radial-gradient`) | M4 | Brought forward from Later: modern buttons and cards use subtle gradients |
+| `linear-gradient`, `radial-gradient` and their `repeating-` forms as `background-image` layers: angles, side and corner directions, positioned and unpositioned stops, hard stops, transition hints, circles and ellipses with every size keyword or explicit radii and a position; sized, positioned and tiled like images | Supported | `the_gpu_paints_what_the_cpu_paints`, `stops_default_to_the_ends_never_go_back_and_spread_evenly`, `corners_point_into_their_quadrant_perpendicular_to_the_other_diagonal`, `a_repeating_radial_gradient_is_shifted_onto_the_ray_by_whole_periods`; the gradients reference page matches Chrome on 99.72% of its content pixels. Interpolated in premultiplied sRGB, as browsers do for legacy colours; `in <colorspace>` is parsed but not yet honoured. The prefixed `-webkit-`/`-moz-` forms are drawn too |
+| `conic-gradient`, gradients in `border-image`, `mask-image` or `list-style-image` | Later | A conic gradient layer is skipped |
 
 ## Effects and animation
 

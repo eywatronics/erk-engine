@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use vello_cpu::kurbo::{Affine, BezPath, Rect};
-use vello_cpu::peniko::Fill;
+use vello_cpu::peniko::{Fill, Gradient as GradientPaint};
 use vello_cpu::{ImageSource, Pixmap};
 use vello_hybrid::{RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TextureBindings};
 use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
@@ -396,6 +396,9 @@ impl Canvas for Hybrid<'_> {
             self.scene.set_paint(image_paint(source, repeat));
         }
     }
+    fn set_gradient(&mut self, gradient: GradientPaint) {
+        self.scene.set_paint(gradient);
+    }
     fn set_paint_transform(&mut self, transform: Affine) {
         self.scene.set_paint_transform(transform);
     }
@@ -482,13 +485,19 @@ mod tests {
 
     /// A page with what the display list holds: backgrounds, rounded
     /// borders of several colours, a shadow, translucency, a clip, text,
-    /// images (one repeated) and the highlight.
+    /// images (one repeated), gradients (linear, repeating, an elliptic
+    /// radial one) and the highlight.
     const PAGE: &str = r#"<body style="margin: 0; background: #f1f5f9; font-family: 'Noto Sans'; font-size: 16px">
       <div style="margin: 10px; padding: 8px; background: #fff; border: 3px solid; border-color: #2563eb #16a34a #dc2626 #f59e0b; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.3)">Merhaba, <b>dünya</b>! Çizim GPU'da.</div>
       <div style="opacity: 0.5; margin: 10px; height: 30px; background: #7c3aed"></div>
       <div style="overflow: hidden; margin: 10px; width: 120px; height: 30px"><div style="width: 300px; height: 300px; background: #0ea5e9"></div></div>
       <img src="logo.png" style="margin: 10px; width: 64px">
       <div style="margin: 10px; height: 40px; background: url(checker.png) repeat"></div>
+      <div style="display: flex; gap: 10px; margin: 10px; height: 50px">
+        <div style="flex: 1; background: linear-gradient(30deg, #7c3aed, #22d3ee 70%, #fde047)"></div>
+        <div style="flex: 1; background: repeating-linear-gradient(45deg, #334155 0 6px, #e2e8f0 6px 12px)"></div>
+        <div style="flex: 1; border-radius: 12px; background: radial-gradient(ellipse at 30% 40%, #fff, #059669 60%, #064e3b)"></div>
+      </div>
     </body>"#;
 
     /// The page through both rasterizers: CPU pixels, GPU pixels.

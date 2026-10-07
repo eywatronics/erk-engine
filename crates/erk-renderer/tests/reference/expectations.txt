@@ -8,6 +8,7 @@ blocks 100.00
 borders 94.88
 canvas-alpha 97.81
 flex-form 97.21
+gradients 99.72
 hidpi 96.19
 images 98.12
 inline-boxes 75.10
