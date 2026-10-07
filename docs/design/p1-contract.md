@@ -160,9 +160,12 @@ dışında) ve onu da `now_ns` olarak verir.
   derinliği Chrome gibi 512'de keser. O belge release'de 2–4 MiB, debug'da
   4–8 MiB yığın istiyor; Windows'ta ana iş parçacığının yığını 1 MB. Bu
   yüzden bir karenin stili, layout'u ve display list'i 16 MiB yığınlı
-  yardımcı bir iş parçacığında, UI iş parçacığı beklerken çalışır (kare
-  başına ~0,19 ms). Belge yine UI iş parçacığının: değişiklikler ve sorgular
-  orada, anında. Host'tan büyük bir yığın beklenmez: motorun her işlemi en
+  kare iş parçacığında, UI iş parçacığı beklerken çalışır; belge ve
+  kaynakları kare için oraya taşınıp geri gelir. Kare iş parçacığı süreçte
+  tektir ve hiç durmaz: Stylo iş parçacığına özel önbelleklerini bilerek
+  sızdırıyor, kare başına açılan iş parçacığı her karede ~13 KB bırakırdı
+  (M3.5). Belge yine UI iş parçacığının: değişiklikler ve sorgular orada,
+  anında. Host'tan büyük bir yığın beklenmez: motorun her işlemi en
   derin belgede 1 MiB yığınla çalışır (test).
 
 ## 5. Callback'ler

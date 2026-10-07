@@ -4,10 +4,25 @@
 //! raster's (raster.rs), which gets a [`Prepared`] frame and nothing else.
 //!
 //! The embedding layer (`erk`) keeps an engine on its UI thread. A frame's
-//! style, layout and display list run on a helper thread with a large stack
-//! while the caller waits: layout recurses once per level of nesting, and
-//! the deepest document the parser builds needs more stack than a UI
-//! thread has (1 MiB on Windows; the measurement is in the M3 plan).
+//! style, layout and display list run on the frame thread, which has a
+//! large stack, while the caller waits: layout recurses once per level of
+//! nesting, and the deepest document the parser builds needs more stack
+//! than a UI thread has (1 MiB on Windows; the measurement is in the M3
+//! plan).
+//!
+//! The frame thread is one for the whole process, started with the first
+//! frame and never stopped. Stylo keeps its bloom filter and style sharing
+//! cache in thread-local storage and leaks them on purpose, for worker
+//! threads that live as long as the process; a thread per frame left
+//! ~13 KB behind each frame (found by AddressSanitizer, M3.5). The page and
+//! its resources move to the frame thread for the frame and back: moves of
+//! a few pointers.
+
+use std::any::Any;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::sync::OnceLock;
+use std::sync::mpsc::{Sender, channel};
+use std::thread::ThreadId;
 
 use erk_dom::NodeId;
 
@@ -24,6 +39,69 @@ use crate::resources::Resources;
 /// address space, committed only as it is used.
 pub(crate) const FRAME_STACK: usize = 16 * 1024 * 1024;
 
+/// A frame to prepare on the frame thread: the page and its resources,
+/// moved there and back.
+struct FrameJob {
+    page: Page,
+    resources: Resources,
+    width: u16,
+    height: u16,
+    scale: f32,
+    reply: Sender<FrameEvent>,
+}
+
+/// What the frame thread prepared.
+type FrameOutput = (
+    Page,
+    Resources,
+    crate::list::DisplayList,
+    Vec<ResourceRequest>,
+);
+
+enum FrameEvent {
+    /// A stage ended.
+    Mark(Stage),
+    /// The frame, or the panic that ended it, and the thread it ran on.
+    Done(Box<Result<FrameOutput, Box<dyn Any + Send>>>, ThreadId),
+}
+
+/// The frame thread, started with the first frame.
+fn frame_thread() -> &'static Sender<FrameJob> {
+    static THREAD: OnceLock<Sender<FrameJob>> = OnceLock::new();
+    THREAD.get_or_init(|| {
+        let (to, jobs) = channel::<FrameJob>();
+        std::thread::Builder::new()
+            .name("erk-frame".to_owned())
+            .stack_size(FRAME_STACK)
+            .spawn(move || {
+                for job in jobs {
+                    let FrameJob {
+                        mut page,
+                        mut resources,
+                        width,
+                        height,
+                        scale,
+                        reply,
+                    } = job;
+                    let marks = reply.clone();
+                    let done = catch_unwind(AssertUnwindSafe(move || {
+                        let (list, requests) =
+                            page.prepare(width, height, scale, &mut resources, &mut |stage| {
+                                let _ = marks.send(FrameEvent::Mark(stage));
+                            });
+                        (page, resources, list, requests)
+                    }));
+                    let _ = reply.send(FrameEvent::Done(
+                        Box::new(done),
+                        std::thread::current().id(),
+                    ));
+                }
+            })
+            .expect("the frame thread starts");
+        to
+    })
+}
+
 pub struct Engine {
     page: Page,
     resources: Resources,
@@ -34,6 +112,9 @@ pub struct Engine {
     scale: f32,
     /// Whether something that shows has changed since the last frame.
     changed: bool,
+    /// The thread the last frame was prepared on, for the tests.
+    #[cfg(test)]
+    frame_thread: Option<ThreadId>,
 }
 
 impl Default for Engine {
@@ -51,6 +132,8 @@ impl Engine {
             size: None,
             scale: 1.0,
             changed: true,
+            #[cfg(test)]
+            frame_thread: None,
         }
     }
 
@@ -225,29 +308,47 @@ impl Engine {
         self.prepare_marked(&mut |_| {})
     }
 
-    /// [`Engine::prepare`], calling `mark` as each stage ends, on the
-    /// thread that runs them: the embedding layer times the stages, the
-    /// core reads no clock (p1-contract §8.1).
+    /// [`Engine::prepare`], calling `mark` on this thread as each stage
+    /// ends: the embedding layer times the stages, the core reads no clock
+    /// (p1-contract §8.1).
     pub fn prepare_marked(
         &mut self,
-        mark: &mut (dyn FnMut(Stage) + Send),
+        mark: &mut dyn FnMut(Stage),
     ) -> (Option<Prepared>, Vec<ResourceRequest>) {
         let Some((width, height)) = self.size.filter(|_| self.changed) else {
             return (None, Vec::new());
         };
-        let scale = self.scale;
-        let (page, resources) = (&mut self.page, &mut self.resources);
-        let (list, requests) = std::thread::scope(|scope| {
-            std::thread::Builder::new()
-                .name("erk-frame".to_owned())
-                .stack_size(FRAME_STACK)
-                .spawn_scoped(scope, || {
-                    page.prepare(width, height, scale, resources, mark)
-                })
-                .expect("a frame thread starts")
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-        });
+        let (reply, events) = channel();
+        let job = FrameJob {
+            page: std::mem::replace(&mut self.page, Page::empty()),
+            resources: std::mem::take(&mut self.resources),
+            width,
+            height,
+            scale: self.scale,
+            reply,
+        };
+        frame_thread()
+            .send(job)
+            .unwrap_or_else(|_| panic!("the frame thread stopped"));
+        let (list, requests) = loop {
+            match events.recv() {
+                Ok(FrameEvent::Mark(stage)) => mark(stage),
+                Ok(FrameEvent::Done(done, _thread)) => match *done {
+                    Ok((page, resources, list, requests)) => {
+                        self.page = page;
+                        self.resources = resources;
+                        #[cfg(test)]
+                        {
+                            self.frame_thread = Some(_thread);
+                        }
+                        break (list, requests);
+                    }
+                    // The page went with the panic; the empty one stays.
+                    Err(panic) => resume_unwind(panic),
+                },
+                Err(_) => panic!("the frame thread stopped"),
+            }
+        };
         let updates = self.resources.table_updates(&list);
         self.changed = false;
         let prepared = Prepared {
@@ -255,7 +356,7 @@ impl Engine {
             list,
             width,
             height,
-            scale: crate::device_scale(scale),
+            scale: crate::device_scale(self.scale),
             pending: self.resources.pending(),
         };
         (Some(prepared), requests)
@@ -310,6 +411,27 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn every_frame_of_every_engine_is_prepared_on_one_thread() {
+        // A thread per frame would leave Stylo's thread-local caches behind
+        // each time; one thread keeps them for the next frame.
+        let mut threads = Vec::new();
+        for _ in 0..2 {
+            let mut engine = Engine::new();
+            engine.load_html("<p>Erk</p>");
+            for width in [100, 120, 140] {
+                engine.resize(width, 50);
+                assert!(engine.prepare().0.is_some());
+                threads.push(engine.frame_thread.expect("a frame was prepared"));
+            }
+        }
+        assert!(
+            threads.iter().all(|thread| *thread == threads[0]),
+            "{threads:?}"
+        );
+        assert_ne!(threads[0], std::thread::current().id());
     }
 
     #[test]
