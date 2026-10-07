@@ -12,7 +12,8 @@ standartları ve Chrome (karşılaştırma: p1-embedded §4).
 Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: host
 uygulama (önce Rust, sonra C-ABI üzerinden Python, Go ve Node.js/Bun ile
 JavaScript/TypeScript) DOM'u `NodeId` ile sürer, Erk çizer ve olayları
-bildirir. **HTML içindeki `<script>` hiçbir zaman desteklenmez**: Erk'te JS
+bildirir. **Bütün dil bağlamaları C-ABI üzerinden** (`erk.h`, `erk_ffi`);
+hiçbiri `erk`'in Rust API'sine doğrudan bağlanmaz. **HTML içindeki `<script>` hiçbir zaman desteklenmez**: Erk'te JS
 motoru yoktur, olmayacaktır; JS/TS yalnızca Erk'i dışarıdan süren bir host
 dilidir (p1-embedded §3.3). Çekirdekte dosya, ağ, süreç, ortam değişkeni ve
 saat yoktur; hepsi host'tan gelir. Gerekçe: [p1-embedded.md](docs/design/p1-embedded.md).
@@ -143,7 +144,7 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
 | M5 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı; artımlı her yol tam yeniden hesapla aynı display list'i verir (fuzz) |
-| M6 | Bağlama crate'leri (Python, Go, Node.js/Bun) projeden yalnızca `erk`'e ya da `erk-ffi`'ye bağımlı (`cargo tree`) |
+| M6 | Bağlamalar (Python, Go, Node.js/Bun) yalnızca C-ABI'ye bağlanır: workspace'te `erk`'e bağımlı olan yalnızca `erk-ffi` ve kabuk (`cargo tree --invert`); bağlama paketleri yalnızca `erk.h`'yi ve paylaşımlı kütüphaneyi kullanır |
 
 ## unsafe ve C/C++ politikası
 

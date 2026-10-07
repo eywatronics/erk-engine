@@ -38,8 +38,9 @@ Modern UI frameworks often bundle an entire web browser just to draw a simple in
   same page draws the same pixels on every machine, and `<script>` in HTML
   is never run. Content cannot execute code.
 - **Your language drives the UI.** Rust and a C ABI today; Python, Go and
-  JavaScript/TypeScript (Node.js and Bun) are planned. JavaScript drives
-  Erk from outside, like any other host language. The host addresses the document by opaque node ids and sends
+  JavaScript/TypeScript (Node.js and Bun) are planned, every one of them
+  through the C ABI. JavaScript drives Erk from outside, like any other
+  host language. The host addresses the document by opaque node ids and sends
   batched changes; Erk sends back events.
 - **A core that cannot reach your system.** The engine core does no file,
   network or process I/O and reads no clock or environment variable.

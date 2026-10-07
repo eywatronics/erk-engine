@@ -14,7 +14,7 @@
 ## 1. Karar
 
 Erk bir tarayıcı değil, **gömülü bir HTML/CSS masaüstü UI motoru**dur.
-Host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u sürer, Erk
+Host uygulama (önce Rust, sonra C-ABI üzerinden Python, Go ve JS/TS) DOM'u sürer, Erk
 stil, layout ve boyamayı yapar, kullanıcı olaylarını host'a bildirir.
 Erk hiçbir zaman betik çalıştırmaz: `<script>` desteklenmez, Erk'in
 ikilisinde JS motoru yoktur. JavaScript ve TypeScript, Python ve Go gibi
@@ -266,6 +266,17 @@ yerine şunu koyuyor:
   yüzden daha da önemli. Bir JS uygulaması Node.js ya da Bun ister;
   tek dosyalık dağıtım (`bun build --compile`, Node'un tek yürütülebilir
   uygulaması) M8'in paketleme işi.
+- **Bütün diller C-ABI'den bağlanır (kullanıcının kararı, 2026-10-07).**
+  Python, Go ve Node.js/Bun bağlamalarının hepsi `erk.h` ve `erk_ffi`
+  paylaşımlı kütüphanesi üzerinden konuşur; hiçbiri `erk`'in Rust API'sine
+  doğrudan bağlanmaz. Neden: (1) korunacak tek bir sınır var: iş parçacığı,
+  zehirlenme, yeniden girme ve panik denetimi (`guard`, `check-ffi.sh`)
+  her dil için aynı yerde; (2) her dil aynı anlamı görür, bir dilin
+  bağlaması diğerlerinin göremediği bir yol açamaz; (3) M8'de 1.0 olacak
+  kararlılık sözü tek bir ABI'ye verilir; (4) bir bağlamayı derlemek için
+  Rust araç zinciri gerekmez, önceden derlenmiş kütüphane yeter. Bu,
+  aşağıdaki ilk açık sorunun `napi-rs` (Rust API üstünde bir Node-API
+  eklentisi) seçeneğini kaldırır.
 - **Zorlama bugünden.** Koruduğu sınır bugün var, bu yüzden muhafız
   beklemez: `check-no-js-engine.sh` iki kilit dosyasında (motorun ve fuzz
   hedeflerinin) bilinen JS motorlarını arar. Kilit dosyası her özelliği,
@@ -278,11 +289,13 @@ yerine şunu koyuyor:
 
 **Açık sorular (M6'nın planına):**
 
-1. **Bağlama yolu.** Node-API eklentisi (`napi-rs` ile `erk`'in Rust
-   API'sinin üstünde; Node.js ve Bun ikisi de Node-API'yi destekliyor, tek
-   paket iki çalışma zamanı) mı, C-ABI'ye FFI mı (Node'da `koffi`, Bun'da
-   `bun:ffi`)? Ölçüt: çağrı başına maliyet, platform başına önceden derlenmiş
-   paketler, iki çalışma zamanında aynı davranış.
+1. **Node.js ve Bun'dan C-ABI'ye yol.** Yol C-ABI (yukarıda); açık olan
+   ona nasıl ulaşılacağı: `erk.h`'nin üstünde C ile yazılmış ince bir
+   Node-API eklentisi (Node.js ve Bun ikisi de Node-API'yi destekliyor, tek
+   paket iki çalışma zamanı) mı, bir FFI kütüphanesi mi (Node'da `koffi`,
+   Bun'da `bun:ffi`)? Ölçüt: çağrı başına maliyet, geri çağrıların
+   (olaylar, `destroy`) güvenle taşınması, platform başına önceden
+   derlenmiş paketler, iki çalışma zamanında aynı davranış.
 2. **Olay döngüsü.** Node ve Bun'ın ana iş parçacığı kendi olay döngüsünü
    çalıştırır; Erk'in pencere döngüsü (`erk_app_run`) bloklar. Pencere
    olaylarını JS döngüsünün içinden pompalamak (winit'in
