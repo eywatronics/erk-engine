@@ -29,7 +29,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M1** | Statik UI | Bitti |
 | **M2** | Etkileşim temeli | Bitti ([m2-interaction.md](m2-interaction.md)) |
 | **M3** | Kütüphane (Rust API, C-ABI) | Bitti ([m3-library.md](m3-library.md)) |
-| **M4** | Etkileşimli DOM | Yeni |
+| **M4** | Etkileşimli DOM | Sürüyor ([m4-interactive-dom.md](m4-interactive-dom.md)) |
 | **M5** | Artımlı render ve formlar | Yeni |
 | **M6** | Bağlamalar: Python, Go, JavaScript | Yeni |
 | **M7** | Geliştirici araçları | Yeni |
@@ -299,6 +299,21 @@ döndürüyor (test). Her muhafız kasıtlı bir ihlalle denenmiş.
 - `Mutation` dizileri fuzz'lanır (eski `NodeId`'ler dahil)
 - M2'nin sayaç demosu genel API'ye taşınır; TodoMVC eleman oluşturmayı,
   silmeyi ve listeyi uçtan uca sınar
+
+M4 de adımlara bölünür; her adım kendi PR'ı ([m4-interactive-dom.md](m4-interactive-dom.md)):
+
+| Adım | Kapsam | Durum |
+|---|---|---|
+| M4.0 | Düğüm oluşturma, taşıma, silme, öznitelik, sınıf, satır içi stil (motor, `erk`, C-ABI) | Yeni |
+| M4.1 | Toplu `Mutation`, `query_all`, klavye olayları | Yeni |
+| M4.2 | `Mutation` fuzz'ı, 10 bin döngü bellek testi | Yeni |
+| M4.3 | `linear-gradient`, `radial-gradient` | Yeni |
+| M4.4 | 2D `transform`, hit-test ters dönüşümle | Yeni |
+| M4.5 | TodoMVC, kabul | Yeni |
+
+**Karar (plan):** girdi, değişiklik ve gönderim olayları form denetimleri
+olmadan oluşamaz; M5'e kaldı. M4'ün TodoMVC'si yeni görevi klavye
+olaylarından host'un kurduğu metinle yazar. Arenada silme M2'den beri var.
 
 **Kabul:** Rust host'lu bir TodoMVC çalışıyor. 10 bin oluştur/sil döngüsünde
 bellek büyümüyor. Mutation fuzz'ı yeşil.
