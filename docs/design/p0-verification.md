@@ -62,7 +62,7 @@ yazıldığında doldurulur.
 | `Mutation` dizileri motoru bozamaz | cargo-fuzz, eski `NodeId`'ler dahil | Nesil denetimini kaldırmak | M4 | — |
 | `erk-invalidation` yalnızca `erk-dom`'a bağımlı | CI `guards`: `cargo tree -p erk-invalidation --target all --all-features --locked` derinlik 1'de projeden yalnızca `erk-dom` | `erk-invalidation`'a `erk-style` eklemek | M5 | — |
 | Artımlı render tam yeniden hesapla aynı | Mutation fuzz'ı her diziyi artımlı ve tam yoldan geçirir, display list'ler eşit; kısmi kare ile tam kare piksel piksel aynı (altın test) | Bir parçanın hasarını üretmemek; erken kesmeyi çıktı değiştiğinde de uygulamak | M5 | — |
-| Çekirdekte JS motoru yok | CI `guards`: `cargo tree --target all --all-features --locked` ile çekirdek crate'lerin, `erk`'in ve `erk-ffi`'nin ağacında bilinen JS motorları (`boa_engine`, `rquickjs`, `quickjs`, `v8`, `deno_core`) yok; `erk-script`'in projeden tek bağımlılığı `erk` | Çekirdeğe bir JS motoru eklemek; `erk-script`'i `erk-dom`'a bağlamak; motoru bir özelliğin arkasına saklamak | M6 | — |
+| Erk'te JS motoru yok, `<script>` hiçbir zaman çalışmaz (p1-embedded §3.3) | CI `guards` (`check-no-js-engine.sh`): `Cargo.lock` ve `fuzz/Cargo.lock`'ta bilinen JS motorları (Boa, QuickJS, V8, Deno, SpiderMonkey, JavaScriptCore, Duktape, Hermes, …) yok. Kilit dosyası her özelliği, hedefi ve dev-dependency'yi çözer | Sahte motor crate'leriyle: normal bağımlılık, dev-dependency, isteğe bağlı özellik, yalnızca bir platform, yeniden adlandırma, fuzz workspace'i | 2026-10-07 | 2026-10-07, altısı da yakaladı |
 
 İç bağımlılık yönü bugün `cargo tree` adımlarıyla denetleniyor; crate sayısı
 artarsa (M3'te `erk`, `erk-ffi`) bir `xtask arch-check`'e taşınması

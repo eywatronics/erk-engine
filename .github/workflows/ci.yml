@@ -164,6 +164,12 @@ jobs:
       - name: The C ABI goes through its guard
         run: bash .github/scripts/check-ffi.sh
 
+      # Erk never runs scripts (p1-embedded §3.3): no JavaScript engine in
+      # either lock file, under any feature, target or rename. JavaScript
+      # and TypeScript drive Erk from Node.js or Bun, whose engine is theirs.
+      - name: No JavaScript engine in Erk
+        run: bash .github/scripts/check-no-js-engine.sh
+
       # The cargo tree checks resolve every target and every feature, so a
       # dependency declared only for Windows or behind an optional feature
       # is seen from this Linux runner too. The tree is read into a variable

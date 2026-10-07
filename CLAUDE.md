@@ -9,12 +9,13 @@ projeye aittir.
 Sciter. Sciter'la API ya da CSS uzantısı uyumluluğu hedef değil; ölçüt web
 standartları ve Chrome (karşılaştırma: p1-embedded §4).
 
-Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: çekirdekte
-JavaScript yok, host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u
-`NodeId` ile sürer, Erk çizer ve olayları bildirir. JavaScript isteğe bağlı bir
-bağlamadır (`erk-script`, M6): Python gibi genel API'nin üstünde durur,
-çekirdeğe girmez. Çekirdekte dosya, ağ, süreç, ortam değişkeni ve saat yoktur;
-hepsi host'tan gelir. Gerekçe: [p1-embedded.md](docs/design/p1-embedded.md).
+Erk **gömülü bir HTML/CSS masaüstü UI motorudur**, tarayıcı değil: host
+uygulama (önce Rust, sonra C-ABI üzerinden Python, Go ve Node.js/Bun ile
+JavaScript/TypeScript) DOM'u `NodeId` ile sürer, Erk çizer ve olayları
+bildirir. **HTML içindeki `<script>` hiçbir zaman desteklenmez**: Erk'te JS
+motoru yoktur, olmayacaktır; JS/TS yalnızca Erk'i dışarıdan süren bir host
+dilidir (p1-embedded §3.3). Çekirdekte dosya, ağ, süreç, ortam değişkeni ve
+saat yoktur; hepsi host'tan gelir. Gerekçe: [p1-embedded.md](docs/design/p1-embedded.md).
 
 ## Commit kuralları
 
@@ -130,6 +131,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | İkili boyutu bütçenin altında | Gömülü bir motorun boyutu ürünün boyutu; bütçe ölçümden konur, gerekçesiz yükselmez | CI `size` job'ı (`check-size-budget.sh`): Linux yayın ikilisi `.github/size-budget.txt`'teki tavanın altında; yükseltme `# raised:` gerekçesi ister | M1.0 |
 | CSS matrisindeki her "Supported" satırın testi var | `css-support.md` host geliştiricisine verilen söz; testsiz bir "Supported" söz değildir | CI `guards` (`check-css-support.sh`): her Supported satır var olan bir testi adlandırır | M1.0 |
 | C-ABI korumadan geçer, `erk.h` güncel | Panik C'ye geçerse tanımsız davranış; UI iş parçacığı dışından gelen çağrı belgeyi bozar; elle değişen başlık ABI'den sapar | `check-ffi.sh`: `erk-ffi`'nin dışa açılan her işlevi `guard`/`guard_free`/`subscribe`'dan geçer, her `unsafe` izni (`src` ve `tests`) `// SAFETY:` gerekçeli. `erk-ffi`'nin testi `include/erk.h`'yi cbindgen ile üretip karşılaştırır; C örneği (`examples/c/hello.c`) üç işletim sisteminde, Linux'ta AddressSanitizer'la derlenip çalışır | M3.5 |
+| Erk'te JS motoru yok, `<script>` hiçbir zaman çalışmaz | İçerik hiçbir zaman kod çalıştıramamalı; JS/TS Erk'i yalnızca host dili olarak dışarıdan sürer (p1-embedded §3.3) | `check-no-js-engine.sh`: `Cargo.lock` ve `fuzz/Cargo.lock`'ta bilinen JS motorları yok (kilit her özelliği, hedefi ve dev-dependency'yi çözer; yeniden adlandırma paket adıyla görünür; altı eşdeğer ihlalle denendi). Belge betiği kapalı ayrıştırılır (`documents_are_parsed_as_with_scripting_disabled`) | 2026-10-07 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
 ## Kural takvimi
@@ -141,7 +143,7 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
 | M5 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı; artımlı her yol tam yeniden hesapla aynı display list'i verir (fuzz) |
-| M6 | Çekirdek crate'ler, `erk` ve `erk-ffi` hiçbir JS motoruna bağımlı değil; `erk-script` projeden yalnızca `erk`'e bağımlı (`cargo tree`) |
+| M6 | Bağlama crate'leri (Python, Go, Node.js/Bun) projeden yalnızca `erk`'e ya da `erk-ffi`'ye bağımlı (`cargo tree`) |
 
 ## unsafe ve C/C++ politikası
 
@@ -172,9 +174,8 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 - **G/Ç yalnızca host'ta.** Çekirdek crate'ler (`erk-dom`, `erk-style`,
   `erk-renderer`) dosya, ağ, süreç, ortam değişkeni ve saat kullanmaz;
   kaynaklar host'un callback'inden, zaman host'un `now_ns`'inden gelir.
-  İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. Çekirdek
-  `<script>` çalıştırmaz; betik ancak host isteğe bağlı `erk-script`'i
-  açarsa çalışır ve host'un açtığı işlevler dışında hiçbir şeye erişemez.
+  İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. Erk
+  `<script>`'i hiçbir zaman çalıştırmaz; içerik kod çalıştıramaz.
 - Loglara sayfa içeriği, form verisi veya kimlik bilgisi yazılmaz.
 
 ## Test disiplini

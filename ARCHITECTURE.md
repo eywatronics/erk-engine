@@ -1,7 +1,7 @@
 # Erk Engine Architecture
 
 Erk is an embeddable HTML/CSS UI engine for desktop applications, written in
-Rust, with no JavaScript in its core. The host application drives the document
+Rust, with no JavaScript engine: `<script>` is never run. The host application drives the document
 through `NodeId`s and batched mutations; Erk styles, lays out and paints it and
 reports user events back. It reuses mature Rust components and puts its original work
 where none of them reach: inline layout, the embedding API and its C ABI,
@@ -80,10 +80,13 @@ window: winit + softbuffer (vello_hybrid on the GPU from M2)
   network or process I/O and reads no clock or environment, which keeps it
   deterministic and makes content unable to reach the file system.
 
-The core runs no JavaScript and has no networking and no sandbox: the content
-is the host's own. JavaScript is planned as an optional binding (`erk-script`,
-M6) on top of the public API, like the Python one; the document never holds a
-script object, so there is no DOM/GC cycle to manage. A separate renderer process remains possible because the messages are
+Erk runs no JavaScript, ever, and has no networking and no sandbox: the
+content is the host's own and cannot execute code. Documents are parsed as by
+a browser with scripting disabled, so `<noscript>` content shows. JavaScript
+and TypeScript drive Erk from outside, as host languages (Node.js and Bun,
+M6), like Python and Go; the document never holds a script object, so there
+is no DOM/GC cycle to manage. CI checks that no JavaScript engine is in either
+lock file (`check-no-js-engine.sh`). A separate renderer process remains possible because the messages are
 plain data, but is not planned.
 
 ## Crates

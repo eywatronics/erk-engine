@@ -16,15 +16,17 @@
 Erk bir tarayıcı değil, **gömülü bir HTML/CSS masaüstü UI motoru**dur.
 Host uygulama (önce Rust, sonra C-ABI üzerinden Python) DOM'u sürer, Erk
 stil, layout ve boyamayı yapar, kullanıcı olaylarını host'a bildirir.
-Çekirdekte betik dili yoktur. JavaScript isteğe bağlı bir bağlamadır:
-Python gibi aynı API'nin üstünde durur, açılmazsa ikiliye girmez (§3.1).
+Erk hiçbir zaman betik çalıştırmaz: `<script>` desteklenmez, Erk'in
+ikilisinde JS motoru yoktur. JavaScript ve TypeScript, Python ve Go gibi
+Erk'i dışarıdan süren host dilleridir: Node.js ya da Bun bağlamasıyla
+(§3.3).
 
 ```
-host uygulama (Rust, Python, C, JS)  iş mantığı, durum, dosyalar
+host uygulama (Rust, C, Python, Go, JS/TS: Node.js, Bun)  iş mantığı, durum, dosyalar
         │   ▲
         │   │  NodeId'ler, toplu değişiklikler, olaylar
         ▼   │
-erk (Rust API) ── erk-ffi (C-ABI, erk.h) · erk-script (isteğe bağlı JS)
+erk (Rust API) ── erk-ffi (C-ABI, erk.h) ── bağlamalar (Python, Go, JS/TS)
         │
 çekirdek: erk-dom · erk-style · erk-renderer     G/Ç yok, saat yok, ortam yok
         │
@@ -45,10 +47,11 @@ sonra C-ABI; ayrı süreç modu ancak ihtiyaç olursa); ilk dil bağlaması Pyth
 
 ## 2. İlkeler
 
-1. **Çekirdekte sıfır JS, sıfır GC.** Çekirdek `<script>`'i ayrıştırır ama
-   çalıştırmaz. JavaScript isteğe bağlı `erk-script` bağlamasıdır: Python
-   bağlaması gibi `erk`'in genel API'sini kullanır, düğümlere yalnızca
-   `NodeId` ile başvurur; DOM hiçbir JS nesnesi tutmaz (§3.1).
+1. **Erk'te sıfır JS, sıfır GC.** `<script>` ayrıştırılır, belgede hareketsiz
+   bir eleman olarak durur ve hiçbir zaman çalışmaz; belge betiği kapalı bir
+   tarayıcıdaki gibi ayrıştırılır. JavaScript ve TypeScript host dilidir
+   (Node.js, Bun): Python bağlaması gibi genel API'yi kullanır, düğümlere
+   yalnızca `NodeId` ile başvurur; DOM hiçbir JS nesnesi tutmaz (§3.3).
 2. **DOM arenanındır.** Dış dünya düğümlere yalnızca `NodeId` ile başvurur
    (u32 indeks + u32 nesil; C tarafında opak `uint64_t`). Silinmiş bir
    düğümün id'si çökme değil hata kodu üretir.
@@ -206,6 +209,10 @@ B'nin burada tarayıcıdaki kadar pahalı olmamasının sebebi `NodeId`:
 - **Yeri M6.** `erk-script` M3'ün API'sine ve M4'ün değişiklik, olay ve
   seçici API'lerine dayanır; Python'dan ve Go'dan sonra, aynı taşta.
 
+**§3.3 bu kararı değiştirdi (2026-10-07):** gömülü JS motoru (`erk-script`)
+yok; JavaScript ve TypeScript host dili. Yukarıdaki değerlendirme geçmiş
+olarak duruyor.
+
 ### 3.2 "Yeni nesil Sciter" için hayatta kalma kuralları önerisi (2026-10-01)
 
 | Öneri | Karar |
@@ -214,9 +221,76 @@ B'nin burada tarayıcıdaki kadar pahalı olmamasının sebebi `NodeId`:
 | Chrome'un bozuk HTML tablolarını düzelten kodunu yazmak zorunda değilsin | Doğru, yazılmıyor: tablo düzeni planda yok. Bozuk HTML'in ayrıştırılması ise bedava: html5ever HTML5 algoritmasının tamamını uyguluyor, maliyeti Erk'e değil kütüphaneye ait |
 | Flexbox, CSS değişkenleri, absolute, `border-radius`, temel metin, geçişler | Hepsi planda: değişkenler destekleniyor ve testli; absolute M1.4, flex M1.5, `border-radius` M1.6, metin M1.3 ve M1.7. Geçişler M9'da; M5'in artımlı render ölçümünden sonra öne alınması açık soru (roadmap M9) |
 | "Bu kadarı masaüstü uygulamalarının %95'ine yeter" | Alınmadı: ölçülebilir değil (§3'teki %85 iddiasıyla aynı gerekçe). Yeterlilik gerçek ekranlarla ölçülür: M1'in ayarlar ekranı, M4'ün TodoMVC'si, M8'in Nexus Mail ekranı |
-| Sıfır JS inadını kır, host tarafında hafif bir QuickJS ya da Boa; DOM ile JS'i birbirine dolama | Zaten alındı (§3.1): `erk-script`, M6. **Düzeltmeyle:** açılır menü için iki satır betik bile gerekmez; `popover` ve `<details>` M5'te betiksiz çalışır. Betik bunların yetmediği yerel UI mantığı için |
+| Sıfır JS inadını kır, host tarafında hafif bir QuickJS ya da Boa; DOM ile JS'i birbirine dolama | (§3.3 ile değişti: gömülü motor yok, JS/TS host dili.) Zaten alındı (§3.1): `erk-script`, M6. **Düzeltmeyle:** açılır menü için iki satır betik bile gerekmez; `popover` ve `<details>` M5'te betiksiz çalışır. Betik bunların yetmediği yerel UI mantığı için |
 | C-ABI kutsal olmalı; yalnızca bir Rust kütüphanesi niş kalır | Zaten ilke: sözleşme M1'den önce yazıldı (M0.5), ABI 1.0 kararlılığı M8'de. Eklendi: `erk-ffi` paylaşımlı kütüphane üretir (`erk.dll`, `liberk.so`, `liberk.dylib`); Python wheel'i ve Go paketi aynı kütüphaneye bağlanır (M3, M6) |
 | Python'dan `import erk` ile 10 MB RAM yiyen bir pencere | Hedef olarak alınmadı, ölçüm olarak alındı: boş demo penceresi bugün 12,6 MB, 1000 düğümlü sayfa 13,0 MB özel bellek kullanıyor (i7-10750H, Windows; m1-static-ui.md). M6 kabulünde Python örneğinin özel belleği aynı yöntemle ölçülüp yayımlanır, yorumlayıcının kendi payı ayrı yazılır. Bütçe ölçümden konur, "< 5 MB ikili" gibi doğrulanmamış bir sayıdan değil |
+
+### 3.3 `<script>` asla; JavaScript ve TypeScript host dili olarak (2026-10-07)
+
+Kullanıcının kararı: **HTML içindeki `<script>` etiketleri hiçbir zaman
+desteklenmeyecek. Erk'i yönetmek için Rust, Python ve Go'nun yanında
+JavaScript/TypeScript (Node.js ve Bun bağlaması) desteği verilecek.**
+
+Bu, §3.1'in B yolunu (isteğe bağlı, gömülü bir JS motoru) kaldırıyor ve
+yerine şunu koyuyor:
+
+- **`<script>` hiçbir zaman çalışmaz.** Varsayılan kapalı değil, açılacak
+  bir özellik de değil: Erk'in hiçbir derlemesinde betik motoru yoktur.
+  `<script>` ayrıştırılır ve belgede hareketsiz bir eleman olarak durur
+  (host okuyabilir, çizilmez). Olay öznitelikleri (`onclick`, …) ve
+  `javascript:` URL'leri de hiçbir şey çalıştırmaz.
+- **Belge betiği kapalı bir tarayıcıdaki gibi ayrıştırılır** (HTML
+  §13.2.4.1, ayrıştırıcının "scripting flag"i kapalı). Sonucu: `<noscript>`'in
+  içi ham metin değil işaretlemedir ve görünür; sayfanın betiksiz yedeği
+  Erk'te çizilir. Bu karara kadar ayrıştırıcı betik açıkmış gibi
+  çalışıyordu: `<noscript>` içeriği ham metin oluyordu ve UA stil sayfası
+  onu gizlemediği için işaretleme ekrana yazı olarak çıkıyordu.
+- **JavaScript ve TypeScript host dilidir.** Python ve Go nasıl Erk'i
+  dışarıdan sürüyorsa JS/TS de öyle: süreç Node.js ya da Bun'ındır, JS
+  motoru (V8, JavaScriptCore) onların, Erk'in değil. Aynı `NodeId`'ler, aynı
+  toplu değişiklikler, aynı olaylar; TypeScript tipleri paketle gelir.
+  JS'teki eleman nesnesi yalnızca bir `NodeId` taşır, DOM hiçbir JS nesnesi
+  tutmaz; abonelikler sözleşmenin `destroy` callback'iyle biter (p1-contract
+  §5). DOM ile GC arasında döngü yine yok.
+- **Neden.** (1) İçerik hiçbir zaman kod çalıştıramaz: host'un gösterdiği
+  HTML'e karışan bir `<script>` (dosyadan, kullanıcıdan, ağdan gelen
+  metinden) hiçbir şey yapamaz; betik enjeksiyonu sınıfı tümüyle yok.
+  (2) Erk'in ikilisi ve bakımı bir JS motoru taşımaz; Boa ile QuickJS
+  arasındaki ölçüm ve yeni bir C bağımlılığı kararı gereksizleşir.
+  (3) JS geliştiricisi yine JS/TS yazar, ama mantığını tam bir çalışma
+  zamanında: npm'in iş mantığı paketleri, dosya ve ağ erişimi, hata
+  ayıklayıcı Node'un ya da Bun'ın.
+- **Bedeli.** Yerel UI mantığı (açılır menü, akordeon) için sayfanın içinde
+  betik yok: ya standart deklaratif HTML davranışlarıyla (`<details>`,
+  `<dialog>`, `popover`, M5) ya da host kodunda. M5'in bu elemanları bu
+  yüzden daha da önemli. Bir JS uygulaması Node.js ya da Bun ister;
+  tek dosyalık dağıtım (`bun build --compile`, Node'un tek yürütülebilir
+  uygulaması) M8'in paketleme işi.
+- **Zorlama bugünden.** Koruduğu sınır bugün var, bu yüzden muhafız
+  beklemez: `check-no-js-engine.sh` iki kilit dosyasında (motorun ve fuzz
+  hedeflerinin) bilinen JS motorlarını arar. Kilit dosyası her özelliği,
+  her hedefi ve dev-dependency'leri çözer; yeniden adlandırılan bir
+  bağımlılık kendi paket adıyla yazılır. Altı eşdeğer ihlalle denendi
+  (normal, dev, isteğe bağlı özellik, yalnızca bir platform, yeniden
+  adlandırma, fuzz workspace'i); hepsi yakalandı. Sınırı: kaynağı depoya
+  kopyalanmış ya da başka adla yayımlanmış bir motor; o bir tasarım kararı
+  ve C/C++ bağımlılığı olarak zaten `docs/design/` ister.
+
+**Açık sorular (M6'nın planına):**
+
+1. **Bağlama yolu.** Node-API eklentisi (`napi-rs` ile `erk`'in Rust
+   API'sinin üstünde; Node.js ve Bun ikisi de Node-API'yi destekliyor, tek
+   paket iki çalışma zamanı) mı, C-ABI'ye FFI mı (Node'da `koffi`, Bun'da
+   `bun:ffi`)? Ölçüt: çağrı başına maliyet, platform başına önceden derlenmiş
+   paketler, iki çalışma zamanında aynı davranış.
+2. **Olay döngüsü.** Node ve Bun'ın ana iş parçacığı kendi olay döngüsünü
+   çalıştırır; Erk'in pencere döngüsü (`erk_app_run`) bloklar. Pencere
+   olaylarını JS döngüsünün içinden pompalamak (winit'in
+   `pump_app_events`'i) mı, başka bir yol mu? macOS pencerenin ana iş
+   parçacığında olmasını ister; p1-contract §1 belgeyi UI iş parçacığında
+   tutar. Ekransız kip (`tick`, `input`) bugün zaten JS döngüsüne uyar.
+3. **Paket adı ve dağıtım** (npm'de platform başına isteğe bağlı
+   bağımlılıklar deseni).
 
 ## 4. Konumlandırma
 
@@ -242,9 +316,9 @@ HTML/CSS ile çizilen masaüstü arayüzü, gömülebilir küçük bir motor, C-
 | Lisans | Kapalı kaynak; ikili ücretsiz, kaynak kodu ücretli lisansla | Açık kaynak, MIT OR Apache-2.0 |
 | Dil ve bellek güvenliği | C++ | Rust; `unsafe` yalnızca adıyla listelenmiş crate'lerde |
 | CSS | Kendi uzantıları (`flow`, `behavior`, `1*` esnek birimleri) | Standart CSS, Stylo'nun ayrıştırması ve kaskadı; uzantı yok. Neyin desteklendiği [css-support.md](../css-support.md)'de, Chrome'a yakınlık referans testiyle ölçülür |
-| Betik | QuickJS motorun parçası | İsteğe bağlı bağlama, varsayılan kapalı (§3.1) |
+| Betik | QuickJS motorun parçası | Yok: `<script>` asla çalışmaz; JS/TS host dili (Node.js, Bun) (§3.3) |
 | G/Ç | Motor kaynakları kendisi yükleyebilir | Çekirdek G/Ç yapmaz; kaynak ve zaman host'tan gelir (§2.4) |
-| Bağlamalar | C-API üzerinden birçok dil | C-ABI; önce Rust ve Python, sonra Go ve JS |
+| Bağlamalar | C-API üzerinden birçok dil | C-ABI; önce Rust ve Python, sonra Go ve JS/TS (Node.js, Bun) |
 
 Sciter'ın API'siyle ya da CSS uzantılarıyla uyumluluk hedef değildir: Erk'in
 ölçütü web standartları ve Chrome'un çizdiği. "Yeni nesil Sciter" ürünün
@@ -252,12 +326,12 @@ biçimini anlatır; README'de ve dışa dönük metinlerde Sciter'ın adı yaln�
 karşılaştırma için geçer.
 
 Erk'in iddiası: standart HTML/CSS'in açıkça sınırlanmış bir alt kümesi,
-çekirdekte sıfır JS (JS isteğe bağlı bir bağlama), kararlı bir C-ABI ve
+Erk'te sıfır JS (`<script>` asla; JS/TS host dili), kararlı bir C-ABI ve
 Python, her makinede aynı çizim, küçük ikili. Boyut ve bellek iddiaları
 ölçülmeden yazılmaz.
 
 **Kime:** arayüzünü HTML/CSS ile çizmek isteyen ama bir JS yığını ya da
-webview taşımak istemeyen Rust, Python ve Go geliştiricileri. Hedef
+webview taşımak istemeyen Rust, Python, Go ve JS/TS geliştiricileri. Hedef
 uygulamalar küçük ve orta boy masaüstü araçları: kurulum sihirbazları,
 başlatıcılar, tepsi ve ayar panelleri, iç araçlar, endüstriyel paneller.
 Erk "Tauri ya da Electron'un yerini alır" iddiasında bulunmaz: React
@@ -293,7 +367,7 @@ bunu kendisi yapar ve DOM'a değişiklik olarak verir.
 
 | Ne | Neden |
 |---|---|
-| Çekirdekte betik; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | `erk-script` isteğe bağlı ve DOM'un küçük bir alt kümesi (§3.1) |
+| `<script>`, olay öznitelikleri, `javascript:` URL'leri; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | Erk hiçbir zaman betik çalıştırmaz; JS/TS Erk'i host dili olarak dışarıdan sürer (§3.3) |
 | Zengin metin düzenleme (`contenteditable`) | M5'in form kontrollerinden çok daha büyük bir iş (§4) |
 | Ağ, HTTP, Fetch, çerezler | Host'un işi |
 | Kum havuzu, çoklu süreç | İçerik host'un kendisi; ihtiyaç olursa mesaj disiplini sayesinde sonradan eklenir |

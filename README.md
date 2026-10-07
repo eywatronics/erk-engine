@@ -26,12 +26,12 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 
 ## Why Erk?
 
-- **No WebView, no JavaScript runtime in the core.** Erk is the renderer:
-  the same page draws the same pixels on every machine, and the engine core
-  ships no script engine. JavaScript is planned as an optional binding,
-  off by default.
-- **Your language drives the UI.** Rust first; a C ABI, Python and Go are
-  planned. The host addresses the document by opaque node ids and sends
+- **No WebView, no JavaScript engine, ever.** Erk is the renderer: the
+  same page draws the same pixels on every machine, and `<script>` in HTML
+  is never run. Content cannot execute code.
+- **Your language drives the UI.** Rust and a C ABI today; Python, Go and
+  JavaScript/TypeScript (Node.js and Bun) are planned. JavaScript drives
+  Erk from outside, like any other host language. The host addresses the document by opaque node ids and sends
   batched changes; Erk sends back events.
 - **A core that cannot reach your system.** The engine core does no file,
   network or process I/O and reads no clock or environment variable.
@@ -52,8 +52,8 @@ Each of these is a good tool; they make different trade-offs.
 | | Erk | Tauri | Sciter | Blitz |
 |---|---|---|---|---|
 | Renderer | Its own: Stylo, Taffy, Parley, Vello | The operating system's WebView (WebView2, WKWebView, WebKitGTK) | Its own, in C++ | Its own: Stylo, Taffy, Parley, Vello |
-| Scripting | None in the core; optional binding planned | JavaScript (any web framework) | Built in (JavaScript) | None; driven from Rust (Dioxus) |
-| Host languages | Rust; C ABI, Python, Go planned | Rust backend, web frontend | C API, many bindings | Rust |
+| Scripting | None, ever; `<script>` is never run | JavaScript (any web framework) | Built in (JavaScript) | None; driven from Rust (Dioxus) |
+| Host languages | Rust, C ABI; Python, Go, JavaScript/TypeScript (Node.js, Bun) planned | Rust backend, web frontend | C API, many bindings | Rust |
 | CSS | Standard, a documented subset | The WebView's full web platform | Standard CSS plus its own extensions | Standard |
 | Same pixels on every OS | Yes (embedded fonts, one CPU renderer) | No: each WebView renders differently | Own renderer; graphics backend varies by platform | Own renderer |
 | Licence | MIT OR Apache-2.0 | MIT OR Apache-2.0 | Proprietary | MIT OR Apache-2.0 |
@@ -63,7 +63,8 @@ Each of these is a good tool; they make different trade-offs.
   and accept the platform WebView.
 - **Choose Sciter** if you need a mature embedded HTML engine today.
 - **Choose Blitz** to write the UI in Rust with Dioxus.
-- **Erk is for** an HTML/CSS interface driven from Rust, C, Python or Go,
+- **Erk is for** an HTML/CSS interface driven from Rust, C, Python, Go or
+  JavaScript/TypeScript,
   without a WebView or a JavaScript stack: installers, launchers, tray and
   settings panels, internal tools, industrial panels. Once it is ready.
 
@@ -146,8 +147,8 @@ Today Erk does **not**:
   is drawn, but a paragraph's direction comes from its first letter;
 - render incrementally: every change redraws the whole page (M5).
 
-Never planned: floats, table layout, multi-column, print, and a
-browser-compatible JavaScript environment. The full list is in
+Never planned: floats, table layout, multi-column, print, `<script>` and
+any browser-compatible JavaScript environment. The full list is in
 [docs/css-support.md](docs/css-support.md).
 
 ## Measurements
@@ -188,7 +189,7 @@ and may only rise unless a written reason says otherwise.
 | M3 | Rust API and C ABI | Planned |
 | M4 | Mutable DOM and events; TodoMVC | Planned |
 | M5 | Incremental rendering, forms, IME, accessibility | Planned |
-| M6 | Bindings: Python, Go, optional JavaScript | Planned |
+| M6 | Bindings: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Planned |
 | M7 | Developer tools, written with Erk | Planned |
 | M8 | Packaging, ABI 1.0 | Planned |
 | M9–M12 | Compositor, host GPU surfaces, SVG and media, components | Planned |

@@ -2,15 +2,28 @@ use std::borrow::Cow;
 use std::cell::{Ref, RefCell};
 
 use html5ever::tendril::{StrTendril, TendrilSink};
-use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
+use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeBuilderOpts, TreeSink};
 use html5ever::{Attribute as HtmlAttribute, ParseOpts, QualName, parse_document};
 
 use crate::{Document, ElementData, NodeData, NodeId};
 
+/// How documents are parsed: as a browser with scripting disabled does
+/// (HTML §13.2.4.1), because Erk never runs scripts (p1-embedded §3.3).
+/// The content of `<noscript>` is markup, not raw text, and shows.
+fn options() -> ParseOpts {
+    ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..TreeBuilderOpts::default()
+        },
+        ..ParseOpts::default()
+    }
+}
+
 impl Document {
     /// Parse a complete HTML document.
     pub fn parse_html(html: &str) -> Self {
-        parse_document(Sink::default(), ParseOpts::default()).one(html)
+        parse_document(Sink::default(), options()).one(html)
     }
 
     /// Replace this document with `html`, parsed into the same arena: every
@@ -20,7 +33,7 @@ impl Document {
     pub fn load_html(&mut self, html: &str) {
         self.clear();
         let doc = RefCell::new(std::mem::take(self));
-        *self = parse_document(Sink { doc }, ParseOpts::default()).one(html);
+        *self = parse_document(Sink { doc }, options()).one(html);
     }
 }
 
