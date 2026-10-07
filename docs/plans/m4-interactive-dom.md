@@ -95,7 +95,7 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 
 ### M4.3: Gradyanlar
 
-- [ ] `linear-gradient`, `radial-gradient` (`background-image`, renk
+- [x] `linear-gradient`, `radial-gradient` (`background-image`, renk
   durakları, açılar ve yönler); display list'te gradyan öğesi; CPU ve GPU
   aynı. Chrome referans sayfası.
 
@@ -160,3 +160,19 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 | CI'da kasıtlı ihlal | PR'ın ikinci commit'i `erk-style` düzeltmesini geri aldı: `fuzz mutations (none)` ve `fuzz mutations (address)` boş korpustan başlayıp aynı paniği buldu (libFuzzer "deadly signal", girdi artifact olarak saklandı); `rust-checks` üç platformda sabit testle düştü. Geri alınınca yeşil |
 | Mutasyonlar (M4.2) | Silmenin abonelikleri bırakmaması: +1 182 448 bayt, yakalandı. Arenanın silinen yuvayı yeniden kullanmaması: +4 030 720 bayt, yakalandı. Bağlı olmayan kapsamın eşlenmesi: panik, yakalandı |
 | Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M4.3
+
+| Konu | Not |
+|---|---|
+| Kapsam | `linear-gradient`, `radial-gradient` ve `repeating-` biçimleri `background-image` katmanı olarak: açı, kenar ve köşe yönleri, konumlu ve konumsuz duraklar, sert geçiş, ara nokta (transition hint), daire ve elips, her boyut anahtar sözcüğü ve açık yarıçaplar, konum; görüntü katmanı gibi boyutlanıyor, konumlanıyor ve döşeniyor. `-webkit-`/`-moz-` önekli biçimler de (başlangıç noktasını adlandırıyorlar, açı doğudan saat yönünün tersine). Dışarıda: `conic-gradient` (katman atlanıyor), `border-image`/`mask-image`/`list-style-image` içindeki gradyanlar, `in <renk uzayı>` (ayrıştırılıyor, uygulanmıyor). css-support.md'de |
+| Display list | Yeni öğe `Gradient { gradient, tile, repeat, area, clip, clip_radii }`, `Image` ile aynı yerleşimle. `Gradient` düz veri: şekil (`Linear { start, end }` ya da `Radial { center, radii, inner }`), [0, 1]'e oturtulmuş duraklar, `repeating`. CSS hesabının hepsi motorda (`gradient.rs`): rasterizer'lar durakları olduğu gibi alıyor. Yüzey muhafızının "display list tipleri yalnızca list.rs'te" kuralı üç yeni tipi de sayıyor; `GradientShape`'i başka dosyada tanımlayan kasıtlı ihlal yakalandı |
+| Durakları oturtmak | CSS Images 3 §3.4.3: ilk durak 0'a, son durak sona; geriye giden konum öncekine çekiliyor; konumsuzlar komşuları arasında eşit dağılıyor. Sonra doğru ilk duraktan son durağa taşınıyor (radyalde iç ve dış elips), böylece peniko'nun `Pad`/`Repeat` uzatması CSS'in "uç renkler sürer" ve "tekrarlar" kuralıyla aynı. Tek noktadaki duraklar sert kenar (1/64 px), tekrarlayanda dönem sıfırsa durakların ortalama rengi (CSS Images 3). Radyalde ışın negatif olamaz: tekrarlamayanda merkezdeki renk hesaplanıp öncekiler atılıyor, tekrarlayanda tam dönemlerle kaydırılıyor |
+| Ara nokta | CSS Images 4 §3.5.3'ün eğrisi (`p^(ln 0.5 / ln h)`) iki durak arasına 15 ara durak olarak örnekleniyor; yarıdaki ara nokta hiçbir şey eklemiyor |
+| Elips | Peniko'nun radyal gradyanı daire; elips, boya dönüşümüyle (merkez etrafında y'de `ry/rx`) geriliyor. Köşe boyutları kenar boyutlarının oranını koruyup köşeden geçiyor: √2 katı |
+| Renk aradeğerleme | Önceden çarpılmış sRGB: CSS'in eski tip renkler için kuralı, peniko'nun varsayılanı. `in oklab` gibi bir yöntem şimdilik uygulanmıyor |
+| Döşeme | Döşenen bir gradyanın her kopyası ayrı dolgu, boya dönüşümü kopyanın kaymasıyla; bir öğede en çok 65 536 kopya (kutusundan çok küçük bir döşeme gösterebileceğinden fazlasına mal olmasın) |
+| Chrome | Makinedeki Chrome kendiliğinden 154.0.8037.58'den .98'e güncellenmişti; yakalama sürüm karıştırmayı reddetti, bütün sayfalar `ERK_RECAPTURE_ALL=1` ile yeniden yakalandı. Eski sayfaların hiçbir görüntüsü tek bayt değişmedi; yalnızca sürüm satırı. `gradients` sayfası 22 gradyan kutusu: içerik skoru **%99,72**, sayfanın 28 blok kutusunun hepsi Chrome'la 1 px içinde. Kalan fark iki yerde, ikisi de kenar yumuşatma: yuvarlak köşeli kutunun kırpma kenarı (diğer sayfalardaki bilinen fark) ve döşenmiş desendeki sert geçişlerin çapraz çizgisi |
+| CPU ve GPU | `the_gpu_paints_what_the_cpu_paints` sayfasına üç gradyan eklendi (açılı, tekrarlayan şerit, konumlu elips): farklı piksel sayısı değişmedi (400×360'ta 14, ölçek 2'de 0). GPU yolunda gradyanı düz renge çeviren mutasyon 17 906 piksel farkla yakalandı |
+| Mutasyonlar | Köşe yönü yanlış köşegende (skor %95,20), doğru kutunun uzun kenarı kadar (%89,80), köşe elipsi √2'siz (%90,86), en yakın köşe en uzak (%95,18), tekrarlayan tekrarlamıyor (%95,30), döşeme tekrarlamıyor (%95,53), elips daire (%91,82): referans testi yakaladı. Ara noktanın eğrisi yok, konum geriye gidebiliyor, konumsuzlar sonrakine yığılıyor, önekli anahtar sözcük çevrilmiyor: birim testleri yakaladı |
+| Skorlar | Diğer sayfaların Chrome skorları ve WPT sonuçları değişmedi |

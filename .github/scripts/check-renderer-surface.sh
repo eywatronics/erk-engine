@@ -88,7 +88,7 @@ forbid "list.rs must hold only plain owned data" -nE \
 # ...and the types the raster takes are defined there and nowhere else: one
 # moved out of list.rs would escape the check above.
 forbid "the display list's types belong in list.rs" -rnE --exclude=list.rs \
-  '\b(struct|enum|type)[[:space:]]+(DisplayList|DisplayItem|GlyphRun|PositionedGlyph|TableUpdate|FontId|ImageId|Radii)\b' \
+  '\b(struct|enum|type)[[:space:]]+(DisplayList|DisplayItem|GlyphRun|PositionedGlyph|Gradient|GradientShape|GradientStop|TableUpdate|FontId|ImageId|Radii)\b' \
   "$src"
 
 # 5. The embedding layer paints through the engine and the raster thread;

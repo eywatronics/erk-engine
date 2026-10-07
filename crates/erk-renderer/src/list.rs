@@ -63,6 +63,18 @@ pub(crate) enum DisplayItem {
         clip: Frame,
         clip_radii: Radii,
     },
+    /// A gradient image (CSS Images 3 §3), placed as `Image` is: one copy
+    /// fills `tile`, repeated along an axis where `repeat` says so; `area`
+    /// is the region painted, clipped to `clip`. The gradient's geometry is
+    /// that of the copy at `tile`.
+    Gradient {
+        gradient: Gradient,
+        tile: Frame,
+        repeat: (bool, bool),
+        area: Frame,
+        clip: Frame,
+        clip_radii: Radii,
+    },
     /// Everything until the matching `PopOpacity` is composited at this
     /// opacity, as one group.
     PushOpacity(f32),
@@ -101,6 +113,39 @@ pub(crate) struct Frame {
 /// Corner radii as (horizontal, vertical): top-left, top-right,
 /// bottom-right, bottom-left.
 pub(crate) type Radii = [(f32, f32); 4];
+
+/// A gradient ready to paint: colours along a line or out from a centre,
+/// its stops already fitted so that the first is at offset 0 and the last
+/// at 1, which both rasterizers take as they are.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Gradient {
+    pub(crate) shape: GradientShape,
+    /// In order, from offset 0 to offset 1.
+    pub(crate) stops: Vec<GradientStop>,
+    /// Past the ends the stops repeat (a `repeating-` gradient); otherwise
+    /// the end colours go on.
+    pub(crate) repeating: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum GradientShape {
+    /// Offset 0 at `start`, offset 1 at `end`; the colour is constant
+    /// across the line.
+    Linear { start: (f32, f32), end: (f32, f32) },
+    /// Ellipses around `center`: offset 1 on the one with `radii`, offset 0
+    /// on the one `inner` times as large.
+    Radial {
+        center: (f32, f32),
+        radii: (f32, f32),
+        inner: f32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GradientStop {
+    pub(crate) offset: f32,
+    pub(crate) color: Rgba,
+}
 
 pub(crate) struct GlyphRun {
     pub(crate) font: FontId,

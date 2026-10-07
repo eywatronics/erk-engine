@@ -5,15 +5,15 @@
 
 use std::sync::Arc;
 
-use vello_cpu::kurbo::{Affine, BezPath, Point, Rect};
-use vello_cpu::peniko::{Color, Extend, Fill};
+use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Vec2};
+use vello_cpu::peniko::{Color, Extend, Fill, Gradient as GradientPaint};
 use vello_cpu::{
     Glyph, Image as VelloImage, ImageSource, Level, Pixmap, RenderContext, RenderSettings,
     Resources,
 };
 
 use crate::color::Rgba;
-use crate::display::{DisplayItem, DisplayList, Frame, GlyphRun, Radii};
+use crate::display::{DisplayItem, DisplayList, Frame, GlyphRun, Gradient, GradientShape, Radii};
 use crate::list::ImageId;
 use crate::tables::Tables;
 
@@ -24,6 +24,7 @@ pub(crate) trait Canvas {
     /// Paint with image `id`, `image`, repeated along an axis where
     /// `repeat` says so.
     fn set_image(&mut self, id: ImageId, image: &Arc<Pixmap>, repeat: (bool, bool));
+    fn set_gradient(&mut self, gradient: GradientPaint);
     fn set_paint_transform(&mut self, transform: Affine);
     fn reset_paint_transform(&mut self);
     fn set_fill_rule(&mut self, rule: Fill);
@@ -51,6 +52,61 @@ pub(crate) fn image_paint(source: ImageSource, repeat: (bool, bool)) -> VelloIma
     }
 }
 
+/// The gradient paint both rasterizers take, and the paint transform that
+/// stretches a radial gradient's circle into its ellipse.
+pub(crate) fn gradient_paint(gradient: &Gradient) -> (GradientPaint, Affine) {
+    let point = |(x, y): (f32, f32)| Point::new(f64::from(x), f64::from(y));
+    let (paint, shape) = match gradient.shape {
+        GradientShape::Linear { start, end } => (
+            GradientPaint::new_linear(point(start), point(end)),
+            Affine::IDENTITY,
+        ),
+        GradientShape::Radial {
+            center,
+            radii,
+            inner,
+        } => {
+            let c = point(center);
+            let around = Vec2::new(c.x, c.y);
+            (
+                GradientPaint::new_two_point_radial(c, radii.0 * inner, c, radii.0),
+                Affine::translate(around)
+                    * Affine::scale_non_uniform(1.0, f64::from(radii.1 / radii.0))
+                    * Affine::translate(-around),
+            )
+        }
+    };
+    let stops: Vec<(f32, Color)> = gradient
+        .stops
+        .iter()
+        .map(|stop| (stop.offset, color(stop.color)))
+        .collect();
+    let extend = if gradient.repeating {
+        Extend::Repeat
+    } else {
+        Extend::Pad
+    };
+    (
+        paint.with_extend(extend).with_stops(stops.as_slice()),
+        shape,
+    )
+}
+
+/// The most copies of a tiled gradient painted in one item: beyond it, a
+/// tile far smaller than its box would cost more than it can show.
+const MAX_COPIES: usize = 65_536;
+
+/// The copies of a tile at `start`, `size` long, that reach `low..high`:
+/// only the first unless it repeats.
+fn copies(start: f64, size: f64, low: f64, high: f64, repeat: bool) -> std::ops::Range<i64> {
+    if !repeat {
+        return 0..1;
+    }
+    let first = ((low - start) / size).floor() as i64;
+    let last = ((high - start) / size).ceil() as i64;
+    first..last.max(first)
+}
+
 pub(crate) fn glyphs(run: &GlyphRun) -> impl Iterator<Item = Glyph> + Clone + '_ {
     run.glyphs.iter().map(|glyph| Glyph {
         id: glyph.id,
@@ -75,6 +131,9 @@ impl Canvas for Cpu {
     fn set_image(&mut self, _: ImageId, image: &Arc<Pixmap>, repeat: (bool, bool)) {
         self.ctx
             .set_paint(image_paint(ImageSource::Pixmap(image.clone()), repeat));
+    }
+    fn set_gradient(&mut self, gradient: GradientPaint) {
+        self.ctx.set_paint(gradient);
     }
     fn set_paint_transform(&mut self, transform: Affine) {
         self.ctx.set_paint_transform(transform);
@@ -249,6 +308,54 @@ pub(crate) fn paint_list(
                 let painted = rect(*area).intersect(rect(*clip));
                 if painted.width() > 0.0 && painted.height() > 0.0 {
                     ctx.fill_rect(&painted);
+                }
+                ctx.reset_paint_transform();
+                if rounded {
+                    ctx.pop_layer();
+                }
+            }
+            DisplayItem::Gradient {
+                gradient,
+                tile,
+                repeat,
+                area,
+                clip,
+                clip_radii,
+            } => {
+                let painted = rect(*area).intersect(rect(*clip));
+                if painted.width() <= 0.0
+                    || painted.height() <= 0.0
+                    || tile.width <= 0.0
+                    || tile.height <= 0.0
+                {
+                    continue;
+                }
+                let rounded = clip_radii.iter().any(|(x, y)| *x > 0.0 && *y > 0.0);
+                if rounded {
+                    ctx.push_clip_layer(&rounded_rect(*clip, clip_radii));
+                }
+                let (paint, shape) = gradient_paint(gradient);
+                ctx.set_gradient(paint);
+                let one = rect(*tile);
+                let (w, h) = (one.width(), one.height());
+                let columns = copies(one.x0, w, painted.x0, painted.x1, repeat.0);
+                let rows = copies(one.y0, h, painted.y0, painted.y1, repeat.1);
+                let mut painted_copies = 0;
+                'copies: for row in rows {
+                    for column in columns.clone() {
+                        if painted_copies == MAX_COPIES {
+                            break 'copies;
+                        }
+                        painted_copies += 1;
+                        let offset = Vec2::new(column as f64 * w, row as f64 * h);
+                        let copy = (one + offset).intersect(painted);
+                        if copy.width() <= 0.0 || copy.height() <= 0.0 {
+                            continue;
+                        }
+                        // The gradient's geometry is the first copy's.
+                        ctx.set_paint_transform(Affine::translate(offset) * shape);
+                        ctx.fill_rect(&copy);
+                    }
                 }
                 ctx.reset_paint_transform();
                 if rounded {

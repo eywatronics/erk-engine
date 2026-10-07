@@ -37,7 +37,8 @@ use parley::PositionedLayoutItem;
 use crate::color::srgb_bytes;
 use crate::layout::{Layouts, ShapedText};
 pub(crate) use crate::list::{
-    DisplayItem, DisplayList, Frame, GlyphRun, PositionedGlyph, Radii, Rgba,
+    DisplayItem, DisplayList, Frame, GlyphRun, Gradient, GradientShape, PositionedGlyph, Radii,
+    Rgba,
 };
 use crate::resources::{Resources, image_url};
 use crate::scroll::{Scrolling, VIEWPORT};
@@ -218,6 +219,42 @@ impl DisplayList {
                         out,
                         "image {}x{} at {} {} {}x{} repeat {:?}",
                         size.0, size.1, tile.x, tile.y, tile.width, tile.height, repeat
+                    );
+                }
+                DisplayItem::Gradient {
+                    gradient,
+                    tile,
+                    repeat,
+                    ..
+                } => {
+                    let shape = match gradient.shape {
+                        GradientShape::Linear { start, end } => {
+                            format!("linear {} {} to {} {}", start.0, start.1, end.0, end.1)
+                        }
+                        GradientShape::Radial {
+                            center,
+                            radii,
+                            inner,
+                        } => format!(
+                            "radial {} {} radii {}x{} inner {inner}",
+                            center.0, center.1, radii.0, radii.1
+                        ),
+                    };
+                    let stops: Vec<String> = gradient
+                        .stops
+                        .iter()
+                        .map(|stop| format!("{} {}", stop.offset, hex(stop.color)))
+                        .collect();
+                    let _ = writeln!(
+                        out,
+                        "gradient {shape}{} stops {} at {} {} {}x{} repeat {:?}",
+                        if gradient.repeating { " repeating" } else { "" },
+                        stops.join(", "),
+                        tile.x,
+                        tile.y,
+                        tile.width,
+                        tile.height,
+                        repeat
                     );
                 }
                 DisplayItem::PushOpacity(opacity) => {
@@ -884,11 +921,13 @@ fn box_decoration(
     }
 }
 
-/// The `background-image` layers that have arrived, last layer first (the
-/// first is on top). Each is placed in the padding box by
-/// `background-size`, `background-position` and `background-repeat`, and
-/// clipped to the border box (CSS Backgrounds 3 §3). `space` and `round`
-/// repeat plainly.
+/// The `background-image` layers, last layer first (the first is on top):
+/// images that have arrived and gradients. Each is placed in the padding
+/// box by `background-size`, `background-position` and
+/// `background-repeat`, and clipped to the border box (CSS Backgrounds 3
+/// §3). `space` and `round` repeat plainly. A gradient has no natural size:
+/// `auto`, `cover` and `contain` give it the padding box's (CSS Images 3
+/// §5.3).
 fn background_images(
     style: &ComputedValues,
     frame: Frame,
@@ -912,13 +951,28 @@ fn background_images(
         height: (frame.height - top - bottom).max(0.0),
     };
     let nth = |slice: usize, index: usize| index % slice.max(1);
+    use erk_style::style::values::generics::image::GenericImage;
+
     for (index, layer) in layers.iter().enumerate().rev() {
-        let Some(image) = image_url(layer).and_then(|url| resources.image(&url).cloned()) else {
-            continue;
+        let image = image_url(layer).and_then(|url| resources.image(&url).cloned());
+        let css_gradient = match layer {
+            GenericImage::Gradient(gradient) => Some(gradient),
+            _ => None,
         };
-        let (natural_w, natural_h) = (image.width(), image.height());
+        if image.is_none() && css_gradient.is_none() {
+            continue;
+        }
+        // A gradient's "natural size" is the area's: auto fills it.
+        let (natural_w, natural_h) = image.as_ref().map_or((area.width, area.height), |image| {
+            (image.width(), image.height())
+        });
         let sizes = &background.background_size.0;
         let (width, height) = match sizes.get(nth(sizes.len(), index)) {
+            Some(GenericBackgroundSize::Cover | GenericBackgroundSize::Contain)
+                if image.is_none() =>
+            {
+                (area.width, area.height)
+            }
             Some(GenericBackgroundSize::Cover) => {
                 let scale = (area.width / natural_w).max(area.height / natural_h);
                 (natural_w * scale, natural_h * scale)
@@ -938,6 +992,9 @@ fn background_images(
                 };
                 match (resolve(width, area.width), resolve(height, area.height)) {
                     (Some(w), Some(h)) => (w, h),
+                    // No natural ratio: the auto side is the area's.
+                    (Some(w), None) if image.is_none() => (w, area.height),
+                    (None, Some(h)) if image.is_none() => (area.width, h),
                     (Some(w), None) => (w, w * natural_h / natural_w),
                     (None, Some(h)) => (h * natural_w / natural_h, h),
                     (None, None) => (natural_w, natural_h),
@@ -980,15 +1037,30 @@ fn background_images(
             width: if repeat_x { frame.width } else { tile.width },
             height: if repeat_y { frame.height } else { tile.height },
         };
-        out.push(DisplayItem::Image {
-            image: image.id,
-            size: image.size(),
-            tile,
-            repeat: (repeat_x, repeat_y),
-            area: painted,
-            clip: frame,
-            clip_radii: radii,
-        });
+        match (image, css_gradient) {
+            (Some(image), _) => out.push(DisplayItem::Image {
+                image: image.id,
+                size: image.size(),
+                tile,
+                repeat: (repeat_x, repeat_y),
+                area: painted,
+                clip: frame,
+                clip_radii: radii,
+            }),
+            (None, Some(css)) => {
+                if let Some(gradient) = crate::gradient::gradient(style, css, tile) {
+                    out.push(DisplayItem::Gradient {
+                        gradient,
+                        tile,
+                        repeat: (repeat_x, repeat_y),
+                        area: painted,
+                        clip: frame,
+                        clip_radii: radii,
+                    });
+                }
+            }
+            (None, None) => {}
+        }
     }
 }
 
