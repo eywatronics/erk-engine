@@ -146,7 +146,7 @@ fn screenshot(page: &Path, html: &str, out: &Path) -> Result<(), String> {
 fn open(app: &mut App, page: &Path, html: &str) {
     app.set_log(log);
     let provider = Provider::for_page(page);
-    app.set_resource_provider(move |request, responder| provider.answer(request, responder));
+    app.set_resource_provider(move |_, request, responder| provider.answer(request, responder));
     app.load_html(html);
     counter::install(app);
 }
