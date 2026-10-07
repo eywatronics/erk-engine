@@ -24,6 +24,14 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 > create or remove nodes (M4) or show form controls (M5). See
 > [current limitations](#current-limitations).
 
+## The Vision: Built for Embedded Systems & the AI Era
+
+Modern UI frameworks often bundle an entire web browser just to draw a simple interface. This bloat is incompatible with the next generation of hardware and software development. Erk Engine is built with a clear vision for the future:
+
+- **Targeting Embedded and Low-RAM Devices:** Industrial panels, medical devices, kiosks, and Raspberry Pis cannot afford the 150MB+ RAM overhead of a WebView or a V8 engine. By stripping away JavaScript and rendering standard HTML/CSS directly via Rust, Erk brings 60fps, native-speed UIs to highly constrained hardware. It is a drop-in replacement for expensive or complex C++ GUI libraries.
+- **The Perfect Architecture for AI-Assisted Coding:** As LLMs write more of our code, they often hallucinate or fail when tangled in npm packages, bundler configs, and complex JavaScript framework lifecycles. However, AI is exceptionally good at writing standard HTML/CSS and pure system code (Rust/C/Go). Erk's zero-boilerplate architecture—separating a "dumb" HTML/CSS UI from a compiled, native backend—provides the most deterministic, AI-friendly environment for rapid app generation.
+- **A Return to Sanity (Dumb UI, Smart Core):** We reject the trend of forcing system logic, state, and routing into the view layer. In Erk, the interface is just markup and styling. The intelligence lives where it belongs: in your compiled, I/O-capable system code, running without IPC bridges or garbage collection pauses.
+
 ## Why Erk?
 
 - **No WebView, no JavaScript engine, ever.** Erk is the renderer: the
