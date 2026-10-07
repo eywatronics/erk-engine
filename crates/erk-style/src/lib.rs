@@ -219,6 +219,9 @@ pub fn query(
     let guard = SharedRwLock::new();
     let tree = StyledTree::new(doc, &guard);
     tree.populate(&url, interaction);
+    if tree.node(scope).id.is_none() {
+        return Ok(Vec::new());
+    }
     let mut caches = SelectorCaches::default();
     let mut context = MatchingContext::new(
         MatchingMode::Normal,
