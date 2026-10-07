@@ -36,6 +36,24 @@
 //! assert_eq!(app.text(button).unwrap(), "1");
 //! ```
 //!
+//! A windowed app, as the README shows it: errors are `std::error::Error`s.
+//!
+//! ```no_run
+//! use erk::{App, Config, EventKind};
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut app = App::new(Config { title: "Hello".to_owned(), ..Config::default() })?;
+//!     app.load_html(r#"<button id="b">Click</button><p id="label">Not yet.</p>"#);
+//!     let button = app.query(None, "#b")?.expect("the page has a button");
+//!     let label = app.query(None, "#label")?.expect("the page has a label");
+//!     app.on(button, EventKind::Click, move |cx, _event| {
+//!         cx.set_text(label, "Clicked.").unwrap();
+//!     })?;
+//!     app.run()?;
+//!     Ok(())
+//! }
+//! ```
+//!
 //! ```compile_fail
 //! fn on_another_thread<T: Send>(_: T) {}
 //! on_another_thread(erk::App::headless(erk::Config::default()).unwrap());
@@ -148,6 +166,23 @@ pub enum Status {
     /// An earlier call panicked; only destroying the app works.
     Poisoned = 8,
 }
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::InvalidArgument => "invalid argument",
+            Self::StaleNode => "stale node",
+            Self::WrongThread => "called from a thread other than the app's",
+            Self::BufferTooSmall => "buffer too small",
+            Self::NotFound => "not found",
+            Self::Reentrant => "not allowed inside a callback",
+            Self::Panic => "the call panicked",
+            Self::Poisoned => "the app is poisoned",
+        })
+    }
+}
+
+impl std::error::Error for Status {}
 
 impl From<erk_renderer::Status> for Status {
     fn from(status: erk_renderer::Status) -> Self {

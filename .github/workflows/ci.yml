@@ -62,6 +62,11 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked --verbose
 
+      # M3's acceptance: a Rust host and a C host each open a page, click its
+      # button and get the event.
+      - name: The Rust example opens a page and gets a click
+        run: cargo run -p erk --example hello --locked
+
       # The C ABI from C (M3.5, p1-contract §11): hello.c opens a page
       # without a window, clicks a button and gets the event, and checks
       # that strings are copied, buffers filled whole or not at all and
