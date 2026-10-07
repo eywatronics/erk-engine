@@ -24,6 +24,14 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 > create or remove nodes (M4) or show form controls (M5). See
 > [current limitations](#current-limitations).
 
+## The Vision: Built for Embedded Systems & the AI Era
+
+Modern UI frameworks often bundle an entire web browser just to draw a simple interface. This bloat is incompatible with the next generation of hardware and software development. Erk Engine is built with a clear vision for the future:
+
+- **Targeting Embedded and Low-RAM Devices:** Industrial panels, medical devices, kiosks, and Raspberry Pis are short on memory, and a WebView or a JavaScript engine brings a browser's worth of it. Erk's idle window takes 12.8 MB of private memory (14.2 MB with 1000 elements). By leaving JavaScript out and rendering standard HTML/CSS directly from Rust, Erk aims at smooth, native-speed UIs on constrained hardware. Measured today on a desktop CPU: a settings screen takes about 10 ms a frame, a 1000-element page about 66 ms, because every change still restyles and lays out the whole page; incremental rendering (M5) is the work that brings large pages to 60 fps. Erk has not been measured on embedded hardware yet (see [Measurements](#measurements)). It is an alternative to expensive or complex C++ GUI libraries, with its own API (Rust and a C ABI), not a drop-in replacement.
+- **The Perfect Architecture for AI-Assisted Coding:** As LLMs write more of our code, they often hallucinate or fail when tangled in npm packages, bundler configs, and complex JavaScript framework lifecycles. However, AI is exceptionally good at writing standard HTML/CSS and pure system code (Rust/C/Go). Erk's zero-boilerplate architecture—separating a "dumb" HTML/CSS UI from a compiled, native backend—provides the most deterministic, AI-friendly environment for rapid app generation.
+- **A Return to Sanity (Dumb UI, Smart Core):** We reject the trend of forcing system logic, state, and routing into the view layer. In Erk, the interface is just markup and styling. The intelligence lives where it belongs: in your compiled, I/O-capable system code, running without IPC bridges or garbage collection pauses.
+
 ## Why Erk?
 
 - **No WebView, no JavaScript engine, ever.** Erk is the renderer: the
@@ -160,7 +168,8 @@ Measured, not claimed. Windows 11, Intel i7-10750H, CPU rendering
 |---|---|
 | Release binary, default profile (Windows) | 16.2 MB (14.9 MB at M1.0, 9.5 MB with `opt-level = "s"` then) |
 | Idle window, private memory | 12.8 MB (small page), 14.2 MB (1000 elements) |
-| 1000-element page, full render | first call ~120 ms, then a median of ~71 ms |
+| Full frame (style, layout, display list, CPU paint), median of 30 at 800 × 600 | settings screen 9.8 ms, 1000-element page 66.5 ms (M3) |
+| Painting alone, 1000-element page | 15.6 ms on the CPU, 7.8 ms on the GPU (GTX 1650) |
 
 The [Web Platform Tests](https://web-platform-tests.org/) reftests run in
 CI against a recorded baseline: 68.1 % of `css/CSS2/normal-flow` (508 of
