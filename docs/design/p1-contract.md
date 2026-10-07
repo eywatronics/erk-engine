@@ -1,7 +1,7 @@
 # Erk Engine — P1: Gömme sözleşmesi (M0.5)
 
 - **Tarih:** 2026-09-30
-- **Durum:** ABI v0.2, M3.5'te koda indi (`crates/erk-ffi`,
+- **Durum:** ABI v0.3 (M4.0), v0.2 M3.5'te koda indi (`crates/erk-ffi`,
   `include/erk.h`, §10). Değişiklik önce bu belgede, gerekçesiyle yapılır;
   M4–M5 boyunca öğrenilenlerle v0.3 diye ilerler; 1.0'a (M8) kadar kırıcı
   değişiklik hakkı saklıdır.
@@ -377,6 +377,17 @@ gerekçeli bir daraltma:
   (girdi, değişiklik, gönderim, tuş: formlarla M5) `ERK_ERR_INVALID_ARGUMENT`
   döner. Başarısız bir `erk_on` `user_data`'yı almaz, `destroy`'u çağırmaz:
   sahiplik host'ta kalır.
+- **v0.3 (M4.0):** M4'e kalan çağrılar geldi: `erk_node_create`,
+  `erk_text_create`, `erk_node_append`, `erk_node_insert_before`
+  (`before` `ERK_NODE_NONE` ise sona), `erk_node_remove`,
+  `erk_node_set_attr`, `erk_node_remove_attr` (öznitelik yoksa
+  `ERK_ERR_NOT_FOUND`); eklenen: `erk_node_attr` ve sınıf yardımcıları
+  `erk_node_add_class`, `erk_node_remove_class`, `erk_node_has_class`.
+  DOM'un reddettiği ağaç (bir düğüm kendi içine, belge düğümü, belgeye
+  metin, ebeveyni başka olan `before`) ve ad olmayan etiket ya da öznitelik
+  adı `ERK_ERR_INVALID_ARGUMENT`. Oluşturulan düğüm belgeye bağlı değildir:
+  çizilmez, sorguda bulunmaz, kutusu yoktur; aboneliği eklenince çalışır.
+  `erk_text_create` adının yerine taslaktaki gibi kaldı.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

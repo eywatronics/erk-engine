@@ -45,7 +45,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 2u));
+  CHECK(erk_abi_version() == ((0u << 16) | 3u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -71,6 +71,20 @@ int main(void) {
   CHECK(erk_query(app, ERK_NODE_NONE, str("#b"), &button) == ERK_OK);
   CHECK(erk_query(app, ERK_NODE_NONE, str("#label"), &label) == ERK_OK);
   CHECK(button != ERK_NODE_NONE && label != ERK_NODE_NONE);
+
+  /* The host builds part of the page: a new paragraph after the label. */
+  ErkNodeId body = ERK_NODE_NONE, note = ERK_NODE_NONE, note_text = ERK_NODE_NONE;
+  CHECK(erk_query(app, ERK_NODE_NONE, str("body"), &body) == ERK_OK);
+  CHECK(erk_node_create(app, str("p"), &note) == ERK_OK);
+  CHECK(erk_text_create(app, str("C'den eklendi"), &note_text) == ERK_OK);
+  CHECK(erk_node_append(app, note, note_text) == ERK_OK);
+  CHECK(erk_node_set_attr(app, note, str("id"), str("note")) == ERK_OK);
+  CHECK(erk_node_append(app, body, note) == ERK_OK);
+  ErkNodeId found = ERK_NODE_NONE;
+  CHECK(erk_query(app, ERK_NODE_NONE, str("body > p#note"), &found) == ERK_OK);
+  CHECK(found == note);
+  /* Into itself: refused. */
+  CHECK(erk_node_append(app, note, note) == ERK_ERR_INVALID_ARGUMENT);
 
   /* A buffer too small is not written; *len says what is needed. */
   char small[4] = {'-', '-', '-', '-'};

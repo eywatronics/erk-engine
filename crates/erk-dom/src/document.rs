@@ -1,6 +1,7 @@
 use html5ever::tree_builder::QuirksMode;
+use html5ever::{LocalName, QualName, local_name, ns};
 
-use crate::{Arena, Node, NodeData, NodeId};
+use crate::{Arena, Attribute, ElementData, Node, NodeData, NodeId};
 
 /// A DOM tree: an arena of nodes plus the id of the document node.
 pub struct Document {
@@ -100,6 +101,118 @@ impl Document {
         }
     }
 
+    /// A new element named `tag`, not in the tree yet; HTML lowercases the
+    /// name (DOM's `createElement`). A `<template>` gets its contents
+    /// fragment.
+    pub fn create_element(&mut self, tag: &str) -> Result<NodeId, MutationError> {
+        if !is_name(tag) {
+            return Err(MutationError::InvalidName);
+        }
+        let name = QualName::new(None, ns!(html), LocalName::from(tag.to_ascii_lowercase()));
+        let template = name.local == local_name!("template");
+        let mut element = ElementData::new(name, Vec::new());
+        if template {
+            element.template_contents = Some(self.create(NodeData::DocumentFragment));
+        }
+        Ok(self.create(NodeData::Element(element)))
+    }
+
+    /// A new text node, not in the tree yet.
+    pub fn create_text(&mut self, text: &str) -> NodeId {
+        self.create(NodeData::Text(text.to_owned()))
+    }
+
+    /// Insert `child` into `parent`, before `before` or last, moving it from
+    /// wherever it was, as DOM's `insertBefore` does; refused where DOM's
+    /// pre-insert validity refuses it.
+    pub fn insert(
+        &mut self,
+        parent: NodeId,
+        child: NodeId,
+        before: Option<NodeId>,
+    ) -> Result<(), MutationError> {
+        let (Some(parent_node), Some(child_node)) = (self.nodes.get(parent), self.nodes.get(child))
+        else {
+            return Err(MutationError::Stale);
+        };
+        let parent_takes = match &parent_node.data {
+            NodeData::Element(_) | NodeData::DocumentFragment => true,
+            // A document holds elements, comments and processing
+            // instructions, never text.
+            NodeData::Document => !matches!(child_node.data, NodeData::Text(_)),
+            _ => false,
+        };
+        let child_moves = !matches!(
+            child_node.data,
+            NodeData::Document | NodeData::DocumentFragment | NodeData::Doctype { .. }
+        );
+        if !parent_takes || !child_moves {
+            return Err(MutationError::Hierarchy);
+        }
+        // Not into itself or its own descendant.
+        let mut ancestor = Some(parent);
+        while let Some(id) = ancestor {
+            if id == child {
+                return Err(MutationError::Hierarchy);
+            }
+            ancestor = self.nodes.get(id).and_then(|node| node.parent);
+        }
+        match before {
+            None => self.append(parent, child),
+            Some(before) => {
+                let sibling = self.nodes.get(before).ok_or(MutationError::Stale)?;
+                if sibling.parent != Some(parent) {
+                    return Err(MutationError::Hierarchy);
+                }
+                // Before itself: where it already is.
+                if before != child {
+                    self.insert_before(before, child);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Set attribute `name` of element `id` to `value`, replacing its value
+    /// if it has one; HTML lowercases the name.
+    pub fn set_attr(&mut self, id: NodeId, name: &str, value: &str) -> Result<(), MutationError> {
+        if !is_name(name) {
+            return Err(MutationError::InvalidName);
+        }
+        let element = self.element_mut(id)?;
+        let local = LocalName::from(name.to_ascii_lowercase());
+        match element
+            .attrs
+            .iter_mut()
+            .find(|attr| attr.name.ns == ns!() && attr.name.local == local)
+        {
+            Some(attr) => value.clone_into(&mut attr.value),
+            None => element.attrs.push(Attribute {
+                name: QualName::new(None, ns!(), local),
+                value: value.to_owned(),
+            }),
+        }
+        Ok(())
+    }
+
+    /// Remove attribute `name` of element `id`; whether it had one.
+    pub fn remove_attr(&mut self, id: NodeId, name: &str) -> Result<bool, MutationError> {
+        let element = self.element_mut(id)?;
+        let local = LocalName::from(name.to_ascii_lowercase());
+        let before = element.attrs.len();
+        element
+            .attrs
+            .retain(|attr| !(attr.name.ns == ns!() && attr.name.local == local));
+        Ok(element.attrs.len() != before)
+    }
+
+    fn element_mut(&mut self, id: NodeId) -> Result<&mut ElementData, MutationError> {
+        match &mut self.nodes.get_mut(id).ok_or(MutationError::Stale)?.data {
+            NodeData::Element(element) => Ok(element),
+            _ => Err(MutationError::Hierarchy),
+        }
+    }
+
     /// Remove `id` from its parent. The node and its subtree stay in the
     /// arena and can be inserted again.
     pub fn detach(&mut self, id: NodeId) {
@@ -192,6 +305,33 @@ impl Document {
 /// The node an id named has been removed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaleNode;
+
+/// Why a change from outside the parser was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationError {
+    /// A node it names was removed.
+    Stale,
+    /// The change would make a tree DOM does not allow: a node inside
+    /// itself, the document node moved, a child under a node that cannot
+    /// have it, `before` not a child of the parent, an attribute on a node
+    /// that is not an element.
+    Hierarchy,
+    /// A tag or attribute name that is not a name.
+    InvalidName,
+}
+
+/// Whether `name` is a name an element or attribute may have: XML's Name,
+/// which is what the parser produces and selectors can match. A letter,
+/// `_`, `:` or any non-ASCII character first; letters, digits, `-`, `.`,
+/// `_`, `:` and non-ASCII after.
+fn is_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let starts = |c: char| c.is_ascii_alphabetic() || c == '_' || c == ':' || !c.is_ascii();
+    starts(first) && chars.all(|c| starts(c) || c.is_ascii_digit() || c == '-' || c == '.')
+}
 
 /// Iterator over a node's children, first to last.
 pub struct Children<'a> {
