@@ -294,11 +294,17 @@ jobs:
           command: check licenses
           arguments: --locked
 
-  # cargo-fuzz on render_html: libFuzzer feeds it bytes for five minutes,
-  # starting from the robustness corpus and the reference pages. A panic or
-  # a crash fails the job and its input is kept as an artifact, to go into
-  # crates/erk-renderer/tests/robustness/ with the fix. The nightly is
-  # pinned so that a new nightly cannot turn the job red on its own.
+  # cargo-fuzz: libFuzzer feeds each target bytes for five minutes. A panic
+  # or a crash fails the job and its input is kept as an artifact, to go
+  # into the target's fixed test with the fix. The nightly is pinned so
+  # that a new nightly cannot turn the job red on its own.
+  #
+  # - render_html (M1): bytes as a page, starting from the robustness
+  #   corpus and the reference pages; findings go into
+  #   crates/erk-renderer/tests/robustness/.
+  # - mutations (M4.2): bytes as a script of host calls (changes, batches,
+  #   stale ids, frames, inputs, callbacks that change the document);
+  #   findings go into FOUND in crates/erk/tests/mutations.rs.
   #
   # Two jobs side by side, measured on PR #26: without a sanitizer libFuzzer
   # tries 67 inputs a second and finds panics; with AddressSanitizer it
@@ -311,11 +317,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - sanitizer: none
+          - target: render_html
+            sanitizer: none
             max_len: 4096
-          - sanitizer: address
+            seeds: crates/erk-renderer/tests/robustness crates/erk-renderer/tests/reference/pages
+          - target: render_html
+            sanitizer: address
             max_len: 65536
-    name: fuzz (${{ matrix.sanitizer }})
+            seeds: crates/erk-renderer/tests/robustness crates/erk-renderer/tests/reference/pages
+          - target: mutations
+            sanitizer: none
+            max_len: 1024
+            seeds: ""
+          - target: mutations
+            sanitizer: address
+            max_len: 1024
+            seeds: ""
+    name: fuzz ${{ matrix.target }} (${{ matrix.sanitizer }})
     env:
       NIGHTLY: nightly-2026-09-25
     steps:
@@ -329,25 +347,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
-          key: ${{ matrix.sanitizer }}
+          key: ${{ matrix.target }}-${{ matrix.sanitizer }}
 
       - name: The fuzz lock file is current
         run: cargo "+$NIGHTLY" fetch --locked --manifest-path fuzz/Cargo.toml
 
-      - name: render_html survives five minutes of fuzzing
+      - name: ${{ matrix.target }} survives five minutes of fuzzing
         run: |
-          mkdir -p fuzz/corpus/render_html
-          cargo "+$NIGHTLY" fuzz run -s ${{ matrix.sanitizer }} render_html \
-            fuzz/corpus/render_html \
-            crates/erk-renderer/tests/robustness \
-            crates/erk-renderer/tests/reference/pages \
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cargo "+$NIGHTLY" fuzz run -s ${{ matrix.sanitizer }} ${{ matrix.target }} \
+            fuzz/corpus/${{ matrix.target }} ${{ matrix.seeds }} \
             -- -max_total_time=300 -max_len=${{ matrix.max_len }} -timeout=60 -rss_limit_mb=4096 -print_final_stats=1
 
       - name: Keep the input that broke it
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-artifacts-${{ matrix.sanitizer }}
+          name: fuzz-artifacts-${{ matrix.target }}-${{ matrix.sanitizer }}
           path: fuzz/artifacts
 
   # The Web Platform Tests reftests of tests/wpt/dirs.txt, at the commit in

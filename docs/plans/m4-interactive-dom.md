@@ -47,7 +47,8 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
   ya yapılır ya gerekçesiyle sınır olarak yazılır.
 - **Bellek ölçümü:** "10 bin döngüde bellek büyümüyor" bir sayım ister:
   sayaçlı bir global allocator test ikilisinde mi, yoksa arena ve yan
-  tabloların boyutları mı? M4.2'de ikisi de denenir.
+  tabloların boyutları mı? M4.2'de ikisi de denenir. **Çözüldü (M4.2):**
+  sayaçlı ayırıcı; gerekçe yürütme notlarında.
 
 ## Genel kısıtlar
 
@@ -87,10 +88,10 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 
 ### M4.2: Fuzz ve bellek
 
-- [ ] `Mutation` dizilerinin fuzz'ı: rastgele değişiklikler, eski id'ler,
+- [x] `Mutation` dizilerinin fuzz'ı: rastgele değişiklikler, eski id'ler,
   kendi içine ekleme, kareler arasında; panik yok. CI'ın fuzz job'larına
   ikinci hedef olarak.
-- [ ] 10 bin oluştur/sil döngüsünde bellek büyümüyor (açık soruya göre).
+- [x] 10 bin oluştur/sil döngüsünde bellek büyümüyor (açık soruya göre).
 
 ### M4.3: Gradyanlar
 
@@ -143,5 +144,19 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 | C-ABI 0.4 | `ErkMutation` dizisi `struct_size` adımıyla okunuyor: eski bir başlıkla derlenmiş dizi de doğru yürünüyor. `ERK_NEW_NODE + i` gerçek id'lerle karışmıyor: id'nin üst yarısı nesil, hiç 0 değil. C tarafındaki tür denetimi topluluğu Rust'a çevirirken yapılıyor: bilinmeyen tür hiçbir şey uygulanmadan reddediliyor, motorun reddettiği ise sırasıyla. `hello.c` iki öğeli bir listeyi tek çağrıyla kurup `erk_query_all` ile buluyor (MSVC'de denendi) |
 | Klavye olayları (karar 3) | Motor her tuş için önce `KeyDown`/`KeyUp`'ı odaktaki elemana (yoksa gövdeye, yoksa köke) gönderiyor, sonra tuşun varsayılan işini (Tab, Enter, Space: M2'deki gibi). Tarayıcıdaki gibi olay yakalama, hedef ve kabarcık evrelerinden geçiyor. `preventDefault` yok: varsayılan iş olaydan bağımsız sürüyor (M5'te formlarla). `Event.key` tuşu, C'de `key` ve karakter için `text` |
 | `css-support.md` | "Key events to the host" satırı ikiye ayrıldı: tuş olayları Supported (test adıyla), metin girişi M5 |
-| Mutasyonlar | C'de topluluk sırasının id sanılması, hata sırasının yazılmaması, karakter tuşunun "diğer" bildirilmesi, `erk_query_all`'ın küçük tampona yazması, `Ref::New`'in bir kaydırılması, tuşların kabarcıklanmaması, tuş olayının tuşsuz gelmesi, tuş olayının hiç gelmemesi: hepsi yakalandı |
+| Mutasyonlar (M4.1) | C'de topluluk sırasının id sanılması, hata sırasının yazılmaması, karakter tuşunun "diğer" bildirilmesi, `erk_query_all`'ın küçük tampona yazması, `Ref::New`'in bir kaydırılması, tuşların kabarcıklanmaması, tuş olayının tuşsuz gelmesi, tuş olayının hiç gelmemesi: hepsi yakalandı |
+| Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |
+
+### M4.2
+
+| Konu | Not |
+|---|---|
+| Yorumlayıcı | Fuzz hedefi ve sabit test aynı dosyayı çalıştırıyor (`crates/erk/tests/script/mod.rs`, fuzz tarafı `#[path]` ile): baytlar 18 işlemden birini ve argümanlarını seçiyor; `erk`'in belgeyi değiştiren ve okuyan her çağrısı, toplu `apply` (ileriye ve boşa `Ref::New` dahil), kare, tuş, işaretçi, tekerlek, `query_all`, sayfa değiştirme, abonelik ve aboneliği bitirme. Geri çağrılar olay yolundayken hedefi siliyor, metnini değiştiriyor, yayılımı durduruyor, sayfayı değiştiriyor ya da hedefe eleman ekliyor. Görülen düğümler (silinenler ve eski sayfanınkiler dahil) 64'le sınırlı bir havuzda. Baytlar bitince her okuma 0: bir betiğin her öneki de betik, libFuzzer'ın küçültmesi doğrudan çalışıyor |
+| **Bulunan hata** | Sabit testin ilk koşusu buldu: belgeye bağlı olmayan bir kapsamla `query_all` stil sisteminde panikliyordu (`erk-style` `node.rs`: "style traversal reached a slot outside the document"). Stil ağacı yalnızca kökten ulaşılan düğümlere yer açıyor; kapsam ve altı yersizdi. Düzeltme `erk_style::query`'de: bağlı olmayan kapsamda hiçbir şey bulunmuyor (karar 2: bağlanmamış düğümler sorguda yok), seçici yine ayrıştırılıyor (geçersizse `InvalidArgument`). Betik 15 bayta küçültülüp `FOUND`'a, durum `a_query_inside_a_detached_element_finds_nothing` testine girdi; düzeltmenin mutasyonu iki testte de yakalandı |
+| Sabit test | 200 betik × 160 bayt, Windows debug'da ~6 sn. Bir kerelik geniş arama (3000 × 300 bayt, başka tohum, ~2 dk) düzeltmeden sonra başka panik bulmadı |
+| Fuzz job'ları | `fuzz` job'ı hedef × sanitizer matrisi oldu: `render_html` ve `mutations`, her biri sanitizer'sız ve AddressSanitizer'la, dört job paralel, beşer dakika. Job adları zorunlu kontroller arasında değil (kural seti yalnızca `rust-checks` ve `guards` istiyor). `mutations` boş korpusla başlıyor, `-max_len=1024`. Fuzz workspace'inin kilidi `erk` ile büyüdü (winit ailesi); yeni çözülen dört paket (`objc2` ×2, `tokio`, `zerocopy`) ana kilitteki sürümlere sabitlendi |
+| Bellek ölçümü (açık soru) | Sayaçlı global ayırıcı seçildi: test ikilisinin her iş parçacığının (motorun kare iş parçacığı dahil) canlı yığın baytları. Arena ve yan tablo boyutlarını saymak reddedildi: Stylo'nun verisini, metin yerleşimlerini, raster tablolarını ve C-ABI'nin geri çağrı kutularını görmez. Global ayırıcı `unsafe` kod olduğu için test `erk-ffi`'de (listelenmiş istisna) ve C-ABI üzerinden: host'un gerçek yolu. `check-ffi.sh`'nin `SAFETY` kuralı `tests/*.rs`'i de kapsıyor; gerekçesiz bir `allow` ve bir `expect` yazımıyla denendi, ikisi de yakalandı |
+| 10 bin döngü | Her döngü: `li` + metin + iki öznitelik + sınıf + tıklama aboneliği, listeye ekleme, kare, işaretçi hareket/bas/bırak, silme (silme sonraki döngünün karesinde çiziliyor). 200 döngü ısınmadan sonra 10 000 döngüde büyüme **0 bayt**; eşik 16 KiB (döngü başına 8 baytlık bir sızıntı 80 000 olurdu). Windows debug'da ~140 sn |
+| CI'da kasıtlı ihlal | PR'ın ikinci commit'i `erk-style` düzeltmesini geri aldı: `fuzz mutations (none)` ve `fuzz mutations (address)` boş korpustan başlayıp aynı paniği buldu (libFuzzer "deadly signal", girdi artifact olarak saklandı); `rust-checks` üç platformda sabit testle düştü. Geri alınınca yeşil |
+| Mutasyonlar (M4.2) | Silmenin abonelikleri bırakmaması: +1 182 448 bayt, yakalandı. Arenanın silinen yuvayı yeniden kullanmaması: +4 030 720 bayt, yakalandı. Bağlı olmayan kapsamın eşlenmesi: panik, yakalandı |
 | Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |

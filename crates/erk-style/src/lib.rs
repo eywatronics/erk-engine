@@ -199,7 +199,9 @@ pub struct InvalidSelector;
 /// The elements inside `scope` (not `scope` itself) that match the CSS
 /// selector list `selector`, in document order, as `querySelectorAll`
 /// finds them. `:scope` is `scope` when it is an element. State
-/// pseudo-classes (`:hover`, `:focus`) follow `interaction`.
+/// pseudo-classes (`:hover`, `:focus`) follow `interaction`. Nothing is
+/// found inside a subtree the document does not contain (M4 plan, decision
+/// 2): it has no style to match against.
 pub fn query(
     doc: &Document,
     scope: NodeId,
@@ -217,6 +219,9 @@ pub fn query(
     let guard = SharedRwLock::new();
     let tree = StyledTree::new(doc, &guard);
     tree.populate(&url, interaction);
+    if tree.node(scope).id.is_none() {
+        return Ok(Vec::new());
+    }
     let mut caches = SelectorCaches::default();
     let mut context = MatchingContext::new(
         MatchingMode::Normal,

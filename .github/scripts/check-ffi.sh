@@ -40,9 +40,10 @@ awk '
   }
 ' "$src" || fail=1
 
-# 2. Every allow of unsafe code gives its reason, however it is written:
-#    alone, with other lints, or as an expect.
-for file in crates/erk-ffi/src/*.rs; do
+# 2. Every allow of unsafe code gives its reason, however it is written
+#    (alone, with other lints, or as an expect) and wherever it is: the
+#    tests have unsafe code too (the counting allocator of tests/memory.rs).
+for file in crates/erk-ffi/src/*.rs crates/erk-ffi/tests/*.rs; do
   awk -v file="$file" '
     /(allow|expect)\([^)]*unsafe_code/ && $0 !~ /\/\/ SAFETY:/ && !safe {
       print file ":" NR ": an allow of unsafe code without a SAFETY reason"; bad = 1

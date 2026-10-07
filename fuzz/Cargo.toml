@@ -1,6 +1,7 @@
-# The cargo-fuzz targets (M1): `render_html` never panics, whatever the
-# input. A workspace of its own, run with a pinned nightly in CI (the `fuzz`
-# job); the engine's workspace and its lints do not include it.
+# The cargo-fuzz targets: `render_html` (M1) never panics, whatever the
+# input; `mutations` (M4.2) runs any script of host calls without a panic.
+# A workspace of its own, run with a pinned nightly in CI (the `fuzz` job);
+# the engine's workspace and its lints do not include it.
 [package]
 name = "erk-fuzz"
 version = "0.0.0"
@@ -15,10 +16,18 @@ cargo-fuzz = true
 # Links libFuzzer, which its build script compiles (C++, NCSA licence).
 libfuzzer-sys = "=0.4.13"
 erk-renderer = { path = "../crates/erk-renderer" }
+erk = { path = "../crates/erk" }
 
 [[bin]]
 name = "render_html"
 path = "fuzz_targets/render_html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mutations"
+path = "fuzz_targets/mutations.rs"
 test = false
 doc = false
 bench = false
