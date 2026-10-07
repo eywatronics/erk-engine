@@ -152,6 +152,23 @@ fn query_all_finds_every_match_in_document_order() {
     assert!(app.query_all(None, ".yok").unwrap().is_empty());
 }
 
+#[test]
+fn a_query_inside_a_detached_element_finds_nothing() {
+    // Found by the mutation fuzz (M4.2): the scope had no place in the
+    // styled tree, and matching it panicked.
+    let mut app = app(r#"<p class="x">1</p>"#);
+    let detached = app.create_element("div").unwrap();
+    let inside = app.create_element("p").unwrap();
+    app.append(detached, inside).unwrap();
+    app.add_class(inside, "x").unwrap();
+    assert_eq!(app.query_all(Some(detached), "*"), Ok(vec![]));
+    assert_eq!(app.query(Some(detached), ".x"), Ok(None));
+    assert_eq!(
+        app.query_all(Some(detached), "p >"),
+        Err(Status::InvalidArgument)
+    );
+}
+
 /// What a key subscription saw: kind, phase, target and key.
 type Seen = (EventKind, Phase, Node, Option<Key>);
 
