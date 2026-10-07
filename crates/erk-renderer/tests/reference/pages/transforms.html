@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Dönüşümler</title>
+<style>
+  body { margin: 20px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 14px; }
+  .satir { display: flex; gap: 36px; margin-bottom: 36px; }
+  .yer { width: 100px; height: 70px; background: #f1f5f9; }
+  .kutu { width: 100px; height: 70px; }
+  /* Functions. */
+  .don { background: #2563eb; transform: rotate(20deg); }
+  .olcek { background: #16a34a; transform: scale(0.6, 0.8); }
+  .kay { background: #dc2626; transform: translate(20%, -10px); }
+  .egik { background: #9333ea; transform: skewX(-15deg); }
+  .matris { background: #ea580c; transform: matrix(0.8, 0.2, -0.2, 0.8, 5, 5); }
+  /* Origins. */
+  .kose { background: #0891b2; transform: rotate(15deg); transform-origin: 0 0; }
+  .sag-alt { background: #be123c; transform: scale(0.5); transform-origin: right bottom; }
+  .piksel { background: #4d7c0f; transform: rotate(-25deg); transform-origin: 20px 60px; }
+  /* Individual properties, and with transform. */
+  .ayri { background: #0f766e; translate: 10px 5px; rotate: 10deg; scale: 0.8; }
+  .ikisi { background: #7c2d12; rotate: 30deg; transform: translateX(20px); }
+  /* Nested, clipped, rounded, with a gradient, with text. */
+  .dis { background: #fde68a; transform: rotate(10deg); padding: 10px; width: 80px; height: 50px; }
+  .ic { background: #b45309; transform: rotate(-30deg) scale(0.8); height: 50px; }
+  .kirp { overflow: hidden; border-radius: 16px; transform: rotate(-12deg); background: #e0f2fe; }
+  .kirp div { width: 160px; height: 30px; margin: 20px 0 0 -20px; background: #0369a1; }
+  .gradyan { background: linear-gradient(90deg, #f43f5e, #6366f1); transform: rotate(8deg) scale(0.9); }
+  .yazi { background: #1e293b; color: #f8fafc; padding: 8px; transform: rotate(-8deg); box-sizing: border-box; }
+  /* Containing blocks. */
+  .tasiyici { background: #cbd5e1; transform: translate(10px, 0); }
+  .mutlak { position: absolute; left: 10px; top: 10px; width: 30px; height: 30px; background: #16a34a; }
+  .sabit { position: fixed; right: 10px; bottom: 10px; width: 30px; height: 30px; background: #dc2626; }
+</style>
+</head>
+<body>
+  <div class="satir">
+    <div class="yer"><div class="kutu don"></div></div>
+    <div class="yer"><div class="kutu olcek"></div></div>
+    <div class="yer"><div class="kutu kay"></div></div>
+    <div class="yer"><div class="kutu egik"></div></div>
+    <div class="yer"><div class="kutu matris"></div></div>
+  </div>
+  <div class="satir">
+    <div class="yer"><div class="kutu kose"></div></div>
+    <div class="yer"><div class="kutu sag-alt"></div></div>
+    <div class="yer"><div class="kutu piksel"></div></div>
+    <div class="yer"><div class="kutu ayri"></div></div>
+    <div class="yer"><div class="kutu ikisi"></div></div>
+  </div>
+  <div class="satir">
+    <div class="yer"><div class="dis"><div class="ic"></div></div></div>
+    <div class="yer"><div class="kutu kirp"><div></div></div></div>
+    <div class="yer"><div class="kutu gradyan"></div></div>
+    <div class="yer"><div class="kutu yazi">Döndürülmüş metin</div></div>
+    <div class="yer"><div class="kutu tasiyici"><div class="mutlak"></div><div class="sabit"></div></div></div>
+  </div>
+</body>
+</html>
