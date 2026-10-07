@@ -73,7 +73,7 @@ v3'ün ve uygulama tuzakları notunun değerlendirmesi:
 ### 3.1 Akış
 
 ```
-host / bağlama (Rust, Python, Go, erk-script)
+host / bağlama (Rust, Python, Go, JS/TS)
         │  Mutation'lar (sinyaller burada Mutation'a çevrilir)
         ▼
 Transaction ──► MutationJournal (kare içinde birikir, birleşir)

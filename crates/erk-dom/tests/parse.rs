@@ -151,3 +151,19 @@ fn nesting_stops_where_chrome_stops() {
     assert_eq!(depth_below_body(&Document::parse_html(&nested(600))), 511);
     assert_eq!(depth_below_body(&Document::parse_html(&nested(5000))), 511);
 }
+
+#[test]
+fn documents_are_parsed_as_with_scripting_disabled() {
+    // Erk never runs scripts (p1-embedded §3.3), so it parses as a browser
+    // with scripting off does (HTML §13.2.4.1): what is inside <noscript>
+    // is markup, and the page's fallback shows.
+    assert_eq!(
+        body("<p>a</p><noscript><p>Betik yok</p></noscript>"),
+        r#"body(p("a"),noscript(p("Betik yok")))"#
+    );
+    // A script stays an inert element with its source as text.
+    assert_eq!(
+        body("<p>a</p><script>document.title = 'x'</script><p>kaldı</p>"),
+        r#"body(p("a"),script("document.title = 'x'"),p("kaldı"))"#
+    );
+}

@@ -1,7 +1,7 @@
 # Erk Engine yol haritası
 
-Erk gömülü bir HTML/CSS masaüstü UI motorudur: çekirdekte JavaScript yok
-(isteğe bağlı bir bağlama olarak var), host uygulama DOM'u sürer. Hedef:
+Erk gömülü bir HTML/CSS masaüstü UI motorudur: `<script>` hiçbir zaman
+çalışmaz, host uygulama (Rust, C, Python, Go, JS/TS) DOM'u sürer. Hedef:
 modern, açık kaynaklı, Rust ile güçlendirilmiş yeni nesil bir Sciter. Bu doküman kilometre taşlarının kapsamını ve kabul kriterini
 tanımlar. Yön değişikliğinin gerekçesi [p1-embedded.md](../design/p1-embedded.md),
 render hattının ve DOM modelinin ayrıntısı
@@ -31,7 +31,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M3** | Kütüphane (Rust API, C-ABI) | Bitti ([m3-library.md](m3-library.md)) |
 | **M4** | Etkileşimli DOM | Sürüyor ([m4-interactive-dom.md](m4-interactive-dom.md)) |
 | **M5** | Artımlı render ve formlar | Yeni |
-| **M6** | Bağlamalar: Python, Go, JavaScript | Yeni |
+| **M6** | Bağlamalar: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Yeni |
 | **M7** | Geliştirici araçları | Yeni |
 | **M8** | Ürünleşme | Yeni |
 | **M9** | Kompozitör ve performans | Yeni |
@@ -47,12 +47,22 @@ güvenliği, M3'te kum havuzu). Rota gömülü bir UI motoruna çevrildi: taray�
 şey ise yeni hedefe doğrudan yarıyor. Gerekçe ve değerlendirme
 [p1-embedded.md](../design/p1-embedded.md)'de.
 
-### JavaScript kararı (2026-10-01)
+### JavaScript kararı (2026-10-01; 2026-10-07'de değişti, aşağıda)
 
 Çekirdekte JavaScript yok; JS, Python ve Go gibi isteğe bağlı bir bağlama
 olarak M6'da geliyor (`erk-script`). Sayaç demosu M4'ten M2'nin kabulüne
 çekildi. Gerekçe ve dış eleştirinin değerlendirmesi
 [p1-embedded.md](../design/p1-embedded.md) §3.1'de.
+
+### `<script>` asla; JS/TS host dili (2026-10-07)
+
+JavaScript kararı değişti: HTML içindeki `<script>` hiçbir zaman
+desteklenmeyecek ve Erk'te hiçbir JS motoru olmayacak (`erk-script`
+kalktı). JavaScript ve TypeScript, Rust, Python ve Go gibi Erk'i dışarıdan
+süren host dilleri: Node.js ve Bun bağlamasıyla, M6'da. Belge betiği kapalı
+bir tarayıcıdaki gibi ayrıştırılıyor (`<noscript>` görünür); Erk'te JS
+motoru olmadığını CI bugünden denetliyor. Gerekçe
+[p1-embedded.md](../design/p1-embedded.md) §3.3'te.
 
 ### Neden önce piksel
 
@@ -368,40 +378,38 @@ okuyor.
 
 ---
 
-## M6 — Bağlamalar: Python, Go, JavaScript
+## M6 — Bağlamalar: Python, Go, JavaScript/TypeScript
 
-Sıra: önce Python (ilk bağlama kararı), sonra Go, sonra JavaScript.
+Sıra: önce Python (ilk bağlama kararı), sonra Go, sonra JavaScript/TypeScript.
+Hepsi Erk'i dışarıdan süren host dilleri; Erk hiçbir zaman betik
+çalıştırmaz ([p1-embedded.md](../design/p1-embedded.md) §3.3).
 
 - `erk-python`: C-ABI üstünde cffi, maturin ile platform wheel'leri
 - Nesne yönelimli sarmalayıcı (`App`, `Element`, `on("click", ...)`)
 - `erk-go`: C-ABI üstünde cgo sarmalayıcısı. Seçici tabanlı kolaylıklar
   (`OnClick("send", ...)`) düşük seviye `NodeId` API'sinin üstünde durur,
   onun yerini almaz
-- `erk-script`: isteğe bağlı JavaScript bağlaması
-  ([p1-embedded.md](../design/p1-embedded.md) §3.1). C-ABI'nin değil `erk`'in
-  Rust API'sinin üstünde, gömülü bir JS motoruyla. JS tarafı düğümlere
-  yalnızca `NodeId` ile başvurur, DOM JS nesnesi tutmaz. DOM API'sinin küçük
-  bir alt kümesi (seçiciler, metin, öznitelikler, `classList`, `style`,
-  oluştur/ekle/sil, `addEventListener`); Web API'si yok; zamanlayıcılar
-  host'un saatiyle. Varsayılan kapalı: Cargo özelliği açılmazsa ikiliye JS
-  motoru girmez
-- JS motoru ölçülerek seçilir: Boa (saf Rust) ile QuickJS (`rquickjs`, C)
-  ikiliye eklediği boyut, açılış süresi ve TodoMVC'nin 10 bin işlemlik
-  süresiyle karşılaştırılır; sonuç bu taşın planına yazılır. QuickJS
-  seçilirse yeni bir C bağımlılığı olduğu için `docs/design/` altında ayrı
-  bir karar belgesi gerekir
-- Muhafızlar `erk-script`'le aynı PR'da: çekirdek crate'ler, `erk` ve
-  `erk-ffi` hiçbir JS motoruna bağımlı değil (`cargo tree`); `erk-script`
-  projeden yalnızca `erk`'e bağımlı. Boyut bütçesi özelliksiz ikiliyi
-  ölçmeye devam eder; betikli derleme kendi bütçe satırını alır
+- JavaScript/TypeScript bağlaması, Node.js ve Bun için: aynı paket iki
+  çalışma zamanında. JS süreci host'tur; JS motoru Node'un ya da Bun'ındır,
+  Erk'in değil. Düğümlere yalnızca `NodeId` ile başvurulur, DOM JS nesnesi
+  tutmaz; abonelikler `destroy` ile biter. TypeScript tipleri pakette, CI'da
+  örneğe karşı `tsc --noEmit`
+- Bu taşın planında karara bağlanacaklar (p1-embedded §3.3'ün açık
+  soruları): Node-API eklentisi (`napi-rs`) mı C-ABI'ye FFI mı (`koffi`,
+  `bun:ffi`); pencere olaylarının JS olay döngüsüyle birlikte nasıl
+  pompalanacağı (macOS'un ana iş parçacığı kısıtı dahil); paket adı ve
+  platform paketleri
+- Muhafızlar: Erk'te JS motoru yok (`check-no-js-engine.sh`, 2026-10-07'den
+  beri); bağlama crate'leri projeden yalnızca `erk`'e ya da `erk-ffi`'ye
+  bağımlı (`cargo tree`), bağlama ile aynı PR'da
 - Diğer diller topluluğa açık; C başlığı ve örnekler yeterli
 
 **Kabul:** `pip install erk` Windows ve Linux'ta çalışıyor; README'deki Python
 örneği bir pencere açıp bir tıklamaya yanıt veriyor. Aynı örnek Go ile de
-çalışıyor. Sayaç ve TodoMVC JavaScript ile yazılmış halde aynı host
-kabuğunda çalışıyor; silinmiş bir düğüme dokunan betik istisna alıyor,
-süreç çökmüyor. JS özelliği kapalı derlemenin bağımlılık ağacında JS motoru
-yok. Python örneğinin penceresinin özel belleği M1.0'daki yöntemle ölçülüp
+çalışıyor. Sayaç ve TodoMVC TypeScript ile yazılmış halde hem Node.js'te
+hem Bun'da çalışıyor (`npm install` ve `bun add` ile, Windows ve Linux);
+silinmiş bir düğüme dokunan kod istisna alıyor, süreç çökmüyor. Erk'in
+hiçbir derlemesinde JS motoru yok. Python örneğinin penceresinin özel belleği M1.0'daki yöntemle ölçülüp
 yayımlanmış; yorumlayıcının kendi payı ayrı yazılmış.
 
 ---
@@ -511,8 +519,8 @@ testi); bir video bir surface içinde oynuyor.
 
 ## M12 — Bileşenler ve ekosistem
 
-Erk'in JavaScript'i bir tarayıcı ortamı değil (M6, DOM'un küçük bir alt
-kümesi); React, Vue ya da Svelte bileşenleri çalışmaz. Yerine:
+Erk sayfanın içinde betik çalıştırmaz; JS/TS Erk'i host olarak dışarıdan
+sürer (M6). React, Vue ya da Svelte bileşenleri çalışmaz. Yerine:
 
 - Yerel kontroller motorun içinde (M5'teki form kontrolleri ve
   `<dialog>`, `<details>`, `popover` gibi davranışı olan HTML elemanları)
@@ -530,7 +538,7 @@ referans sayfası.
 
 | Ne | Neden |
 |---|---|
-| Çekirdekte betik; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | JS isteğe bağlı bir bağlama (M6) ve DOM'un küçük bir alt kümesi; iş mantığı host'ta |
+| `<script>`, olay öznitelikleri, `javascript:` URL'leri; tarayıcı uyumlu bir JS ortamı (Web API'leri, React gibi çatılar) | Erk hiçbir zaman betik çalıştırmaz (p1-embedded §3.3); JS/TS host dili olarak Node.js ya da Bun'dan (M6); iş mantığı host'ta |
 | Zengin metin düzenleme (`contenteditable`) | M5'in form kontrollerinden çok daha büyük bir iş; bir e-posta istemcisinin yazma penceresi gibi ekranlar Erk'in alanı dışında (p1-embedded §4) |
 | Ağ, HTTP, Fetch, çerezler | Host'un işi; motor ağa hiç erişmez |
 | Kum havuzu, çoklu süreç, site izolasyonu | İçerik host'un kendisi; mesajlar serileştirilebilir kaldığı için ihtiyaç olursa sonradan eklenebilir |

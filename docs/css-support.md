@@ -19,10 +19,11 @@ does not lay out or paint is not supported.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `<script>` and scripts the host runs | Later (M6) | Off by default. The engine core runs no scripts; the optional `erk-script` binding runs JavaScript on top of the public API, with a small DOM subset (selectors, text, attributes, `classList`, `style`, create/insert/remove, `addEventListener`) |
+| `<script>` | Not planned | Never run: Erk has no JavaScript engine. A script stays in the document as an inert element. JavaScript and TypeScript drive Erk from outside, as host languages (Node.js and Bun, M6) |
+| `<noscript>` | Supported | `documents_are_parsed_as_with_scripting_disabled`. Documents are parsed as with scripting disabled, so the content of `<noscript>` is markup and shows |
 | The host finds elements with CSS selectors and sets their text (`erk_query`, `erk_node_set_text`) | Supported | `queries_find_what_css_selectors_match_in_document_order`, `a_query_finds_the_first_match_or_says_what_is_wrong`, `set_text_changes_the_page_and_a_stale_node_is_an_error`, `clicks_count_and_the_page_shows_the_number`. A removed node, or one of a document since replaced, is an error, never another node. More changes (attributes, classes, inserting and removing) come in M4 |
-| Event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Listen with `addEventListener` in `erk-script`, or subscribe from the host through the embedding API |
-| Web APIs (`fetch`, storage, workers, `XMLHttpRequest`) | Not planned | A script reaches files or the network only through functions the host exposes |
+| Event handler attributes (`onclick`, …), `javascript:` URLs | Not planned | Never run. Subscribe from the host through the embedding API |
+| Web APIs (`fetch`, storage, workers, `XMLHttpRequest`) | Not planned | There is no script in the page to call them; the host does its own I/O |
 
 ## Selectors and cascade
 
