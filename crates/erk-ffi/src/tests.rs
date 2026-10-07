@@ -56,8 +56,106 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_2() {
-    assert_eq!(erk_abi_version(), 2);
+fn the_abi_version_is_0_3() {
+    assert_eq!(erk_abi_version(), 3);
+}
+
+#[test]
+fn a_document_is_built_from_c() {
+    let app = app_with(PAGE);
+    let body = query(app, "body");
+    let (mut list, mut item, mut text) = (ERK_NODE_NONE, ERK_NODE_NONE, ERK_NODE_NONE);
+    assert_eq!(erk_node_create(app, s("UL"), &mut list), ERK_OK);
+    assert_eq!(erk_node_create(app, s("li"), &mut item), ERK_OK);
+    assert_eq!(erk_text_create(app, s("bir"), &mut text), ERK_OK);
+    assert_eq!(erk_node_append(app, item, text), ERK_OK);
+    assert_eq!(
+        erk_node_insert_before(app, list, item, ERK_NODE_NONE),
+        ERK_OK
+    );
+    assert_eq!(erk_node_append(app, body, list), ERK_OK);
+    assert_eq!(query(app, "body > ul > li"), item);
+    assert_eq!(text_of(app, list).unwrap(), "bir");
+    // Attributes and classes.
+    assert_eq!(erk_node_set_attr(app, item, s("data-n"), s("1")), ERK_OK);
+    assert_eq!(erk_node_add_class(app, item, s("yeni")), ERK_OK);
+    let mut has = 0;
+    assert_eq!(erk_node_has_class(app, item, s("yeni"), &mut has), ERK_OK);
+    assert_eq!(has, 1);
+    assert_eq!(erk_node_remove_class(app, item, s("yeni")), ERK_OK);
+    assert_eq!(erk_node_has_class(app, item, s("yeni"), &mut has), ERK_OK);
+    assert_eq!(has, 0);
+    let mut buf = [0u8; 8];
+    let mut len = 0;
+    assert_eq!(
+        erk_node_attr(
+            app,
+            item,
+            s("data-n"),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!(&buf[..len], b"1");
+    assert_eq!(erk_node_remove_attr(app, item, s("data-n")), ERK_OK);
+    assert_eq!(
+        erk_node_remove_attr(app, item, s("data-n")),
+        ERK_ERR_NOT_FOUND
+    );
+    assert_eq!(
+        erk_node_attr(
+            app,
+            item,
+            s("data-n"),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut len
+        ),
+        ERK_ERR_NOT_FOUND
+    );
+    // What DOM refuses, and bad names.
+    assert_eq!(erk_node_append(app, item, list), ERK_ERR_INVALID_ARGUMENT);
+    let mut bad = ERK_NODE_NONE;
+    assert_eq!(
+        erk_node_create(app, s("a b"), &mut bad),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    // Removed: stale everywhere.
+    assert_eq!(erk_node_remove(app, list), ERK_OK);
+    assert_eq!(erk_node_append(app, body, item), ERK_ERR_STALE_NODE);
+    assert_eq!(text_of(app, text), Err(ERK_ERR_STALE_NODE));
+    let mut root = ERK_NODE_NONE;
+    assert_eq!(erk_document_root(app, &mut root), ERK_OK);
+    assert_eq!(erk_node_remove(app, root), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn removing_a_subscribed_node_runs_its_destroy_once() {
+    let app = app_with(PAGE);
+    let counts = Counts::default();
+    let mut subscription = 0;
+    let user_data = std::ptr::from_ref(&counts).cast_mut().cast();
+    let button = query(app, "#b");
+    assert_eq!(
+        erk_on(
+            app,
+            button,
+            ERK_EVENT_CLICK,
+            Some(count_click),
+            user_data,
+            Some(count_destroy),
+            &mut subscription
+        ),
+        ERK_OK
+    );
+    assert_eq!(erk_node_remove(app, button), ERK_OK);
+    assert_eq!(counts.destroyed.load(Ordering::SeqCst), 1);
+    assert_eq!(erk_off(app, subscription), ERK_ERR_NOT_FOUND);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+    assert_eq!(counts.destroyed.load(Ordering::SeqCst), 1);
 }
 
 /// An app pointer, carried to another thread for a call there.

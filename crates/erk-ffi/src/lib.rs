@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 2;
+pub const ERK_ABI_VERSION: u32 = 3;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -963,6 +963,167 @@ pub extern "C" fn erk_node_text(
     guard(app, Calls::Document, |app| {
         let value = app.cx().text(node(node_id)?).abi()?;
         put_text(&value, buf, cap, len)
+    })
+}
+
+/// A new element named `tag`, not in the document yet: insert it with
+/// `erk_node_append` or `erk_node_insert_before`, or let it go with
+/// `erk_node_remove`. HTML lowercases the name.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_create(app: *mut ErkApp, tag: ErkStr, out: *mut ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let made = app.cx().create_element(&text(tag)?).abi()?;
+        put(out, made.to_raw())
+    })
+}
+
+/// A new text node, not in the document yet.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_text_create(
+    app: *mut ErkApp,
+    value: ErkStr,
+    out: *mut ErkNodeId,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let made = app.cx().create_text(&text(value)?);
+        put(out, made.to_raw())
+    })
+}
+
+/// Make `child` the last child of `parent`, moving it from wherever it
+/// was. `ERK_ERR_INVALID_ARGUMENT` where DOM refuses it.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_append(
+    app: *mut ErkApp,
+    parent: ErkNodeId,
+    child: ErkNodeId,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().append(node(parent)?, node(child)?).abi()
+    })
+}
+
+/// Insert `child` into `parent` before `before`, a child of `parent`, or
+/// last for `ERK_NODE_NONE`.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_insert_before(
+    app: *mut ErkApp,
+    parent: ErkNodeId,
+    child: ErkNodeId,
+    before: ErkNodeId,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let before = (before != ERK_NODE_NONE)
+            .then(|| node(before))
+            .transpose()?;
+        app.cx()
+            .insert_before(node(parent)?, node(child)?, before)
+            .abi()
+    })
+}
+
+/// Remove `node` and everything in it: their ids go stale and their
+/// subscriptions end.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_remove(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().remove(node(node_id)?).abi()
+    })
+}
+
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_set_attr(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+    value: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx()
+            .set_attr(node(node_id)?, &text(name)?, &text(value)?)
+            .abi()
+    })
+}
+
+/// Remove attribute `name`; `ERK_ERR_NOT_FOUND` if there was none.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_remove_attr(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        match app.cx().remove_attr(node(node_id)?, &text(name)?).abi()? {
+            true => Ok(()),
+            false => Err(ERK_ERR_NOT_FOUND),
+        }
+    })
+}
+
+/// Attribute `name`'s value; `ERK_ERR_NOT_FOUND` without one.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_attr(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+    buf: *mut c_char,
+    cap: usize,
+    len: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let value = app
+            .cx()
+            .attr(node(node_id)?, &text(name)?)
+            .abi()?
+            .ok_or(ERK_ERR_NOT_FOUND)?;
+        put_text(&value, buf, cap, len)
+    })
+}
+
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_add_class(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    class: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().add_class(node(node_id)?, &text(class)?).abi()
+    })
+}
+
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_remove_class(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    class: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().remove_class(node(node_id)?, &text(class)?).abi()
+    })
+}
+
+/// `*out` is 1 if element `node`'s classes hold `class`, else 0.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_has_class(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    class: ErkStr,
+    out: *mut u32,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let has = app.cx().has_class(node(node_id)?, &text(class)?).abi()?;
+        put(out, u32::from(has))
     })
 }
 

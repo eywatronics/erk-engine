@@ -699,7 +699,79 @@ impl Page {
     /// Set `node`'s text as `textContent` does; the next frame shows it.
     pub(crate) fn set_text(&mut self, node: u64, text: &str) -> Result<(), Status> {
         let node = self.node(node)?;
-        self.doc.set_text(node, text).map_err(|_| Status::StaleNode)
+        self.doc
+            .set_text(node, text)
+            .map_err(|_| Status::StaleNode)?;
+        self.forget_gone_nodes();
+        Ok(())
+    }
+
+    /// A new element, not in the document yet (DOM's `createElement`).
+    pub(crate) fn create_element(&mut self, tag: &str) -> Result<NodeId, Status> {
+        self.doc.create_element(tag).map_err(status)
+    }
+
+    /// A new text node, not in the document yet.
+    pub(crate) fn create_text(&mut self, text: &str) -> NodeId {
+        self.doc.create_text(text)
+    }
+
+    /// Insert `child` into `parent`, before `before` or last, moving it from
+    /// wherever it was.
+    pub(crate) fn insert(
+        &mut self,
+        parent: u64,
+        child: u64,
+        before: Option<u64>,
+    ) -> Result<(), Status> {
+        let (parent, child) = (self.node(parent)?, self.node(child)?);
+        let before = before.map(|before| self.node(before)).transpose()?;
+        self.doc.insert(parent, child, before).map_err(status)
+    }
+
+    /// Remove `node` and everything in it; their ids go stale. The document
+    /// node stays.
+    pub(crate) fn remove(&mut self, node: u64) -> Result<(), Status> {
+        let node = self.node(node)?;
+        if !self.doc.remove(node) {
+            return Err(Status::InvalidArgument);
+        }
+        self.forget_gone_nodes();
+        Ok(())
+    }
+
+    /// Set attribute `name` of element `node`.
+    pub(crate) fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
+        let node = self.node(node)?;
+        self.doc.set_attr(node, name, value).map_err(status)
+    }
+
+    /// Remove attribute `name` of element `node`; whether it had one.
+    pub(crate) fn remove_attr(&mut self, node: u64, name: &str) -> Result<bool, Status> {
+        let node = self.node(node)?;
+        self.doc.remove_attr(node, name).map_err(status)
+    }
+
+    /// Attribute `name` of element `node`; `None` without one, or for a node
+    /// that is not an element.
+    pub(crate) fn attr(&self, node: u64, name: &str) -> Result<Option<String>, Status> {
+        let node = self.node(node)?;
+        let local = erk_dom::LocalName::from(name.to_ascii_lowercase());
+        Ok(self
+            .doc
+            .node(node)
+            .and_then(|node| node.as_element())
+            .and_then(|element| element.attr(&local))
+            .map(str::to_owned))
+    }
+
+    /// Let go of the scroll positions of scroll containers no longer in the
+    /// document: a page that keeps making and removing scrolled boxes would
+    /// otherwise keep one entry for each. The hovered, pressed, focused and
+    /// highlighted node need nothing: every use checks the node is there.
+    fn forget_gone_nodes(&mut self) {
+        let doc = &self.doc;
+        self.offsets.retain(|id, _| doc.node(*id).is_some());
     }
 
     /// The node `bits` names: 0 and other numbers no id has are invalid, an
@@ -707,6 +779,16 @@ impl Page {
     fn node(&self, bits: u64) -> Result<NodeId, Status> {
         let id = NodeId::from_bits(bits).ok_or(Status::InvalidArgument)?;
         self.doc.node(id).map(|_| id).ok_or(Status::StaleNode)
+    }
+}
+
+/// A refused change as the API's status.
+fn status(error: erk_dom::MutationError) -> Status {
+    match error {
+        erk_dom::MutationError::Stale => Status::StaleNode,
+        erk_dom::MutationError::Hierarchy | erk_dom::MutationError::InvalidName => {
+            Status::InvalidArgument
+        }
     }
 }
 
@@ -912,6 +994,21 @@ mod tests {
     use super::*;
 
     const HTML: &str = r#"<body style="margin: 0"><p style="background: #cde">Erk <b>sayfayı</b> bir kez okur.</p><div style="width: 50%; height: 20px; background: red"></div>"#;
+
+    #[test]
+    fn a_removed_scroller_leaves_no_scroll_position_behind() {
+        let mut page = Page::parse(
+            r#"<body style="margin: 0"><div id=s style="height: 40px; overflow: auto"><div style="height: 400px"></div></div>"#,
+        );
+        let mut resources = Resources::default();
+        page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
+        assert!(page.wheel((0.0, 50.0), (10.0, 10.0)));
+        page.prepare(100, 100, 1.0, &mut resources, &mut |_| {});
+        assert_eq!(page.offsets.len(), 1);
+        let scroller = page.query(None, "#s").unwrap().unwrap();
+        page.remove(scroller.to_bits()).unwrap();
+        assert!(page.offsets.is_empty());
+    }
 
     #[test]
     fn a_page_paints_every_frame_as_a_fresh_parse_would() {

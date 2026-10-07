@@ -304,7 +304,7 @@ M4 de adımlara bölünür; her adım kendi PR'ı ([m4-interactive-dom.md](m4-in
 
 | Adım | Kapsam | Durum |
 |---|---|---|
-| M4.0 | Düğüm oluşturma, taşıma, silme, öznitelik, sınıf, satır içi stil (motor, `erk`, C-ABI) | Yeni |
+| M4.0 | Düğüm oluşturma, taşıma, silme, öznitelik, sınıf, satır içi stil (motor, `erk`, C-ABI) | Bitti: DOM'un ekleme kuralları, silmede abonelik ve kaydırma konumu temizliği; C-ABI 0.3 |
 | M4.1 | Toplu `Mutation`, `query_all`, klavye olayları | Yeni |
 | M4.2 | `Mutation` fuzz'ı, 10 bin döngü bellek testi | Yeni |
 | M4.3 | `linear-gradient`, `radial-gradient` | Yeni |

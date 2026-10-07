@@ -77,6 +77,110 @@ impl Context {
         Ok(())
     }
 
+    /// A new element named `tag`, not in the document yet: insert it with
+    /// [`Context::append`] or [`Context::insert_before`], or let it go with
+    /// [`Context::remove`]. HTML lowercases the name; `InvalidArgument` for
+    /// one that is not a name.
+    pub fn create_element(&mut self, tag: &str) -> Result<Node, Status> {
+        let id = self.engine.create_element(tag)?;
+        Ok(self.outward(id).expect("a new node has an id"))
+    }
+
+    /// A new text node, not in the document yet.
+    pub fn create_text(&mut self, text: &str) -> Node {
+        let id = self.engine.create_text(text);
+        self.outward(id).expect("a new node has an id")
+    }
+
+    /// Make `child` the last child of `parent`, moving it from wherever it
+    /// was. `InvalidArgument` where DOM refuses it: a node into itself or
+    /// its descendant, the document node, text into the document.
+    pub fn append(&mut self, parent: Node, child: Node) -> Result<(), Status> {
+        let (parent, child) = (self.inward(parent), self.inward(child));
+        Ok(self.engine.insert(parent, child, None)?)
+    }
+
+    /// Insert `child` into `parent` before `before`, a child of `parent`,
+    /// or last for `None` (DOM's `insertBefore`).
+    pub fn insert_before(
+        &mut self,
+        parent: Node,
+        child: Node,
+        before: Option<Node>,
+    ) -> Result<(), Status> {
+        let (parent, child) = (self.inward(parent), self.inward(child));
+        let before = before.map(|node| self.inward(node));
+        Ok(self.engine.insert(parent, child, before)?)
+    }
+
+    /// Remove `node` and everything in it: their ids go stale, and their
+    /// subscriptions end. `InvalidArgument` for the document node.
+    pub fn remove(&mut self, node: Node) -> Result<(), Status> {
+        self.engine.remove(self.inward(node))?;
+        self.forget_gone_nodes();
+        Ok(())
+    }
+
+    /// Set attribute `name` of element `node` to `value`; HTML lowercases
+    /// the name. The next frame restyles with it (`class`, `id`, `style`,
+    /// attribute selectors).
+    pub fn set_attr(&mut self, node: Node, name: &str, value: &str) -> Result<(), Status> {
+        Ok(self.engine.set_attr(self.inward(node), name, value)?)
+    }
+
+    /// Remove attribute `name` of element `node`; whether it had one.
+    pub fn remove_attr(&mut self, node: Node, name: &str) -> Result<bool, Status> {
+        Ok(self.engine.remove_attr(self.inward(node), name)?)
+    }
+
+    /// Attribute `name` of `node`; `None` without one, or for a node that is
+    /// not an element.
+    pub fn attr(&self, node: Node, name: &str) -> Result<Option<String>, Status> {
+        Ok(self.engine.attr(self.inward(node), name)?)
+    }
+
+    /// Whether element `node`'s `class` holds `class`, as DOM's `classList`
+    /// reads it: classes are separated by ASCII white space.
+    pub fn has_class(&self, node: Node, class: &str) -> Result<bool, Status> {
+        let classes = self.attr(node, "class")?.unwrap_or_default();
+        Ok(classes.split_ascii_whitespace().any(|c| c == class))
+    }
+
+    /// Add `class` to element `node`'s classes, once. `InvalidArgument` for
+    /// an empty class or one with white space in it.
+    pub fn add_class(&mut self, node: Node, class: &str) -> Result<(), Status> {
+        let mut classes = self.classes(node, class)?;
+        if !classes.iter().any(|c| c == class) {
+            classes.push(class.to_owned());
+            self.set_attr(node, "class", &classes.join(" "))?;
+        }
+        Ok(())
+    }
+
+    /// Remove `class` from element `node`'s classes.
+    pub fn remove_class(&mut self, node: Node, class: &str) -> Result<(), Status> {
+        let mut classes = self.classes(node, class)?;
+        let before = classes.len();
+        classes.retain(|c| c != class);
+        if classes.len() != before {
+            self.set_attr(node, "class", &classes.join(" "))?;
+        }
+        Ok(())
+    }
+
+    /// `node`'s classes, after checking `class` is one class.
+    fn classes(&self, node: Node, class: &str) -> Result<Vec<String>, Status> {
+        if class.is_empty() || class.contains(|c: char| c.is_ascii_whitespace()) {
+            return Err(Status::InvalidArgument);
+        }
+        Ok(self
+            .attr(node, "class")?
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// `node`'s text as the DOM's `textContent` reads it.
     pub fn text(&self, node: Node) -> Result<String, Status> {
         Ok(self.engine.text(self.inward(node))?)

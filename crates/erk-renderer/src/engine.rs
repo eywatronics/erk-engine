@@ -243,6 +243,53 @@ impl Engine {
         result
     }
 
+    /// A new element named `tag`, not in the document yet; HTML lowercases
+    /// the name. `InvalidArgument` for a name that is not one.
+    pub fn create_element(&mut self, tag: &str) -> Result<u64, Status> {
+        Ok(self.page.create_element(tag)?.to_bits())
+    }
+
+    /// A new text node, not in the document yet.
+    pub fn create_text(&mut self, text: &str) -> u64 {
+        self.page.create_text(text).to_bits()
+    }
+
+    /// Insert `child` into `parent`, before `before` or last, moving it from
+    /// wherever it was (DOM's `insertBefore`). `InvalidArgument` where DOM
+    /// refuses it: a node into itself, the document node, text into the
+    /// document, `before` not a child of `parent`.
+    pub fn insert(&mut self, parent: u64, child: u64, before: Option<u64>) -> Result<(), Status> {
+        self.page.insert(parent, child, before)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Remove `node` and everything in it; their ids go stale.
+    pub fn remove(&mut self, node: u64) -> Result<(), Status> {
+        self.page.remove(node)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Set attribute `name` of element `node` to `value`.
+    pub fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
+        self.page.set_attr(node, name, value)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Remove attribute `name` of element `node`; whether it had one.
+    pub fn remove_attr(&mut self, node: u64, name: &str) -> Result<bool, Status> {
+        let removed = self.page.remove_attr(node, name)?;
+        self.changed |= removed;
+        Ok(removed)
+    }
+
+    /// Attribute `name` of element `node`, if it has one.
+    pub fn attr(&self, node: u64, name: &str) -> Result<Option<String>, Status> {
+        self.page.attr(node, name)
+    }
+
     /// `node`'s text as `textContent` reads it.
     pub fn text(&self, node: u64) -> Result<String, Status> {
         self.page.text(node)
@@ -450,6 +497,48 @@ mod tests {
         );
         engine.set_text(p, "Erk!").unwrap();
         assert!(engine.prepare().0.is_some());
+    }
+
+    #[test]
+    fn a_removed_element_holds_no_state_the_next_input_reports() {
+        // Focused, hovered and pressed, then removed: the next input must
+        // not report it (a blur for a node the host can no longer use).
+        let mut engine = Engine::new();
+        engine.load_html(
+            r#"<body style="margin: 0"><div id=a tabindex=0 style="height: 40px"></div><div id=b tabindex=0 style="height: 40px"></div>"#,
+        );
+        engine.resize(100, 100);
+        engine.prepare();
+        let a = engine.query(None, "#a").unwrap().unwrap();
+        let tab = KeyInput {
+            key: crate::messages::Key::Tab,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        let focused = engine.key(&tab);
+        assert!(focused.iter().any(|event| event.target == a), "{focused:?}");
+        engine.pointer(&PointerInput {
+            kind: PointerKind::Down,
+            x: 10.0,
+            y: 10.0,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::default(),
+        });
+        engine.remove(a).unwrap();
+        engine.prepare();
+        let events = engine.key(&tab);
+        assert!(events.iter().all(|event| event.target != a), "{events:?}");
+        let released = engine.pointer(&PointerInput {
+            kind: PointerKind::Up,
+            x: 10.0,
+            y: 50.0,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::default(),
+        });
+        assert!(
+            released.iter().all(|event| event.target != a),
+            "{released:?}"
+        );
     }
 
     #[test]

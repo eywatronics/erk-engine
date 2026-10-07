@@ -66,17 +66,17 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 
 ### M4.0: Düğüm oluşturma, taşıma, silme, öznitelikler
 
-- [ ] Motor, `erk` ve C-ABI: `create_element(tag)`, `create_text(text)`,
+- [x] Motor, `erk` ve C-ABI: `create_element(tag)`, `create_text(text)`,
   `append(parent, child)`, `insert_before(parent, child, before)`,
   `remove(node)`, `set_attr`, `remove_attr`, `attr`; kolaylık olarak sınıf
-  (`add_class`, `remove_class`, `has_class`) ve satır içi stil özelliği
-  (`set_style_property`). Geçersiz ağaç (bir düğümü kendi içine eklemek,
+  (`add_class`, `remove_class`, `has_class`). Satır içi stil
+  `set_attr(node, "style", …)` ile (yürütme notları). Geçersiz ağaç (bir düğümü kendi içine eklemek,
   belge düğümünü taşımak, `before`'un ebeveyni farklı) `InvalidArgument`.
-- [ ] Silinen alt ağaçların abonelikleri biter (`destroy` bir kez); eski
+- [x] Silinen alt ağaçların abonelikleri biter (`destroy` bir kez); eski
   id'ler her çağrıda `StaleNode`.
-- [ ] Öznitelik değişikliği stile yansır (`class`, `id`, `style`,
+- [x] Öznitelik değişikliği stile yansır (`class`, `id`, `style`,
   `[attr]` seçicileri) ve bir sonraki karede görünür.
-- [ ] `erk.h`'ye yeni işlevler; C örneği ve §11 testleri genişler.
+- [x] `erk.h`'ye yeni işlevler; C örneği ve §11 testleri genişler.
 
 ### M4.1: Toplu değişiklik, `query_all`, klavye olayları
 
@@ -122,4 +122,14 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 
 ## Yürütme Notları
 
-(Her adımın bulguları, düzeltilen varsayımları ve kararları buraya yazılır.)
+### M4.0
+
+| Konu | Not |
+|---|---|
+| `erk-dom` | Arenada silme, serbest liste ve nesil M2'den beri vardı; eklenen: `create_element` (HTML gibi adı küçük harfe çeviriyor, `<template>`'e içerik parçası veriyor), `create_text`, `insert(parent, child, before)` (DOM'un ön ekleme geçerliliği: kendi içine ya da torununa, belge düğümünü, belgeye metni, metnin altına bir şeyi, ebeveyni başka olan `before`'u reddediyor; kendinden önceye ekleme yerinde bırakıyor), `set_attr` (ad küçük harfe, var olanın değeri değişiyor, yoksa sona), `remove_attr`. Adlar XML'in Name kuralıyla: harf, `_`, `:` ya da ASCII dışı başlar; ardından rakam, `-`, `.` da. `MutationError { Stale, Hierarchy, InvalidName }` |
+| Motor, `erk`, C-ABI | Değişiklikler kareyi istiyor (`changed`); `remove_attr` yalnızca bir şey sildiyse. `erk`'te silme alt ağacın aboneliklerini bitiriyor (`destroy` bir kez). Sınıf yardımcıları `classList` gibi ASCII boşlukla ayrılmış sınıfları okuyor; boş ya da boşluklu sınıf `InvalidArgument`. C-ABI 0.3: 11 yeni işlev, toplam 42; C örneği bir paragraf oluşturup ekliyor ve sorguyla buluyor |
+| Satır içi stil özelliği | Planın `set_style_property`'si yapılmadı: `style` özniteliğini bildirimlere bölüp yeniden yazmak `url("a;b")` gibi değerlerde yanlış olur, doğrusu Stylo'nun bildirim bloğunu ayrıştırıp serileştirmek (CSSOM). Satır içi stil `set_attr(node, "style", …)` ile tam çalışıyor (test); özellik bazında yardımcı, CSSOM'u isteyen form ve geçiş işleriyle M5'e |
+| Bağlanmamış düğüm (karar 2) | Çizilmiyor, sorguda yok, kutusu `NotFound`, ebeveyni yok; etiketi ve sınıfı okunuyor; ona yapılan abonelik eklenince çalışıyor (testler) |
+| **Mutasyonla bulunan ölü kod** | Silmeden sonra odak, hover, basılı ve vurgulanan düğümü temizleyen kod yazıldı; mutasyonu yaşadı: o durumları kullanan her yer düğümün varlığını zaten denetliyor (`move_focus` M2.4'ten beri). Kod yalnızca gerçek etkisi olan parçaya indi: silinen kaydırma kaplarının kaydırma konumları, yoksa kaydırılıp silinen her kap haritada bir kayıt bırakırdı (test, mutasyonla). Odaktaki elemanı silip Tab'a basınca silinen düğüm için `blur` gelmediği de test edildi; `move_focus`'taki denetimin mutasyonu yakalandı |
+| Mutasyonlar | Torununa ekleme, belgeye metin, ebeveyni başka `before`, içeriksiz `<template>`, öznitelik adının küçültülmemesi, ad denetiminin olmaması, silmenin abonelikleri bırakması, aynı sınıfın iki kez eklenmesi, değişikliğin kare istememesi, `remove_attr`'ın bulunmayanı bulundu sayması: hepsi yakalandı |
+| Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |

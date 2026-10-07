@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 2
+#define ERK_ABI_VERSION 3
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -445,6 +445,62 @@ ErkStatus erk_node_set_text(ErkApp *app, ErkNodeId node_id, ErkStr value);
  `node`'s text as `textContent`; `*len` is the bytes needed (no NUL).
  */
 ErkStatus erk_node_text(ErkApp *app, ErkNodeId node_id, char *buf, size_t cap, size_t *len);
+
+/*
+ A new element named `tag`, not in the document yet: insert it with
+ `erk_node_append` or `erk_node_insert_before`, or let it go with
+ `erk_node_remove`. HTML lowercases the name.
+ */
+ErkStatus erk_node_create(ErkApp *app, ErkStr tag, ErkNodeId *out);
+
+/*
+ A new text node, not in the document yet.
+ */
+ErkStatus erk_text_create(ErkApp *app, ErkStr value, ErkNodeId *out);
+
+/*
+ Make `child` the last child of `parent`, moving it from wherever it
+ was. `ERK_ERR_INVALID_ARGUMENT` where DOM refuses it.
+ */
+ErkStatus erk_node_append(ErkApp *app, ErkNodeId parent, ErkNodeId child);
+
+/*
+ Insert `child` into `parent` before `before`, a child of `parent`, or
+ last for `ERK_NODE_NONE`.
+ */
+ErkStatus erk_node_insert_before(ErkApp *app, ErkNodeId parent, ErkNodeId child, ErkNodeId before);
+
+/*
+ Remove `node` and everything in it: their ids go stale and their
+ subscriptions end.
+ */
+ErkStatus erk_node_remove(ErkApp *app, ErkNodeId node_id);
+
+ErkStatus erk_node_set_attr(ErkApp *app, ErkNodeId node_id, ErkStr name, ErkStr value);
+
+/*
+ Remove attribute `name`; `ERK_ERR_NOT_FOUND` if there was none.
+ */
+ErkStatus erk_node_remove_attr(ErkApp *app, ErkNodeId node_id, ErkStr name);
+
+/*
+ Attribute `name`'s value; `ERK_ERR_NOT_FOUND` without one.
+ */
+ErkStatus erk_node_attr(ErkApp *app,
+                        ErkNodeId node_id,
+                        ErkStr name,
+                        char *buf,
+                        size_t cap,
+                        size_t *len);
+
+ErkStatus erk_node_add_class(ErkApp *app, ErkNodeId node_id, ErkStr class_);
+
+ErkStatus erk_node_remove_class(ErkApp *app, ErkNodeId node_id, ErkStr class_);
+
+/*
+ `*out` is 1 if element `node`'s classes hold `class`, else 0.
+ */
+ErkStatus erk_node_has_class(ErkApp *app, ErkNodeId node_id, ErkStr class_, uint32_t *out);
 
 /*
  Call `fn(user_data, app, event)` when an event of `kind` reaches `node`
