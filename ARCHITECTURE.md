@@ -84,7 +84,9 @@ Erk runs no JavaScript, ever, and has no networking and no sandbox: the
 content is the host's own and cannot execute code. Documents are parsed as by
 a browser with scripting disabled, so `<noscript>` content shows. JavaScript
 and TypeScript drive Erk from outside, as host languages (Node.js and Bun,
-M6), like Python and Go; the document never holds a script object, so there
+M6), like Python and Go. Every language binding goes through the C ABI
+(`erk.h`), never the Rust API, so one boundary carries the thread, panic and
+reentrancy checks for all of them; the document never holds a script object, so there
 is no DOM/GC cycle to manage. CI checks that no JavaScript engine is in either
 lock file (`check-no-js-engine.sh`). A separate renderer process remains possible because the messages are
 plain data, but is not planned.

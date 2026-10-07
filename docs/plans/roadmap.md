@@ -382,26 +382,31 @@ okuyor.
 
 Sıra: önce Python (ilk bağlama kararı), sonra Go, sonra JavaScript/TypeScript.
 Hepsi Erk'i dışarıdan süren host dilleri; Erk hiçbir zaman betik
-çalıştırmaz ([p1-embedded.md](../design/p1-embedded.md) §3.3).
+çalıştırmaz. **Bütün bağlamalar C-ABI üzerinden** (`erk.h` ve `erk_ffi`
+paylaşımlı kütüphanesi); hiçbiri `erk`'in Rust API'sine doğrudan bağlanmaz
+([p1-embedded.md](../design/p1-embedded.md) §3.3, 2026-10-07).
 
 - `erk-python`: C-ABI üstünde cffi, maturin ile platform wheel'leri
 - Nesne yönelimli sarmalayıcı (`App`, `Element`, `on("click", ...)`)
 - `erk-go`: C-ABI üstünde cgo sarmalayıcısı. Seçici tabanlı kolaylıklar
   (`OnClick("send", ...)`) düşük seviye `NodeId` API'sinin üstünde durur,
   onun yerini almaz
-- JavaScript/TypeScript bağlaması, Node.js ve Bun için: aynı paket iki
-  çalışma zamanında. JS süreci host'tur; JS motoru Node'un ya da Bun'ındır,
+- JavaScript/TypeScript bağlaması, Node.js ve Bun için, C-ABI üstünde: aynı
+  paket iki çalışma zamanında. JS süreci host'tur; JS motoru Node'un ya da Bun'ındır,
   Erk'in değil. Düğümlere yalnızca `NodeId` ile başvurulur, DOM JS nesnesi
   tutmaz; abonelikler `destroy` ile biter. TypeScript tipleri pakette, CI'da
   örneğe karşı `tsc --noEmit`
 - Bu taşın planında karara bağlanacaklar (p1-embedded §3.3'ün açık
-  soruları): Node-API eklentisi (`napi-rs`) mı C-ABI'ye FFI mı (`koffi`,
-  `bun:ffi`); pencere olaylarının JS olay döngüsüyle birlikte nasıl
+  soruları): Node.js ve Bun'dan C-ABI'ye `erk.h` üstünde C ile yazılmış
+  ince bir Node-API eklentisiyle mi, FFI ile mi (`koffi`, `bun:ffi`);
+  pencere olaylarının JS olay döngüsüyle birlikte nasıl
   pompalanacağı (macOS'un ana iş parçacığı kısıtı dahil); paket adı ve
   platform paketleri
 - Muhafızlar: Erk'te JS motoru yok (`check-no-js-engine.sh`, 2026-10-07'den
-  beri); bağlama crate'leri projeden yalnızca `erk`'e ya da `erk-ffi`'ye
-  bağımlı (`cargo tree`), bağlama ile aynı PR'da
+  beri); bağlamalar yalnızca C-ABI'ye bağlanır: workspace'te `erk`'e
+  bağımlı olan yalnızca `erk-ffi` ve kabuk (`cargo tree --invert`), bağlama
+  paketleri yalnızca `erk.h`'yi ve paylaşımlı kütüphaneyi kullanır;
+  bağlamayla aynı PR'da
 - Diğer diller topluluğa açık; C başlığı ve örnekler yeterli
 
 **Kabul:** `pip install erk` Windows ve Linux'ta çalışıyor; README'deki Python
