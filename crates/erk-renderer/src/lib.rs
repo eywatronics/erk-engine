@@ -26,6 +26,7 @@ mod resources;
 mod scroll;
 mod tables;
 mod text;
+mod transform;
 
 pub use engine::Engine;
 #[cfg(feature = "gpu")]

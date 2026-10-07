@@ -214,11 +214,13 @@ impl Walk<'_> {
     ) {
         let style = self.styles.computed(id);
         let position = style.as_ref().map(|style| style.clone_position());
-        let containing_inside = if position.is_some_and(|p| p != Position::Static) {
-            id
-        } else {
-            containing
-        };
+        // A positioned or transformed box is the containing block of the
+        // absolutely positioned boxes in it.
+        let is_container = position.is_some_and(|p| p != Position::Static)
+            || style
+                .as_ref()
+                .is_some_and(|style| crate::transform::transforms(style));
+        let containing_inside = if is_container { id } else { containing };
         let Some(layout) = self.layouts.get(id) else {
             // No box of its own (an inline element): what it holds is placed
             // relative to the box above.
@@ -230,14 +232,27 @@ impl Walk<'_> {
         let (x, y) = (origin.0 + layout.location.x, origin.1 + layout.location.y);
 
         // The scopes that contain this box, and with it what it holds.
-        let keep = match position {
-            Some(Position::Fixed) => 0,
-            Some(Position::Absolute) => active
+        // An out-of-flow box keeps the scopes its containing block is in: a
+        // fixed one's is its nearest transformed ancestor, or the viewport,
+        // outside them all.
+        let inside = |container: NodeId| {
+            active
                 .iter()
                 .rposition(|scope| {
-                    contains(self.doc, self.scrolling.scopes[*scope].node, containing)
+                    contains(self.doc, self.scrolling.scopes[*scope].node, container)
                 })
-                .map_or(0, |at| at + 1),
+                .map_or(0, |at| at + 1)
+        };
+        let keep = match position {
+            Some(Position::Fixed) => {
+                let container = crate::layout::fixed_container(self.doc, self.styles, id);
+                if container == self.doc.root() {
+                    0
+                } else {
+                    inside(container)
+                }
+            }
+            Some(Position::Absolute) => inside(containing),
             _ => active.len(),
         };
         let escaped = active.split_off(keep);

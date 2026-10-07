@@ -79,6 +79,11 @@ pub(crate) enum DisplayItem {
     /// opacity, as one group.
     PushOpacity(f32),
     PopOpacity,
+    /// Everything until the matching `PopTransform` goes through this 2D
+    /// affine matrix `[a, b, c, d, e, f]` (a point `(x, y)` to
+    /// `(a x + c y + e, b x + d y + f)`), inside the transforms around it.
+    PushTransform([f32; 6]),
+    PopTransform,
     /// Everything until the matching `PopClip` is clipped to this box,
     /// with these corner radii.
     PushClip {

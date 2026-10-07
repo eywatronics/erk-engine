@@ -653,10 +653,10 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
     let mut stack = vec![(doc.root(), doc.root())];
     while let Some((parent, outer_container)) = stack.pop() {
         let parent_style = styles.computed(parent);
-        let positioned = parent_style
+        let contains = parent_style
             .as_ref()
-            .is_some_and(|style| is_positioned(style));
-        let container = if positioned { parent } else { outer_container };
+            .is_some_and(|style| contains_out_of_flow(style));
+        let container = if contains { parent } else { outer_container };
         // Only a block container lays its inline content out as lines; in a
         // flex or grid container each run of text is an anonymous item.
         let block_container = parent_style.as_ref().is_none_or(|style| {
@@ -724,9 +724,10 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
             }
         }
         // A paragraph: only inline content, laid out as one run. A positioned
-        // block keeps a block box with an anonymous paragraph inside, so the
-        // absolutely positioned elements it contains are laid out by Taffy.
-        if !has_blocks && !positioned && block_container && parent != doc.root() {
+        // or transformed block keeps a block box with an anonymous paragraph
+        // inside, so the absolutely positioned elements it contains are laid
+        // out by Taffy.
+        if !has_blocks && !contains && block_container && parent != doc.root() {
             let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
                 match entry {
@@ -749,7 +750,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                     node.children = children;
                 }
             }
-            add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
+            add_out_of_flow(doc, styles, &mut nodes, &mut calcs, &mut stack, out_of_flow);
             continue;
         }
 
@@ -852,7 +853,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
             children.sort_by_key(|child| nodes[usize::from(*child)].order);
         }
         nodes[parent.index() as usize].children = children;
-        add_out_of_flow(&mut nodes, &mut calcs, &mut stack, out_of_flow, doc.root());
+        add_out_of_flow(doc, styles, &mut nodes, &mut calcs, &mut stack, out_of_flow);
     }
 
     // Replaced elements: an `<img>` with a box shows its image, if it has
@@ -930,20 +931,21 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
 
 /// Give each absolutely positioned element a box as the last child of its
 /// containing block. The containing block was built before it (it is an
-/// ancestor), and is never a paragraph: positioned blocks keep a block box.
-/// A fixed element goes to the viewport, the document node's box.
+/// ancestor), and is never a paragraph: positioned and transformed blocks
+/// keep a block box. A fixed element goes to its nearest transformed
+/// ancestor, or else to the viewport, the document node's box.
 fn add_out_of_flow(
+    doc: &Document,
+    styles: &Styles,
     nodes: &mut [LayoutNode],
     calcs: &mut CalcTable,
     stack: &mut Vec<(NodeId, NodeId)>,
     out_of_flow: OutOfFlow,
-    viewport: NodeId,
 ) {
     use erk_style::style::computed_values::position::T as CssPosition;
     for (id, computed, container) in out_of_flow {
-        // A fixed element's containing block is always the viewport.
         let container = if computed.clone_position() == CssPosition::Fixed {
-            viewport
+            fixed_container(doc, styles, id)
         } else {
             container
         };
@@ -980,6 +982,34 @@ fn taffy_style(computed: &ComputedValues) -> Style<Atom> {
         };
     }
     style
+}
+
+/// The containing block of a `position: fixed` element: its nearest
+/// ancestor with a transform (CSS Transforms 1 §2), or the viewport.
+pub(crate) fn fixed_container(doc: &Document, styles: &Styles, id: NodeId) -> NodeId {
+    let mut at = doc.node(id).and_then(|node| node.parent());
+    while let Some(ancestor) = at {
+        if styles
+            .computed(ancestor)
+            .is_some_and(|style| crate::transform::transforms(&style) && !is_inline_box(&style))
+        {
+            return ancestor;
+        }
+        at = doc.node(ancestor).and_then(|node| node.parent());
+    }
+    doc.root()
+}
+
+/// A box that is the containing block of the absolutely positioned
+/// elements in it: a positioned one (CSS 2 §10.1), or a transformed one
+/// (CSS Transforms 1 §2).
+fn contains_out_of_flow(style: &ComputedValues) -> bool {
+    is_positioned(style) || crate::transform::transforms(style)
+}
+
+/// An inline box that is not atomic: transforms do not apply to it.
+fn is_inline_box(style: &ComputedValues) -> bool {
+    is_inline_level(style) && !is_atomic_inline(style)
 }
 
 /// `position` other than `static`: a containing block for absolutely
@@ -1037,7 +1067,7 @@ impl Run {
         if paragraph.is_empty() {
             return;
         }
-        let container = if is_positioned(style) {
+        let container = if contains_out_of_flow(style) {
             parent
         } else {
             container
