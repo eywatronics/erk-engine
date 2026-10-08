@@ -1,8 +1,10 @@
 # Erk Engine — P2: Artımlı render mimarisi (M5)
 
 - **Tarih:** 2026-10-01
-- **Durum:** Tasarım. Kod yok; M5 başlayınca bu belge o taşın planına
-  dönüşür, açık sorular (§9) M5'in ilk adımında kapanır.
+- **Durum:** Tasarım, nihai. Uygulama planı:
+  [m5-incremental-forms.md](../plans/m5-incremental-forms.md) (§5'in
+  adımları orada; M5.8'in bölünmesi ve erişilebilirliğin formlardan sonraya
+  alınması gerekçesiyle). Açık sorular (§9) M5.0'da kapanır.
 - **Önceki belgeler:** [p1-embedded.md](p1-embedded.md),
   [p1-contract.md](p1-contract.md), [roadmap.md](../plans/roadmap.md) M2 ve
   M5.

@@ -30,7 +30,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M2** | Etkileşim temeli | Bitti ([m2-interaction.md](m2-interaction.md)) |
 | **M3** | Kütüphane (Rust API, C-ABI) | Bitti ([m3-library.md](m3-library.md)) |
 | **M4** | Etkileşimli DOM | Bitti ([m4-interactive-dom.md](m4-interactive-dom.md)) |
-| **M5** | Artımlı render ve formlar | Yeni |
+| **M5** | Artımlı render ve formlar | Sürüyor ([m5-incremental-forms.md](m5-incremental-forms.md)) |
 | **M6** | Bağlamalar: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Yeni |
 | **M7** | Geliştirici araçları | Yeni |
 | **M8** | Ürünleşme | Yeni |
@@ -369,6 +369,27 @@ bağımlı; düğüme bağlı veri yan tablolarda.
   `now_ns`'inden (p1-contract §7). Rengin "çat" diye değil 150 ms'de
   yumuşakça değişmesi uygulamanın kalitesini belirliyor; tam animasyon
   motoru (`@keyframes`, kompozitörde koşan animasyonlar) M9'da kalır
+
+M5 de adımlara bölünür; her adım kendi PR'ı ([m5-incremental-forms.md](m5-incremental-forms.md)).
+Tasarımın dokuz adımından sapmalar (M5.8'in bölünmesi, erişilebilirliğin
+formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
+
+| Adım | Kapsam | Durum |
+|---|---|---|
+| M5.0 | Ölçüm (B1–B11, taban) ve doğruluk kâhini (iki yol) | Yeni |
+| M5.1 | Mutation journal, birleştirme, transaction | Yeni |
+| M5.2 | `erk-invalidation`: bitler, nedenler, cebir; bağımlılık muhafızı | Yeni |
+| M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Yeni |
+| M5.4 | Kalıcı layout: Taffy önbelleği, sınırlar, erken kesme | Yeni |
+| M5.5 | Kalıcı metin şekillendirmesi | Yeni |
+| M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Yeni |
+| M5.7 | Odak, Tab sırası, varsayılan eylemin iptali, girdi/değişiklik/gönderim olayları | Yeni |
+| M5.8 | Metin alanları: imleç, seçim, pano, IME | Yeni |
+| M5.9 | Onay kutusu, radyo, düğme, `select`, form gönderimi | Yeni |
+| M5.10 | `<details>`, `<dialog>`, `popover`, `commandfor` | Yeni |
+| M5.11 | Erişilebilirlik (AccessKit) | Yeni |
+| M5.12 | Temel geçişler | Yeni |
+| M5.13 | Kabul | Yeni |
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
 hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. p2-incremental §4'ün
