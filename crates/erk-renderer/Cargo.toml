@@ -12,6 +12,7 @@ rust-version.workspace = true
 
 [dependencies]
 erk-dom = { path = "../erk-dom" }
+erk-invalidation = { path = "../erk-invalidation" }
 erk-style = { path = "../erk-style" }
 # Stylo's transform matrices take an euclid reference box. Same version
 # Stylo uses, already in the tree.

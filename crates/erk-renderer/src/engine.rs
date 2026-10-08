@@ -125,7 +125,7 @@ pub struct Engine {
     last: Option<(crate::list::DisplayList, u16, u16)>,
     /// The document as the last frame saw it, and where the journal
     /// missed a change, while verifying.
-    seen: Option<crate::journal::Snapshot>,
+    seen: Option<erk_invalidation::journal::Snapshot>,
     missed: Option<String>,
     /// How many transactions are open: no frame is prepared until the
     /// outermost closes.

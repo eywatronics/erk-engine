@@ -18,7 +18,6 @@ use erk_style::style::values::computed::Display;
 use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
-use crate::journal::{Changes, Journal, Snapshot};
 use crate::layout;
 use crate::messages::{
     BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
@@ -30,6 +29,7 @@ use crate::scroll::{Offsets, Scrolling};
 use crate::tables::Tables;
 use crate::text::{EmbeddedFontMetrics, TextEngine};
 use crate::transform::Matrix;
+use erk_invalidation::journal::{Changes, Journal, Snapshot};
 
 pub(crate) struct Page {
     doc: Document,
@@ -187,12 +187,12 @@ impl Page {
 
     /// The document's state now, to check the next frame's journal with.
     pub(crate) fn snapshot(&self) -> Snapshot {
-        crate::journal::snapshot(&self.doc)
+        erk_invalidation::journal::snapshot(&self.doc)
     }
 
     /// What really changed since `before`.
     pub(crate) fn difference(&self, before: &Snapshot) -> Changes {
-        crate::journal::difference(before, &self.doc)
+        erk_invalidation::journal::difference(before, &self.doc)
     }
 
     /// What the last frame found had changed.
@@ -904,10 +904,10 @@ impl Page {
             self.journal.touch(&self.doc, old);
         }
         self.journal.touch(&self.doc, parent);
-        let joins = !crate::journal::connected(&self.doc, child);
+        let joins = !erk_invalidation::journal::connected(&self.doc, child);
         self.doc.insert(parent, child, before).map_err(status)?;
         // From outside the document into it: all of it is new there.
-        if joins && crate::journal::connected(&self.doc, child) {
+        if joins && erk_invalidation::journal::connected(&self.doc, child) {
             self.journal.arrived(&self.doc, child);
         }
         Ok(())

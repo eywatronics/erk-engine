@@ -790,10 +790,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "erk-invalidation"
+version = "0.1.0"
+dependencies = [
+ "erk-dom",
+]
+
+[[package]]
 name = "erk-renderer"
 version = "0.1.0"
 dependencies = [
  "erk-dom",
+ "erk-invalidation",
  "erk-style",
  "euclid",
  "fearless_simd",

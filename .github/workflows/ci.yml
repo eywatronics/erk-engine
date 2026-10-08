@@ -196,6 +196,13 @@ jobs:
             exit 1
           fi
 
+      # erk-invalidation knows the document and nothing above it
+      # (p2-incremental §3.12): style, layout and the display list consume
+      # it, it consumes none of them. Normal and build dependencies, every
+      # target and feature, a rename shown by its package's name.
+      - name: erk-invalidation depends only on erk-dom
+        run: bash .github/scripts/check-invalidation-deps.sh
+
       # The shell is the first host of the Rust API (M3.3): it reaches the
       # engine through erk and nothing else, and erk reaches the document and
       # the styles through the engine (p1-contract §1.1). --depth 1 on

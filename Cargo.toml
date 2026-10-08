@@ -6,6 +6,7 @@ members = [
     "crates/erk-shell",    # window, event loop, messaging with the renderer
     "crates/erk-renderer", # layout, display list, paint; the renderer thread
     "crates/erk-dom",      # arena DOM and HTML parsing
+    "crates/erk-invalidation", # what changed since the last frame, and what it makes dirty
     "crates/erk-style",    # Stylo adapter (the one crate that may declare unsafe fns)
     "crates/erk-wpt",      # Web Platform Tests reftest runner (a tool, not part of the engine)
 ]

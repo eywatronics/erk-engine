@@ -158,11 +158,11 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.2: `erk-invalidation`
 
-- [ ] Kirlenme bitleri (stil, metin, layout, boyama, erişilebilirlik; yön
+- [x] Kirlenme bitleri (stil, metin, layout, boyama, erişilebilirlik; yön
   bitlerin içinde), neden tamponu (`inspect` özelliği), yan tablolar.
-- [ ] Cebir özellik testleri (boş girdi, tekrar uygulama, monotonluk,
+- [x] Cebir özellik testleri (boş girdi, tekrar uygulama, monotonluk,
   birleşim üzerine dağılma); koşulsuz terfi mutasyonu yakalanıyor.
-- [ ] Muhafız aynı PR'da: crate projeden yalnızca `erk-dom`'a bağımlı,
+- [x] Muhafız aynı PR'da: crate projeden yalnızca `erk-dom`'a bağımlı,
   kasıtlı ve eşdeğer bağımlılıklarla denenmiş.
 
 ### M5.3: Kalıcı stil
@@ -339,3 +339,19 @@ Tabana eklenenler (aynı oturumda B1 ile, M5.0'ın koşulları):
 | B2 | bir karede 100 metin | 353,34 | 450,75 | 200 | 100 |
 | B2b | aynı metin bir karede 100 kez | 340,43 | 420,96 | 200 | 1 |
 | B10 | bir karede 100 toplu işlem | 335,04 | 463,54 | 200 | 100 |
+
+### M5.2
+
+| Konu | Not |
+|---|---|
+| Crate | `crates/erk-invalidation`: projeden yalnızca `erk-dom`'a bağımlı, çekirdeğin parçası. Dış bağımlılığı da yok: bitler `bitflags` yerine küçük bir `u16` sarmalayıcısı (`Invalidation`), birleşim ve fark işleçleriyle |
+| Bitler | Tasarımın on biti (§3.3): `STYLE_SELF`, `STYLE_SUBTREE`, `TEXT_SHAPE`, `LAYOUT_SELF`, `LAYOUT_ANCESTOR`, `PAINT_SELF`, `PAINT_SUBTREE`, `A11Y_SELF`, `A11Y_SUBTREE`, `HIT_TEST`. Karar 10'un düzeyleri bunlarla: yalnızca boyama `PAINT_*`, yerleşim `LAYOUT_*` ama `TEXT_SHAPE` değil, şekillendirme yalnızca `TEXT_SHAPE` |
+| Yayılma | `Rule { absorb, promote }`, `propagate(I, R) = ∅` (I boşsa) ya da `(I ∖ absorb) ∪ promote`; clamp yok. `propagate_up` ataları yürüyor, her kenarda ebeveynin kuralıyla; hiçbir şey geçmeyince ya da ata hepsini zaten taşıyınca duruyor (O(d)) |
+| Cebir testleri | Sabit tohumlu üreteçle her biri 10 bin durum: boş girdi, tekrar uygulama, monotonluk, birleşim üzerine dağılma. Yakınsama bir zincirde: 50 düzeyde, yapraktan 10 düzey yukarıdaki sınırda yürüyüş 9 ata işaretleyip duruyor, ikinci kez hiç işaretlemiyor |
+| Nedenler | `Cause` (metin, öznitelik, sınıf, satır içi stil, durum, çocuğun layout'u, ebeveynin layout'u, kaynak, görüntü alanı) ve `(sıra, düğüm, bitler, neden)` kayıtları halka tamponda; `chain(node)` zinciri çocuktan tohuma geri okuyor. `inspect` özelliğinin (ve testlerin) arkasında; kapalıyken `Causes` hiçbir şey tutmuyor. Sıcak yoldaki maliyeti M5.3'te, tüketildiğinde ölçülecek |
+| Yan tablo | `SideTable<T>`: `NodeId::index()` ile düz vektör, her girdi düğümünün neslini tutuyor; silinip yeniden kullanılan bir yuva eski düğümün verisini yeni düğüme vermiyor; `clear` yalnızca kullanılan yuvalara dokunuyor |
+| Günlük | M5.1'in `journal.rs`'i tasarımın dediği yere, bu crate'e taşındı (`erk_invalidation::journal`); renderer onu kullanıyor. Davranış değişmedi |
+| Tüketim | M5.2'de hiçbir aşama bitleri tüketmiyor: kare hâlâ tam yeniden hesap. Bitleri ilk tüketen M5.3 (stil hasarı → bitler) |
+| Muhafız | `check-invalidation-deps.sh` (CI `guards`): normal ve derleme bağımlılıkları, her hedef ve özellik, derinlik 1. Kasıtlı ihlaller, her biri kilit dosyası güncellenip (çözümleme hatasıyla değil bağımlılığı görerek düşsün diye): `erk-style` normal, yalnızca derleme, bir özelliğin arkasında, yalnızca bir platformda ve yeniden adlandırılmış bağımlılık olarak: beşi de yakalandı. `check-core-io.sh` crate'i de tarıyor; `std::fs` sokan ihlal yakalandı |
+| Mutasyonlar | Koşulsuz terfi (planın beklediği; boş girdi testi yakaladı), soğurmanın yok sayılması, yürüyüşün erken durmaması, nesil denetiminin kalkması, zincirin ilk kayıtta durması, en yeni kaydın önce ezilmesi: yakalandı. "Hiçbir şey geçmeyince dur" dalı mutasyondan sağ çıktı: ölü kod, çünkü boş küme her kümenin altkümesi ve "ata hepsini taşıyor" denetimi onu zaten durduruyor; silindi, yorum ikisini birden söylüyor |
+| Fuzz kilidi | M4.4'te unutulan ders: yeni crate fuzz workspace'inin kilidine de girdi (`fuzz/Cargo.lock`), aynı PR'da |
