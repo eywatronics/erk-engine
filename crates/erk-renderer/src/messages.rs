@@ -157,6 +157,11 @@ pub struct FrameStats {
     pub laid_out: usize,
     pub shaped: usize,
     pub items: usize,
+    /// The document changes recorded since the frame before (M5.1).
+    pub recorded: usize,
+    /// What is left of them coalesced: the changes invalidation starts
+    /// from.
+    pub changes: usize,
 }
 
 /// An event on the page, as p1-contract's `ErkEvent` describes it: its

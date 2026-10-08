@@ -1,7 +1,7 @@
 # Erk Engine — P1: Gömme sözleşmesi (M0.5)
 
 - **Tarih:** 2026-09-30
-- **Durum:** ABI v0.5 (M4.5), v0.2 M3.5'te koda indi (`crates/erk-ffi`,
+- **Durum:** ABI v0.6 (M5.1), v0.2 M3.5'te koda indi (`crates/erk-ffi`,
   `include/erk.h`, §10). Değişiklik önce bu belgede, gerekçesiyle yapılır;
   M4–M5 boyunca öğrenilenlerle v0.3 diye ilerler; 1.0'a (M8) kadar kırıcı
   değişiklik hakkı saklıdır.
@@ -406,6 +406,16 @@ gerekçeli bir daraltma:
   Bugüne kadar `ERK_KEY_OTHER` geliyordu; aynı tuş artık başka bir değerle
   geldiği için sürüm 5. `ERK_KEY_*` M5'in metin alanlarıyla büyüyecek; bir
   host tanımadığı değeri `ERK_KEY_OTHER` gibi okumalı.
+- **v0.6 (M5.1):** `erk_transaction_begin` ve `erk_transaction_commit`:
+  en dıştaki işlem kapanana kadar hiçbir kare hazırlanmaz, hiçbir kare
+  belgeyi bir grup değişikliğin ortasında göstermez. İç içe olabilir;
+  açılmamış bir işlemi kapatmak `ERK_ERR_INVALID_ARGUMENT`. Değişiklikler
+  işlemin içinde de belgeye hemen girer, host yazdığını okur. İşlem geri
+  alma (rollback) getirmez: `erk_apply`'ın ilk hatada durup öncekileri
+  bırakması sürüyor. p2-incremental §3.2 bunu `erk_apply`'ın kendisi
+  sayıyordu; ayrı bir çift gerekti, çünkü bir değişiklik grubunu birden
+  çok çağrıyla yapan ve aralarında bekleyen (async) bir bağlama, araya
+  giren bir kareyle yarım bir belge gösterebilirdi.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 5;
+pub const ERK_ABI_VERSION: u32 = 6;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -983,6 +983,28 @@ pub extern "C" fn erk_query(
         let scope = (scope != ERK_NODE_NONE).then(|| node(scope)).transpose()?;
         let found = app.cx().query(scope, &text(selector)?).abi()?;
         put(out, raw(found))
+    })
+}
+
+/// Open a transaction: until the outermost one is committed no frame is
+/// prepared, so none shows the document halfway through a group of
+/// changes (p1-contract §10, v0.6). Transactions nest.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_transaction_begin(app: *mut ErkApp) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().begin_transaction();
+        Ok(())
+    })
+}
+
+/// Close the innermost transaction; `ERK_ERR_INVALID_ARGUMENT` if none is
+/// open.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_transaction_commit(app: *mut ErkApp) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().commit_transaction().abi()
     })
 }
 

@@ -45,7 +45,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 5u));
+  CHECK(erk_abi_version() == ((0u << 16) | 6u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -108,7 +108,11 @@ int main(void) {
   batch[4].node = ERK_NEW_NODE + 0;
   ErkNodeId created[5];
   size_t failed_at = 0;
+  /* In a transaction: no frame shows the list half built. */
+  CHECK(erk_transaction_begin(app) == ERK_OK);
   CHECK(erk_apply(app, batch, 5, created, &failed_at) == ERK_OK);
+  CHECK(erk_transaction_commit(app) == ERK_OK);
+  CHECK(erk_transaction_commit(app) == ERK_ERR_INVALID_ARGUMENT);
   ErkNodeId items[2] = {ERK_NODE_NONE, ERK_NODE_NONE};
   size_t count = 0;
   CHECK(erk_query_all(app, ERK_NODE_NONE, str("ul > li"), items, 2, &count) == ERK_OK);

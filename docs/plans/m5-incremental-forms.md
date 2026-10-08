@@ -107,7 +107,8 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   hangi değerleri). **Çözüldü (M5.0)**, cevaplar yürütme notlarında.
 - **Transaction'ın C-ABI'deki yüzü:** `erk_apply` zaten toplu; iç içe
   transaction'ın bir `begin`/`commit` çifti mi yoksa `erk_apply`'ın bir
-  bayrağı mı olacağı M5.1'de.
+  bayrağı mı olacağı M5.1'de. **Çözüldü (M5.1):** `erk_transaction_begin`
+  ve `erk_transaction_commit` çifti; gerekçe yürütme notlarında.
 - **`select`'in açılır listesi:** sayfanın içinde bir katman mı (popover
   gibi), ayrı bir işletim sistemi penceresi mi? **Çözüldü (2026-10-08):
   sayfa içi katman**, `popover`'ın üst katmanıyla (top layer). Erk
@@ -150,9 +151,9 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.1: Mutation journal ve transaction
 
-- [ ] Kare içinde biriken değişiklikler, birleştirme (aynı düğümün art arda
+- [x] Kare içinde biriken değişiklikler, birleştirme (aynı düğümün art arda
   metinleri, eklenip silinen düğüm), iç içe transaction.
-- [ ] 100 metin değişikliği tek uygulama (B2, B10); birleştirmenin
+- [x] 100 metin değişikliği tek uygulama (B2, B10); birleştirmenin
   doğruluğu fuzz'la: son DOM durumu sırayla uygulamayla aynı.
 
 ### M5.2: `erk-invalidation`
@@ -315,3 +316,25 @@ Tabana eklenenler (aynı oturumda B1 ile, M5.0'ın koşulları):
 | B1 | 10 bin eleman, bir metin | 336,00 | 388,10 | 396,44 | 396,44 | 9,21 | 253,00 | 30,58 | 33,52 | 10003 | 10003 | 8000 | 26002 |
 | B12 | 10 bin kelimede bir paragrafa bir karakter | 127,33 | 135,60 | 160,53 | 160,53 | 0,96 | 49,64 | 17,79 | 57,37 | 503 | 503 | 500 | 2504 |
 | B13 | 10 bin elemanda satır içi renk | 348,78 | 463,94 | 560,91 | 560,91 | 9,10 | 262,56 | 31,80 | 34,10 | 10003 | 10003 | 8000 | 26002 |
+
+### M5.1
+
+| Konu | Not |
+|---|---|
+| **Tasarımdan sapma: değişiklikler hemen uygulanır** | p2-incremental §3.2 günlüğün kare sınırında tek seferde uygulanmasını söylüyordu. Uygulanmadı: değişiklik DOM'a o anda giriyor, host yazdığını okuyor (M4'ün API'si buna dayanıyor; TodoMVC `set_text`'ten sonra metni okuyor). Ertelenseydi her okumanın günlüğü katman olarak DOM'un üstüne bindirmesi gerekirdi. DOM'a yazmak ucuz; pahalı olan invalidation, o da kare sınırında. Günlük bu yüzden "neyin değiştiği"ni tutuyor: dokunulan her düğümün **ilk dokunuştan önceki durumu** (metni, öznitelikleri, çocukları), bir yan tabloda (`NodeId::index()`, nesille). Kare sınırında `take` o durumu düğümün şimdiki hâliyle karşılaştırıyor: tasarımın birleştirme kuralları aynen çıkıyor (son değer kazanır, eklenip çıkarılan sınıf iptal, oluşturulup silinen düğüm iz bırakmaz, eski hâline dönen değer değişiklik değil). "İlk dokunuştan önceki durum" M5.3'te Stylo'nun eleman snapshot'ının istediği veri |
+| Net değişiklikler | `Changes { everything, text, attrs (adlarıyla), children }`: yalnızca bu karede de geçen karede de belgede olan düğümler; bu karede oluşturulanlar (tamamen yeni, ebeveynin `children` değişikliği onları kapsıyor) ve artık belgede olmayanlar düşüyor. Sayfa baştan yüklenince `everything`. `set_text` bir elemanın çocuklarını silip yeni bir metin düğümü yaptığı için sayfa o düğümü "oluşturuldu" diye kaydediyor; yoksa ona sonraki bir dokunuş değişiklik sayılırdı (journal testi yakaladı) |
+| Kayıt yolları | `set_text` (eleman ya da metin), `set_attr`, `remove_attr`, `insert` (ayrıldığı ve katıldığı ebeveyn), `remove` (ebeveyni), `create_element`, `create_text`; `load` yeni bir günlük (`everything`). Toplu `apply` ve `erk` aynı yollardan geçiyor |
+| Muhafız | Doğrulama kipinde motor her kareden sonra belgenin anlık görüntüsünü tutuyor; sonraki karede günlüğün bulduğu net değişiklikleri belgenin gerçek farkıyla karşılaştırıyor, farkı `verify` raporluyor ("the journal found … but the document changed …"). Fuzz yorumlayıcısı her karede çağırdığı için iki `fuzz mutations` job'ı ve sabit test de bunu denetliyor |
+| Mutasyonlar | `set_attr`, `insert`'in ayrıldığı ebeveyn, `remove`'un ebeveyni, `set_text`'in kaydı silinince fuzz yakaladı. `remove_attr`'in kaydı silinince fuzz **yakalamadı** (rastgele bir betiğin geçen karede var olan bir özniteliği o karede başka hiçbir şeye dokunmadan silmesi nadir): her değişiklik yolunu ayrı bir karede deneyen `every_kind_of_change_reaches_the_journal_one_frame_at_a_time` yazıldı, yakaladı. Sonraki dokunuşun ilk durumu ezmesi ve oluşturulan düğümlerin karşılaştırılması journal testleriyle yakalandı |
+| Transaction | `Engine::begin`/`commit`, `erk`'te `begin_transaction`, `commit_transaction` ve `transaction(|cx| …)`; C-ABI'de `erk_transaction_begin`/`erk_transaction_commit` (sözleşme v0.6). En dıştaki kapanana kadar `tick` kare hazırlamıyor; değişiklikler belgeye yine hemen giriyor. **Geri alma yok:** `erk_apply` ilk hatada duruyor ve öncekileri bırakıyor, M4.1'deki gibi; silmeyi geri almak, silinen düğümlerin arenadan kare sonuna kadar serbest bırakılmamasını isterdi. Gerektiğinde ayrı bir karar. C-ABI'de neden ayrı bir çift (tasarım `erk_apply`'ın kendisini işlem sayıyordu): bir grubu birden çok çağrıyla yapan ve aralarında bekleyen bir bağlama (Node'un `await`'i, Python'un `asyncio`'su) için, araya giren kareyi tutacak başka yol yok |
+| Ölçüm | Yeni sütunlar `recorded` (karede kaydedilen) ve `changes` (birleştirme sonrası). Aynı metin bir karede 100 kez (yeni B2b): 200 kayıt, **1 değişiklik**. 100 farklı metin (B2, B10): 200 kayıt, 100 değişiklik (her `set_text` elemanı ve yaptığı metin düğümünü kaydediyor). Kare süreleri değişmedi (B1 medyan 337 ms): kare hâlâ tam yeniden hesap, günlüğün maliyeti ölçülemeyecek kadar küçük. Kazanç M5.2'den itibaren: invalidation 200 değil 1 kayıttan başlayacak |
+| Skorlar | Render'a dokunulmadı: Chrome referans skorları ve WPT sonuçları değişmedi |
+
+Ölçüm (M5.1, aynı oturum):
+
+| | Senaryo | medyan | p95 | kaydedilen | değişiklik |
+|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 337,12 | 424,99 | 2 | 1 |
+| B2 | bir karede 100 metin | 353,34 | 450,75 | 200 | 100 |
+| B2b | aynı metin bir karede 100 kez | 340,43 | 420,96 | 200 | 1 |
+| B10 | bir karede 100 toplu işlem | 335,04 | 463,54 | 200 | 100 |

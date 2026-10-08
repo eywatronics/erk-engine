@@ -123,6 +123,13 @@ pub struct Engine {
     verifying: bool,
     /// The last frame's display list and size, while verifying.
     last: Option<(crate::list::DisplayList, u16, u16)>,
+    /// The document as the last frame saw it, and where the journal
+    /// missed a change, while verifying.
+    seen: Option<crate::journal::Snapshot>,
+    missed: Option<String>,
+    /// How many transactions are open: no frame is prepared until the
+    /// outermost closes.
+    held: usize,
     /// The thread the last frame was prepared on, for the tests.
     #[cfg(test)]
     frame_thread: Option<ThreadId>,
@@ -145,6 +152,9 @@ impl Engine {
             changed: true,
             verifying: false,
             last: None,
+            seen: None,
+            missed: None,
+            held: 0,
             #[cfg(test)]
             frame_thread: None,
         }
@@ -386,12 +396,28 @@ impl Engine {
         &mut self,
         mark: &mut dyn FnMut(Stage),
     ) -> (Option<Prepared>, Vec<ResourceRequest>) {
-        let Some((width, height)) = self.size.filter(|_| self.changed) else {
+        let Some((width, height)) = self.size.filter(|_| self.changed && self.held == 0) else {
             return (None, Vec::new());
         };
+        let actual = self
+            .seen
+            .as_ref()
+            .filter(|_| self.verifying)
+            .map(|seen| self.page.difference(seen));
         let (list, requests) = self.on_frame_thread(width, height, false, mark);
         if self.verifying {
             self.last = Some((list.clone(), width, height));
+            let found = self.page.changes();
+            if let Some(actual) = actual
+                && !found.everything
+                && *found != actual
+                && self.missed.is_none()
+            {
+                self.missed = Some(format!(
+                    "the journal found {found:?} but the document changed {actual:?}"
+                ));
+            }
+            self.seen = Some(self.page.snapshot());
         }
         let updates = self.resources.table_updates(&list);
         self.changed = false;
@@ -417,7 +443,22 @@ impl Engine {
         self.verifying = verifying;
         if !verifying {
             self.last = None;
+            self.seen = None;
+            self.missed = None;
         }
+    }
+
+    /// Open a transaction: until the outermost one is committed, no frame
+    /// is prepared, so none shows the document halfway through the
+    /// changes (M5.1; a host that awaits between changes needs it).
+    pub fn begin(&mut self) {
+        self.held += 1;
+    }
+
+    /// Close the innermost transaction; `InvalidArgument` if none is open.
+    pub fn commit(&mut self) -> Result<(), Status> {
+        self.held = self.held.checked_sub(1).ok_or(Status::InvalidArgument)?;
+        Ok(())
     }
 
     /// Check the last frame against the oracle: the same document
@@ -427,6 +468,9 @@ impl Engine {
     pub fn verify(&mut self) -> Result<(), String> {
         if !self.verifying {
             return Err("not verifying: call set_verifying(true) first".to_owned());
+        }
+        if let Some(missed) = self.missed.take() {
+            return Err(missed);
         }
         if self.last.is_none() {
             return Ok(());
@@ -544,6 +588,92 @@ mod tests {
     }
 
     #[test]
+    fn every_kind_of_change_reaches_the_journal_one_frame_at_a_time() {
+        let mut engine = Engine::new();
+        engine.load_html(
+            "<ul id=list><li id=a title=x>bir</li><li id=b>iki</li></ul><p id=p>metin</p>",
+        );
+        engine.resize(200, 100);
+        engine.set_verifying(true);
+        assert!(engine.prepare().0.is_some());
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (list, a, b, p) = (
+            find(&engine, "#list"),
+            find(&engine, "#a"),
+            find(&engine, "#b"),
+            find(&engine, "#p"),
+        );
+        let text = engine.child_at(p, 0).unwrap().unwrap();
+        // Each change in a frame of its own: the journal must find it, and
+        // what it finds must be what the document did (`verify`).
+        let frame = |engine: &mut Engine, change: &dyn Fn(&mut Engine)| {
+            change(engine);
+            assert!(engine.prepare().0.is_some());
+            assert_eq!(engine.verify(), Ok(()));
+            engine.stats().changes
+        };
+        assert_eq!(
+            frame(&mut engine, &|e| e.set_attr(a, "title", "y").unwrap()),
+            1
+        );
+        assert_eq!(
+            frame(&mut engine, &|e| assert!(
+                e.remove_attr(a, "title").unwrap()
+            )),
+            1
+        );
+        assert_eq!(
+            frame(&mut engine, &|e| e.set_text(text, "yazı").unwrap()),
+            1
+        );
+        assert_eq!(frame(&mut engine, &|e| e.set_text(b, "üç").unwrap()), 1);
+        // A move: the list loses it, the paragraph gains it.
+        assert_eq!(frame(&mut engine, &|e| e.insert(p, a, None).unwrap()), 2);
+        assert_eq!(frame(&mut engine, &|e| e.remove(a).unwrap()), 1);
+        assert_eq!(
+            frame(&mut engine, &|e| {
+                let made = e.create_element("li").unwrap();
+                e.insert(list, made, None).unwrap();
+            }),
+            1
+        );
+        // Made and removed in one frame, and set back: nothing.
+        assert_eq!(
+            frame(&mut engine, &|e| {
+                let made = e.create_element("li").unwrap();
+                e.insert(list, made, None).unwrap();
+                e.remove(made).unwrap();
+                e.set_attr(b, "class", "on").unwrap();
+                e.remove_attr(b, "class").unwrap();
+            }),
+            0
+        );
+    }
+
+    #[test]
+    fn no_frame_shows_a_transaction_halfway() {
+        let mut engine = Engine::new();
+        engine.load_html("<p id=p>bir</p>");
+        engine.resize(100, 50);
+        assert!(engine.prepare().0.is_some());
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        engine.begin();
+        engine.begin();
+        engine.set_text(p, "iki").unwrap();
+        assert!(engine.prepare().0.is_none(), "inside a transaction");
+        engine.commit().unwrap();
+        assert!(engine.prepare().0.is_none(), "the outer one is still open");
+        engine.set_text(p, "üç").unwrap();
+        engine.commit().unwrap();
+        assert!(engine.prepare().0.is_some(), "all of it at once");
+        // Both changes (each records the element and the text node it
+        // makes), coalesced into one.
+        assert_eq!(engine.stats().recorded, 4);
+        assert_eq!(engine.stats().changes, 1);
+        assert_eq!(engine.commit(), Err(Status::InvalidArgument));
+    }
+
+    #[test]
     fn the_oracle_says_where_a_frame_parts_from_it() {
         use crate::list::{DisplayItem, DisplayList};
         let rect = |x: f32| DisplayItem::Rect {
@@ -603,6 +733,9 @@ mod tests {
                 laid_out: 7,
                 shaped: 3,
                 items,
+                // A new document: all of it is new, nothing to coalesce.
+                recorded: 0,
+                changes: 0,
             }
         );
     }
