@@ -147,6 +147,18 @@ pub enum KeyState {
     Up,
 }
 
+/// What the last frame did, counted (M5.0): how many elements were styled,
+/// boxes laid out, paragraphs shaped and display list items made. Today
+/// every frame does all of them; M5's incremental steps are measured by
+/// how far these fall.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrameStats {
+    pub styled: usize,
+    pub laid_out: usize,
+    pub shaped: usize,
+    pub items: usize,
+}
+
 /// An event on the page, as p1-contract's `ErkEvent` describes it: its
 /// kind, the node it happened to, and the path from that node up to the
 /// root element, from which the host dispatches the capture, target and

@@ -76,8 +76,8 @@ use erk_renderer::{Engine, Painted, Prepared, RasterThread, Stage};
 
 pub use context::{BatchError, Context, Mutation, Ref};
 pub use erk_renderer::{
-    BoxModel, Frame, KeyInput, KeyState, NodeKind, PointerButton, PointerInput, PointerKind,
-    ResourceKind, ResourceRequest,
+    BoxModel, Frame, FrameStats, KeyInput, KeyState, NodeKind, PointerButton, PointerInput,
+    PointerKind, ResourceKind, ResourceRequest,
 };
 pub use events::{Event, EventKind, Key, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};

@@ -78,7 +78,9 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 - **p95 hedefinin sayısı:** M5.0'ın taban ölçümünden konur (proje kuralı:
   sayı ölçümden). Makine yine i7-10750H ve GTX 1650; M3'ün tablosu
-  (`nodes-1000` tam kare 66,49 ms) başlangıç noktası.
+  (`nodes-1000` tam kare 66,49 ms) başlangıç noktası. **Çözüldü (M5.0):**
+  p95 ≤ 16,7 ms; gerekçe yürütme notlarında.
+- **Tasarımın §9'u:** **Çözüldü (M5.0)**, cevaplar yürütme notlarında.
 - **Tasarımın §9'u** (Stylo snapshot'ı `erk-style`'ın beş `unsafe fn`
   yüzeyini değiştiriyor mu; kalıcı layout yan tablosu arena silmesi ve
   nesillerle nasıl eşleşir; `vello_hybrid`'de kısmi sunum; `contain`'in
@@ -114,13 +116,13 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.0: Ölçüm ve kâhin
 
-- [ ] B1–B11 senaryoları ölçüm aracında (`measure`); M4'ün tam yeniden
+- [x] B1–B11 senaryoları ölçüm aracında (`measure`); M4'ün tam yeniden
   hesabı taban, sayılar bu planın yürütme notlarına.
-- [ ] İki yol altyapısı: tam yeniden hesap kâhin olarak ayrı bir yol;
+- [x] İki yol altyapısı: tam yeniden hesap kâhin olarak ayrı bir yol;
   `Mutation` fuzz'ı ve sabit testi diziyi iki yoldan geçirip display
   list'leri karşılaştırıyor (bugün iki yol aynı kodu çalıştırır; altyapı
   hazır olur).
-- [ ] p2-incremental §9'un açık soruları kapanmış; p95 hedefi konmuş.
+- [x] p2-incremental §9'un açık soruları kapanmış; p95 hedefi konmuş.
 
 ### M5.1: Mutation journal ve transaction
 
@@ -231,3 +233,35 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 |---|---|
 | Tasarımdan sapmalar | Tasarımın M5.8'i dörde bölündü (karar 2); erişilebilirlik formlardan sonraya alındı (karar 3). Yol haritasının tasarımdan sonra eklediği maddeler planda: temel geçişler (2026-10-05 kararı, M5.12), canlı düzenleme temeli (M5.3). M4'ün M5'e bıraktıkları planda: `set_style_property` (M5.3), girdi/değişiklik/gönderim olayları ve varsayılan eylemin iptali (M5.7) |
 | M5'e alınmayanlar | Satır içi elemanların kutu sorgusu (M4.5 notu): M7'nin denetim işiyle. `-webkit-box` hizalama hatası (M4.4'ün WPT notu): ayrı bir hata, M5'in kapsamı değil. Web fontları ve dış stil sayfaları: "Later" |
+
+### M5.0
+
+| Konu | Not |
+|---|---|
+| Ölçüm aracı | `crates/erk/examples/bench.rs` (`cargo run --release -p erk --example bench [B1 …]`): her senaryo kendi sayfasını ekransız bir uygulamada kuruyor, ısındırıyor, sonra her değişiklikten sonraki `tick`'i (kare hazırlama ve CPU'da boyama) ölçüyor; medyan, p95, p99, en yavaş, aşamaların medyanı (`last_frame_timings`) ve son karenin sayaçları. Planın dediği `measure` yerine yeni bir örnek: `measure` renderer'ın içinde, sayfa yükleyip yeniden boyuyor; senaryolar ise host gibi değişiklik yapıyor, `erk`'in API'si gerekiyor |
+| Sayaçlar | `FrameStats { styled, laid_out, shaped, items }`: stillenen eleman, yerleşen kutu (belge düğümünün kutusu ve anonim paragraflar dahil), şekillendirilen paragraf, display list öğesi. `Engine::stats`, `erk`'te `frame_stats`. M5.3–M5.6'nın "yalnızca etkilenenler" testleri bunlarla yazılacak. İlk testte sayaç anonim paragrafları saymıyordu; test yakaladı, düzeltildi |
+| Kâhin | `Page::build`: belgeden display list'e bütün hat, sayfaya hiçbir şey yazmadan. `prepare` onu çağırıp sonucu sayfaya yazıyor; `oracle` aynısını yazmadan çağırıyor, kare iş parçacığında (derin belgeler büyük yığın istiyor). `Engine::set_verifying` açıkken her karenin listesinin bir kopyası tutuluyor, `Engine::verify` belgeyi baştan hesaplatıp karşılaştırıyor; ilk farklı öğeyi, uzunlukları ya da tuval rengini söylüyor. Bugün iki yol aynı kodu çalıştırıyor; artımlı yol geldikçe `prepare` ayrışacak, `build` kâhin olarak kalacak. Display list tiplerine `Clone`, `Debug`, `PartialEq` geldi (yalnızca türetme; yüzey muhafızının kuralına dokunmuyor) |
+| Muhafız | Fuzz yorumlayıcısı (`tests/script/`) her `tick`'ten sonra karşılaştırıyor: sabit tohumlu test ve iki `fuzz mutations` job'ı. Sabit test 6 sn'den 19 sn'ye çıktı (her kare iki kez hesaplanıyor). Kasıtlı ihlaller: karenin isabet bölgelerini atmak (kâhin yakaladı: "5 items … 14 items, part at item 0"), tuval rengini bir bit değiştirmek (kâhin yakaladı), son öğeyi atmak (yakalandı, ama kâhinden önce: atılan öğe bir `PopClip`'ti ve raster'ın katman dengesi düştü). Sayaç mutasyonları (stillenen hep 0, anonim paragraflar sayılmıyor) birim testiyle yakalandı |
+| Taban (B1–B10) | 800×600, her karede tam yeniden hesap, CPU raster, yayın derlemesi, i7-10750H, 30 kare (B7 120). Tablo aşağıda |
+| Bulgu | Karenin dörtte üçü yerleşim ve metin şekillendirmesi: B1'de 333 ms'nin 253'ü. Stil 9 ms (Stylo bütün belgeyi stillese de hızlı), display list 32, raster 33. Kazancın büyüğü M5.4 ve M5.5'te; M5.3'ün stil hasarı, yerleşimin neyi yeniden hesaplayacağını söyleyen girdi olduğu için sıra değişmiyor. Ölçümler gürültülü: aynı makinede ilk koşu B1'de 470 ms medyan verdi, ikincisi 333; her adım kendi karşılaştırmasını aynı oturumda tabanla yan yana koşmalı |
+| B4 | `input:checked` formlar (M5.9) olmadan yok: `.card:has(.checked)` ve torundaki bir sınıf yerine geçiyor |
+| B8, B9, B11 | B8 (erişilebilirlik) M5.11'le, B9 (artımlı / tam) ilk artımlı yolla, B11 (döşeme boyutu) M5.6'yla. Ölçüm aracı bunları söylüyor |
+| p95 hedefi | **10 bin düğümlü belgede bir tuş vuruşunun karesi p95 ≤ 16,7 ms** (60 Hz'de bir kare), bu makinede, yayın derlemesi, 800×600, CPU raster. Taban (B1) p95 454 ms: hedef yaklaşık 27 kat. Gerekçe: değişen tek bir paragraf; stilin artımlısı bir elemanı, yerleşimin artımlısı (erken kesmeyle) bir paragrafı ve atalarını, kısmi sunum yalnızca hasar bölgesini boyar. Raster tek başına bugün 33 ms: hedef kısmi sunum olmadan tutmaz, bu yüzden M5.6'ya bağlı. Metin alanı M5.8'de gelince ölçüm gerçek bir alana yazmakla tekrarlanır |
+| §9: Stylo snapshot'ı ve `unsafe` | Değiştirmiyor. Erk `TElement`'in snapshot yöntemlerini zaten uyguluyor (`has_snapshot`, `handled_snapshot`, ve beş `unsafe fn`'den biri olan `set_handled_snapshot`) ve Stylo'ya boş bir `SnapshotMap` veriyor. Snapshot'ın kendisi Stylo'nun güvenli `ServoElementSnapshot` tipi: kalıcı stil (M5.3) haritayı doldurmaktan ibaret, beş imzalı yüzey aynı kalıyor |
+| §9: Kalıcı yerleşim ve arena | Yan tablo bugün de `NodeId::index()` ile indeksli. Kalıcı olunca her yuva düğümün neslini de tutar: nesli farklı bir yuva (silinip yeniden kullanılmış) yok sayılır ve kirli doğar, eski bir düğümün önbelleği yeni düğüme geçmez. Taffy'nin önbelleği o yuvanın `LayoutNode`'unda durduğu için aynı kuralla gider |
+| §9: `vello_hybrid`'de kısmi sunum | Ön yön, M5.6'da ölçülerek: CPU yolunda kalıcı pixmap, yalnızca hasar bölgesinin yeniden boyanması ve `softbuffer`'ın `present_with_damage`'i (destekliyor); GPU yolunda tam yeniden boyama (bugün `nodes-1000` için 7,8 ms) ölçüm aksini gösterene kadar. Kalıcı bir doku ve makasla kısmi GPU boyaması, ölçüm gerektirirse ve M9'un döşeme önbelleğiyle sınırı çizilerek |
+| §9: `contain` | M5.4'te `size`, `layout` ve `paint` değerleri (ve `strict`/`content` kısaltmaları) kendi referans sayfasıyla: `size` kutuyu içeriği boşmuş gibi boyutlar (bir yerleşim özelliği, yalnızca ipucu değil), `layout` bağımsız bir biçimlendirme bağlamı ve yeniden yerleşim sınırı, `paint` dolgu kutusuna kırpma. css-support.md'nin satırı o zaman "Supported" olur |
+| Proje kuralları | "Artımlı her yol tam yeniden hesapla aynı display list'i verir" satırı kural takviminden kural tablosuna geçti: muhafız (iki yollu fuzz ve sabit test) artık var ve kasıtlı ihlallerle denendi |
+
+Taban, M5.0 (ikinci koşu; süreler ms, sayaçlar son kare):
+
+| | Senaryo | medyan | p95 | p99 | en yavaş | stil | yerleşim | display list | raster | stillenen | yerleşen | şekillenen | öğe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 333,14 | 453,82 | 543,80 | 543,80 | 8,60 | 252,72 | 31,60 | 33,43 | 10003 | 10003 | 8000 | 26002 |
+| B2 | bir karede 100 metin | 338,85 | 383,90 | 388,37 | 388,37 | 8,52 | 251,06 | 30,92 | 34,02 | 10003 | 10003 | 8000 | 26002 |
+| B3 | 1000 düzey, yaprağa sınıf | 7,83 | 9,43 | 9,99 | 9,99 | 1,58 | 3,59 | 0,65 | 1,55 | 1004 | 1004 | 1 | 1004 |
+| B4 | 1000 kartta `:has()` | 30,50 | 44,14 | 46,21 | 46,21 | 2,24 | 14,81 | 3,99 | 8,78 | 2003 | 1003 | 1000 | 4002 |
+| B5 | `contain: size layout` içinde, 10 bin | 329,23 | 449,11 | 523,23 | 523,23 | 8,76 | 249,87 | 31,17 | 33,01 | 10005 | 10004 | 8001 | 26005 |
+| B6 | 5000 elemanda imleç | 166,34 | 216,91 | 221,26 | 221,26 | 4,43 | 126,39 | 14,64 | 17,19 | 5004 | 5005 | 4001 | 13002 |
+| B7 | 5000 elemanda sürükleme | 165,81 | 213,92 | 220,00 | 225,08 | 4,17 | 123,76 | 17,03 | 16,81 | 5004 | 5004 | 4000 | 13004 |
+| B10 | bir karede 100 toplu işlem | 330,17 | 458,53 | 533,64 | 533,64 | 9,02 | 250,35 | 30,87 | 32,24 | 10003 | 10003 | 8000 | 26002 |

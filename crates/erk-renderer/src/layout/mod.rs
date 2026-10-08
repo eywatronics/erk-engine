@@ -98,6 +98,17 @@ pub(crate) struct ShapedText {
 }
 
 impl Layouts {
+    /// How many boxes were laid out and how many paragraphs shaped, the
+    /// anonymous paragraphs counted as both: what layout cost (M5.0's
+    /// counters).
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        let anonymous: usize = self.anonymous.iter().map(Vec::len).sum();
+        (
+            self.nodes.iter().filter(|node| node.is_some()).count() + anonymous,
+            self.text.iter().filter(|text| text.is_some()).count() + anonymous,
+        )
+    }
+
     /// The final (pixel-rounded) layout of a box, relative to its parent box.
     /// `None` for nodes that generate no box. An atomic inline's parent box
     /// is the block it sits in, whichever inline elements are between.

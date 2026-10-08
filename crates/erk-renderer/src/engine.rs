@@ -28,8 +28,8 @@ use erk_dom::NodeId;
 
 use crate::list::Prepared;
 use crate::messages::{
-    BoxModel, Cursor, Event, FontCatalog, KeyInput, NodeKind, PointerInput, ResourceRequest,
-    ResourceResponse, Stage, Status,
+    BoxModel, Cursor, Event, FontCatalog, FrameStats, KeyInput, NodeKind, PointerInput,
+    ResourceRequest, ResourceResponse, Stage, Status,
 };
 use crate::page::Page;
 use crate::resources::Resources;
@@ -40,13 +40,15 @@ use crate::resources::Resources;
 pub(crate) const FRAME_STACK: usize = 16 * 1024 * 1024;
 
 /// A frame to prepare on the frame thread: the page and its resources,
-/// moved there and back.
+/// moved there and back. With `oracle` the page is not prepared but
+/// recomputed from nothing, changing nothing ([`Engine::verify`]).
 struct FrameJob {
     page: Page,
     resources: Resources,
     width: u16,
     height: u16,
     scale: f32,
+    oracle: bool,
     reply: Sender<FrameEvent>,
 }
 
@@ -81,14 +83,19 @@ fn frame_thread() -> &'static Sender<FrameJob> {
                         width,
                         height,
                         scale,
+                        oracle,
                         reply,
                     } = job;
                     let marks = reply.clone();
                     let done = catch_unwind(AssertUnwindSafe(move || {
-                        let (list, requests) =
+                        let (list, requests) = if oracle {
+                            let list = page.oracle(width, height, scale, &mut resources);
+                            (list, Vec::new())
+                        } else {
                             page.prepare(width, height, scale, &mut resources, &mut |stage| {
                                 let _ = marks.send(FrameEvent::Mark(stage));
-                            });
+                            })
+                        };
                         (page, resources, list, requests)
                     }));
                     let _ = reply.send(FrameEvent::Done(
@@ -112,6 +119,10 @@ pub struct Engine {
     scale: f32,
     /// Whether something that shows has changed since the last frame.
     changed: bool,
+    /// Whether frames are kept to be checked against the oracle.
+    verifying: bool,
+    /// The last frame's display list and size, while verifying.
+    last: Option<(crate::list::DisplayList, u16, u16)>,
     /// The thread the last frame was prepared on, for the tests.
     #[cfg(test)]
     frame_thread: Option<ThreadId>,
@@ -132,6 +143,8 @@ impl Engine {
             size: None,
             scale: 1.0,
             changed: true,
+            verifying: false,
+            last: None,
             #[cfg(test)]
             frame_thread: None,
         }
@@ -376,37 +389,10 @@ impl Engine {
         let Some((width, height)) = self.size.filter(|_| self.changed) else {
             return (None, Vec::new());
         };
-        let (reply, events) = channel();
-        let job = FrameJob {
-            page: std::mem::replace(&mut self.page, Page::empty()),
-            resources: std::mem::take(&mut self.resources),
-            width,
-            height,
-            scale: self.scale,
-            reply,
-        };
-        frame_thread()
-            .send(job)
-            .unwrap_or_else(|_| panic!("the frame thread stopped"));
-        let (list, requests) = loop {
-            match events.recv() {
-                Ok(FrameEvent::Mark(stage)) => mark(stage),
-                Ok(FrameEvent::Done(done, _thread)) => match *done {
-                    Ok((page, resources, list, requests)) => {
-                        self.page = page;
-                        self.resources = resources;
-                        #[cfg(test)]
-                        {
-                            self.frame_thread = Some(_thread);
-                        }
-                        break (list, requests);
-                    }
-                    // The page went with the panic; the empty one stays.
-                    Err(panic) => resume_unwind(panic),
-                },
-                Err(_) => panic!("the frame thread stopped"),
-            }
-        };
+        let (list, requests) = self.on_frame_thread(width, height, false, mark);
+        if self.verifying {
+            self.last = Some((list.clone(), width, height));
+        }
         let updates = self.resources.table_updates(&list);
         self.changed = false;
         let prepared = Prepared {
@@ -419,6 +405,115 @@ impl Engine {
         };
         (Some(prepared), requests)
     }
+
+    /// What the last frame did, counted.
+    pub fn stats(&self) -> FrameStats {
+        self.page.stats()
+    }
+
+    /// Keep each frame's display list to check it against the oracle with
+    /// [`Engine::verify`]: for tests and fuzzing, since keeping a copy costs.
+    pub fn set_verifying(&mut self, verifying: bool) {
+        self.verifying = verifying;
+        if !verifying {
+            self.last = None;
+        }
+    }
+
+    /// Check the last frame against the oracle: the same document
+    /// recomputed from nothing must give the same display list (M5 plan,
+    /// decision 9). An error says where they part. Nothing to check before
+    /// the first frame; the document must not have changed since the last.
+    pub fn verify(&mut self) -> Result<(), String> {
+        if !self.verifying {
+            return Err("not verifying: call set_verifying(true) first".to_owned());
+        }
+        if self.last.is_none() {
+            return Ok(());
+        }
+        if self.changed {
+            return Err("the document changed since the last frame".to_owned());
+        }
+        let Some((last, width, height)) = self.last.take() else {
+            return Ok(());
+        };
+        let (oracle, _) = self.on_frame_thread(width, height, true, &mut |_| {});
+        let result = compare(&last, &oracle);
+        self.last = Some((last, width, height));
+        result
+    }
+
+    /// Run the pipeline for the page on the frame thread, with its stack:
+    /// the frame, or with `oracle` the recomputation that changes nothing.
+    fn on_frame_thread(
+        &mut self,
+        width: u16,
+        height: u16,
+        oracle: bool,
+        mark: &mut dyn FnMut(Stage),
+    ) -> (crate::list::DisplayList, Vec<ResourceRequest>) {
+        let (reply, events) = channel();
+        let job = FrameJob {
+            page: std::mem::replace(&mut self.page, Page::empty()),
+            resources: std::mem::take(&mut self.resources),
+            width,
+            height,
+            scale: self.scale,
+            oracle,
+            reply,
+        };
+        frame_thread()
+            .send(job)
+            .unwrap_or_else(|_| panic!("the frame thread stopped"));
+        loop {
+            match events.recv() {
+                Ok(FrameEvent::Mark(stage)) => mark(stage),
+                Ok(FrameEvent::Done(done, _thread)) => match *done {
+                    Ok((page, resources, list, requests)) => {
+                        self.page = page;
+                        self.resources = resources;
+                        #[cfg(test)]
+                        {
+                            self.frame_thread = Some(_thread);
+                        }
+                        return (list, requests);
+                    }
+                    // The page went with the panic; the empty one stays.
+                    Err(panic) => resume_unwind(panic),
+                },
+                Err(_) => panic!("the frame thread stopped"),
+            }
+        }
+    }
+}
+
+/// Where the frame's display list and the oracle's part, if they do.
+fn compare(
+    frame: &crate::list::DisplayList,
+    oracle: &crate::list::DisplayList,
+) -> Result<(), String> {
+    if frame == oracle {
+        return Ok(());
+    }
+    if frame.canvas != oracle.canvas {
+        return Err(format!(
+            "the canvas is {:?} in the frame and {:?} in the oracle",
+            frame.canvas, oracle.canvas
+        ));
+    }
+    let at = frame
+        .items
+        .iter()
+        .zip(&oracle.items)
+        .position(|(a, b)| a != b)
+        .unwrap_or(frame.items.len().min(oracle.items.len()));
+    Err(format!(
+        "the frame ({} items) and the oracle ({} items) part at item {at}:\n  frame:  {:?}\n  oracle: {:?}",
+        frame.items.len(),
+        oracle.items.len(),
+        frame.items.get(at),
+        oracle.items.get(at),
+    ))
 }
 
 #[cfg(test)]
@@ -429,6 +524,88 @@ mod tests {
     /// The stack Windows gives a program's main thread, where a host's UI
     /// thread usually is.
     const MAIN_THREAD_STACK: usize = 1024 * 1024;
+
+    #[test]
+    fn a_frame_agrees_with_the_oracle_and_a_change_is_painted_before_it_is_checked() {
+        let mut engine = Engine::new();
+        engine.load_html("<p id=p>bir</p><p>iki</p>");
+        engine.resize(120, 60);
+        engine.set_verifying(true);
+        assert_eq!(engine.verify(), Ok(()), "nothing to check yet");
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        engine.set_text(p, "üç").unwrap();
+        assert!(engine.verify().is_err(), "the change is not painted yet");
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        engine.set_verifying(false);
+        assert!(engine.verify().is_err());
+    }
+
+    #[test]
+    fn the_oracle_says_where_a_frame_parts_from_it() {
+        use crate::list::{DisplayItem, DisplayList};
+        let rect = |x: f32| DisplayItem::Rect {
+            x,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            color: [0, 0, 0, 255],
+        };
+        let frame = DisplayList {
+            canvas: [255; 4],
+            items: vec![rect(0.0), rect(10.0)],
+        };
+        assert_eq!(compare(&frame, &frame.clone()), Ok(()));
+        let moved = DisplayList {
+            canvas: [255; 4],
+            items: vec![rect(0.0), rect(11.0)],
+        };
+        let parted = compare(&frame, &moved).unwrap_err();
+        assert!(parted.contains("item 1"), "{parted}");
+        let shorter = DisplayList {
+            canvas: [255; 4],
+            items: vec![rect(0.0)],
+        };
+        let parted = compare(&frame, &shorter).unwrap_err();
+        assert!(
+            parted.contains("2 items") && parted.contains("1 items"),
+            "{parted}"
+        );
+        let other_canvas = DisplayList {
+            canvas: [0; 4],
+            items: frame.items.clone(),
+        };
+        assert!(
+            compare(&frame, &other_canvas)
+                .unwrap_err()
+                .contains("canvas")
+        );
+    }
+
+    #[test]
+    fn a_frame_counts_what_it_styled_laid_out_shaped_and_painted() {
+        let mut engine = Engine::new();
+        engine.load_html("<body><div><p>bir</p><p>iki</p></div><span>üç</span>");
+        engine.resize(200, 100);
+        assert_eq!(engine.stats(), FrameStats::default(), "no frame yet");
+        let (prepared, _) = engine.prepare();
+        let items = prepared.unwrap().list.items.len();
+        // Styled: html, head, body, div, two p and the span. Boxes: the
+        // document's (the initial containing block), html, body, div, the
+        // two p, and the anonymous paragraph of the span's line. Shaped:
+        // the two p and that anonymous paragraph.
+        assert_eq!(
+            engine.stats(),
+            FrameStats {
+                styled: 7,
+                laid_out: 7,
+                shaped: 3,
+                items,
+            }
+        );
+    }
 
     #[test]
     fn the_deepest_document_runs_on_a_main_threads_stack() {

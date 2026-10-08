@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::mpsc::Receiver;
 
-use erk_renderer::{BoxModel, Engine, NodeKind};
+use erk_renderer::{BoxModel, Engine, FrameStats, NodeKind};
 
 use crate::Status;
 use crate::events::{self, Event, EventKind, Listener, Listeners, Phase, Subscription};
@@ -354,6 +354,27 @@ impl Context {
     /// click there would find it (p1-contract §8.1, `erk_inspect_at`).
     pub fn inspect_at(&self, x: f32, y: f32) -> Option<Node> {
         self.engine.inspect_at(x, y).and_then(|id| self.outward(id))
+    }
+
+    /// What the last frame did, counted: elements styled, boxes laid out,
+    /// paragraphs shaped, display list items (M5.0).
+    pub fn frame_stats(&self) -> FrameStats {
+        self.engine.stats()
+    }
+
+    /// Keep each frame to check it against the oracle with
+    /// [`Context::verify_frame`]. For tests and fuzzing: it costs a copy of
+    /// every frame.
+    #[doc(hidden)]
+    pub fn set_verifying(&mut self, verifying: bool) {
+        self.engine.set_verifying(verifying);
+    }
+
+    /// Check the last frame against the document recomputed from nothing
+    /// (M5 plan, decision 9); the error says where they part.
+    #[doc(hidden)]
+    pub fn verify_frame(&mut self) -> Result<(), String> {
+        self.engine.verify()
     }
 
     /// Draw the developer tools' highlight over `node`'s boxes from the next
