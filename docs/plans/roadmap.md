@@ -385,8 +385,8 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Yeni |
 | M5.7 | Odak, Tab sırası, varsayılan eylemin iptali, girdi/değişiklik/gönderim olayları | Yeni |
 | M5.8 | Metin alanları: imleç, seçim, pano, IME | Yeni |
-| M5.9 | Onay kutusu, radyo, düğme, `select`, form gönderimi | Yeni |
-| M5.10 | `<details>`, `<dialog>`, `popover`, `commandfor` | Yeni |
+| M5.9 | Üst katman; `<details>`, `<dialog>`, `popover`, `commandfor` | Yeni |
+| M5.10 | Onay kutusu, radyo, düğme, `select` (listesi üst katmanda), form gönderimi | Yeni |
 | M5.11 | Erişilebilirlik (AccessKit) | Yeni |
 | M5.12 | Temel geçişler | Yeni |
 | M5.13 | Kabul | Yeni |

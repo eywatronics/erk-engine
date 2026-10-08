@@ -60,7 +60,14 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
    (ön düzenleme, onay) `erk`'te motorun girdi türlerine çevrilir; C-ABI'de
    yeni `ERK_INPUT_*` türleri olarak. Motor kompozisyon metnini alanın
    içinde altı çizili gösterir, onaylanınca değere yazar. Windows'ta TSF
-   winit üzerinden.
+   winit üzerinden. **Motor imlecin dikdörtgenini dışarı verir:** işletim
+   sisteminin aday penceresini doğru yere koyabilmesi için odaktaki
+   alanın imleci (kompozisyon sürerken kompozisyonun başı), görüntü alanı
+   koordinatlarında, CSS ve cihaz pikseliyle, dönüşümlerden geçmiş
+   sınırlayıcı kutu olarak. `erk`'te bir sorgu ve kare başına değişince
+   bir bildirim; pencere kipinde `erk` onu winit'in `set_ime_cursor_area`'sına
+   verir, C-ABI'de bir sorgu (`erk_caret_rect`) ve olay. Kendi penceresini
+   süren bir host (oyun motoru) IME'yi bununla konumlar.
 7. **Varsayılan eylem iptal edilebilir.** `Event`'e `prevent_default`
    (C-ABI'de bir çağrı) gelir: bir tuşun, tıklamanın ya da gönderimin
    varsayılan işi host bir abonelikte iptal ederse yapılmaz. Bugün
@@ -73,6 +80,20 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
    tohumlu testi her diziyi iki yoldan geçirir: artımlı ve tam yeniden
    hesap, display list'ler eşit (proje kurallarının M5 satırı). Kısmi
    kare ile tam karenin piksel eşitliği M5.6'nın muhafızı.
+10. **Kirlenme düzeyleri ayrı ve sayaçlarla kanıtlı.** Tek bir "kirli"
+    bayrağı yok; tasarımın bit kümesi en az şu ayrımları yapar ve her biri
+    M5.0'ın sayaçlarıyla test edilir:
+    - **yalnızca boyama** (renk, arka plan, `visibility`, `opacity`):
+      yerleşim ve şekillendirme hiç çalışmaz (`laid_out` ve `shaped` 0);
+    - **yerleşim** (genişlik, kenar boşluğu, konum): yeniden yerleşim,
+      ama metin yeniden **şekillendirilmez**, yalnızca satırlara yeniden
+      bölünür (`shaped` 0); şekillendirme yalnızca metin ya da font
+      değişince;
+    - **stil** (sınıf, öznitelik, seçiciyi etkileyen durum): etkilenen
+      elemanlar yeniden stillenir, sonra ne olacağını **hesaplanan stil
+      farkı** söyler: renkten başka bir şey değişmediyse yine yalnızca
+      boyama. "Sınıf değişti, her şey çalışır" olmaz.
+    B13 (satır içi renk) ve B12 (tek karakter) bu düzeylerin ölçüsü.
 
 ## Açık sorular
 
@@ -80,18 +101,21 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   sayı ölçümden). Makine yine i7-10750H ve GTX 1650; M3'ün tablosu
   (`nodes-1000` tam kare 66,49 ms) başlangıç noktası. **Çözüldü (M5.0):**
   p95 ≤ 16,7 ms; gerekçe yürütme notlarında.
-- **Tasarımın §9'u:** **Çözüldü (M5.0)**, cevaplar yürütme notlarında.
 - **Tasarımın §9'u** (Stylo snapshot'ı `erk-style`'ın beş `unsafe fn`
   yüzeyini değiştiriyor mu; kalıcı layout yan tablosu arena silmesi ve
   nesillerle nasıl eşleşir; `vello_hybrid`'de kısmi sunum; `contain`'in
-  hangi değerleri): M5.0'da kapanır, cevaplar yürütme notlarına.
+  hangi değerleri). **Çözüldü (M5.0)**, cevaplar yürütme notlarında.
 - **Transaction'ın C-ABI'deki yüzü:** `erk_apply` zaten toplu; iç içe
   transaction'ın bir `begin`/`commit` çifti mi yoksa `erk_apply`'ın bir
   bayrağı mı olacağı M5.1'de.
 - **`select`'in açılır listesi:** sayfanın içinde bir katman mı (popover
-  gibi), ayrı bir işletim sistemi penceresi mi? Sayfanın içinde olması
-  ekransız kipi ve testleri basit tutar; pencere sınırının dışına
-  taşamaması bedeli. M5.9'da.
+  gibi), ayrı bir işletim sistemi penceresi mi? **Çözüldü (2026-10-08):
+  sayfa içi katman**, `popover`'ın üst katmanıyla (top layer). Erk
+  gömülü bir motor: ikinci bir işletim sistemi penceresi istemek C-ABI'yi
+  ve kendi penceresini süren host'ları (oyun motorları) zorlar, ekransız
+  kipte ve testlerde de yoktur. Bedeli: liste pencerenin dışına taşamaz,
+  sığmazsa yukarı açılır ve kayar. Bu yüzden davranışlı elemanlar artık
+  kontrollerden önce (M5.9 ve M5.10'un sırası değişti).
 - **Geçişler ve artımlılık:** her karede geçişteki düğümlerin yeniden
   stillenmesi artımlı yolda nasıl maliyetlenir; Stylo'nun `animation`
   modülünün Erk'in `TElement`'iyle ne kadarı kullanılabilir. M5.12'de.
@@ -144,13 +168,17 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 - [ ] Stylo'nun snapshot'ları ve yeniden stil ipuçları; hesaplanan stil
   farkı Erk'in bitlerine. Bir sınıf değişikliği yalnızca etkilenen
-  elemanları stilliyor; `.card:has(input:checked)` vakası (B4).
+  elemanları stilliyor; `.card:has(input:checked)` vakası (B4). Yalnızca
+  rengi değiştiren bir sınıf ya da satır içi stil yerleşimi çalıştırmıyor
+  (karar 10; B13, `laid_out` ve `shaped` 0).
 - [ ] Canlı düzenlemenin temeli: satır içi stilin bir özelliğini ve bir
   kuralı değiştirip artımlı yeniden stil (M4.0'ın ertelediği
   `set_style_property`, Stylo'nun bildirim bloğuyla: CSSOM).
 
 ### M5.4: Kalıcı layout
 
+- [ ] Bir genişlik değişikliği metni yeniden şekillendirmiyor, yalnızca
+  yeniden satırlara bölüyor (karar 10; `shaped` 0).
 - [ ] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı;
   hesaplanmış stilden sınırlar (`contain: size layout`, sabit boyut) ve
   erken kesme. B1, B3 ve B5 tabana karşı.
@@ -177,22 +205,27 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 - [ ] `<input type="text">` ve `<textarea>`: değer, imleç (host'un saatiyle
   yanıp sönen), seçim (fare ve klavye), düzenleme tuşları (`ERK_KEY_*`
-  büyür: oklar, Delete, Home, End), pano (karar 5), IME (karar 6).
+  büyür: oklar, Delete, Home, End), pano (karar 5), IME (karar 6) ve
+  imlecin dikdörtgeni (karar 6: `erk`'te sorgu ve bildirim, winit'in
+  `set_ime_cursor_area`'sı, C-ABI'de `erk_caret_rect`); dönen bir alanda
+  da doğru yerde (test).
 - [ ] Türkçe (`ı`, `İ`, `ş`) ve CJK IME girişi; `white-space: break-spaces`,
   `tab-size`. Chrome referans sayfası (stillenmiş alanlar) ve altın görüntü
   (varsayılan görünüm).
 
-### M5.9: Diğer kontroller
+### M5.9: Davranışı olan elemanlar
 
-- [ ] `checkbox`, `radio` (gruplu), `button` (yerli görünüm),
-  `select`; `:checked`, `:disabled`; `<form>` gönderimi (`SUBMIT`, iptal
-  edilebilir). Referans sayfası ve altın görüntü.
-
-### M5.10: Davranışı olan elemanlar
-
+- [ ] Üst katman (top layer): `<dialog>`'un, `popover`'ın ve M5.10'daki
+  `select` listesinin çizildiği, sayfanın üstündeki katman.
 - [ ] `<details>`/`<summary>`, `<dialog>` (modal ve değil), `popover`
   özniteliği, `commandfor`/`command`: açılır menü, akordeon ve diyalog
   host'a gitmeden çalışıyor; her biri Chrome referans sayfasıyla.
+
+### M5.10: Diğer kontroller
+
+- [ ] `checkbox`, `radio` (gruplu), `button` (yerli görünüm),
+  `select` (açılır listesi M5.9'un üst katmanında, sayfa içinde); `:checked`, `:disabled`; `<form>` gönderimi (`SUBMIT`, iptal
+  edilebilir). Referans sayfası ve altın görüntü.
 
 ### M5.11: Erişilebilirlik
 
@@ -244,7 +277,7 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 | Muhafız | Fuzz yorumlayıcısı (`tests/script/`) her `tick`'ten sonra karşılaştırıyor: sabit tohumlu test ve iki `fuzz mutations` job'ı. Sabit test 6 sn'den 19 sn'ye çıktı (her kare iki kez hesaplanıyor). Kasıtlı ihlaller: karenin isabet bölgelerini atmak (kâhin yakaladı: "5 items … 14 items, part at item 0"), tuval rengini bir bit değiştirmek (kâhin yakaladı), son öğeyi atmak (yakalandı, ama kâhinden önce: atılan öğe bir `PopClip`'ti ve raster'ın katman dengesi düştü). Sayaç mutasyonları (stillenen hep 0, anonim paragraflar sayılmıyor) birim testiyle yakalandı |
 | Taban (B1–B10) | 800×600, her karede tam yeniden hesap, CPU raster, yayın derlemesi, i7-10750H, 30 kare (B7 120). Tablo aşağıda |
 | Bulgu | Karenin dörtte üçü yerleşim ve metin şekillendirmesi: B1'de 333 ms'nin 253'ü. Stil 9 ms (Stylo bütün belgeyi stillese de hızlı), display list 32, raster 33. Kazancın büyüğü M5.4 ve M5.5'te; M5.3'ün stil hasarı, yerleşimin neyi yeniden hesaplayacağını söyleyen girdi olduğu için sıra değişmiyor. Ölçümler gürültülü: aynı makinede ilk koşu B1'de 470 ms medyan verdi, ikincisi 333; her adım kendi karşılaştırmasını aynı oturumda tabanla yan yana koşmalı |
-| B4 | `input:checked` formlar (M5.9) olmadan yok: `.card:has(.checked)` ve torundaki bir sınıf yerine geçiyor |
+| B4 | `input:checked` formlar (M5.10) olmadan yok: `.card:has(.checked)` ve torundaki bir sınıf yerine geçiyor |
 | B8, B9, B11 | B8 (erişilebilirlik) M5.11'le, B9 (artımlı / tam) ilk artımlı yolla, B11 (döşeme boyutu) M5.6'yla. Ölçüm aracı bunları söylüyor |
 | p95 hedefi | **10 bin düğümlü belgede bir tuş vuruşunun karesi p95 ≤ 16,7 ms** (60 Hz'de bir kare), bu makinede, yayın derlemesi, 800×600, CPU raster. Taban (B1) p95 454 ms: hedef yaklaşık 27 kat. Gerekçe: değişen tek bir paragraf; stilin artımlısı bir elemanı, yerleşimin artımlısı (erken kesmeyle) bir paragrafı ve atalarını, kısmi sunum yalnızca hasar bölgesini boyar. Raster tek başına bugün 33 ms: hedef kısmi sunum olmadan tutmaz, bu yüzden M5.6'ya bağlı. Metin alanı M5.8'de gelince ölçüm gerçek bir alana yazmakla tekrarlanır |
 | §9: Stylo snapshot'ı ve `unsafe` | Değiştirmiyor. Erk `TElement`'in snapshot yöntemlerini zaten uyguluyor (`has_snapshot`, `handled_snapshot`, ve beş `unsafe fn`'den biri olan `set_handled_snapshot`) ve Stylo'ya boş bir `SnapshotMap` veriyor. Snapshot'ın kendisi Stylo'nun güvenli `ServoElementSnapshot` tipi: kalıcı stil (M5.3) haritayı doldurmaktan ibaret, beş imzalı yüzey aynı kalıyor |
@@ -265,3 +298,20 @@ Taban, M5.0 (ikinci koşu; süreler ms, sayaçlar son kare):
 | B6 | 5000 elemanda imleç | 166,34 | 216,91 | 221,26 | 221,26 | 4,43 | 126,39 | 14,64 | 17,19 | 5004 | 5005 | 4001 | 13002 |
 | B7 | 5000 elemanda sürükleme | 165,81 | 213,92 | 220,00 | 225,08 | 4,17 | 123,76 | 17,03 | 16,81 | 5004 | 5004 | 4000 | 13004 |
 | B10 | bir karede 100 toplu işlem | 330,17 | 458,53 | 533,64 | 533,64 | 9,02 | 250,35 | 30,87 | 32,24 | 10003 | 10003 | 8000 | 26002 |
+
+### Dış öneriler (2026-10-08)
+
+| Öneri | Karar |
+|---|---|
+| Sentetik senaryolar bir tuş vuruşunu iyi taklit etmeli: 10 bin kelimelik bir belgenin ortasındaki paragrafa tek karakter eklemek, satır içi `style="color: red"` değiştirmek gibi mikro değişiklikler | **Alındı.** Ölçüm aracına B12 (500 paragraf × 20 kelime, ortadaki paragrafa her karede bir karakter daha) ve B13 (10 bin elemanda bir `span`'ın satır içi rengi) eklendi; tabanları aşağıda. B13 bugün B1 kadar pahalı (349 ms): bir renk değişikliği yerleşimi ve 8000 paragrafın şekillendirmesini tetikliyor; karar 10'un ölçüsü bu. B12'de raster 57 ms (ekran metinle dolu): kısmi sunumun (M5.6) ölçüsü |
+| Kirliliği tek bayrakta tutmamak; en az boyama, yerleşim ve stil düzeyleri | **Alındı, iki düzeltmeyle** (karar 10). Tasarımın bit kümesi zaten daha ince (stil, metin, yerleşim, boyama, erişilebilirlik); önerinin değeri bunu ölçülebilir bir kabule çevirmek: her düzey sayaçlarla test edilir. Düzeltmeler: genişlik değişince metin yeniden şekillendirilmez, yalnızca satırlara bölünür (şekillendirme metin ya da font değişince); sınıf değişince "her şey" değil, hesaplanan stil farkının söylediği kadarı çalışır |
+| IME'nin aday penceresi için motor imlecin ekran koordinatını dışarı vermeli | **Alındı** (karar 6, M5.8). Planda yoktu. Dönüşümlerden geçmiş sınırlayıcı kutu, CSS ve cihaz pikseliyle; pencere kipinde winit'in `set_ime_cursor_area`'sı, C-ABI'de sorgu ve olay. Sözleşmeye M5.8'de, "sözleşme önce" kuralıyla girer |
+| `select`'in listesi ikinci bir işletim sistemi penceresi değil, `popover`'ın üst katmanında sayfa içi | **Alındı**, açık soru kapandı. Planda `select` (M5.9) `popover`'dan (M5.10) önceydi: iki adımın sırası değişti, üst katman davranışlı elemanlarla (M5.9) geliyor, kontroller (M5.10) onu kullanıyor |
+
+Tabana eklenenler (aynı oturumda B1 ile, M5.0'ın koşulları):
+
+| | Senaryo | medyan | p95 | p99 | en yavaş | stil | yerleşim | display list | raster | stillenen | yerleşen | şekillenen | öğe |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 336,00 | 388,10 | 396,44 | 396,44 | 9,21 | 253,00 | 30,58 | 33,52 | 10003 | 10003 | 8000 | 26002 |
+| B12 | 10 bin kelimede bir paragrafa bir karakter | 127,33 | 135,60 | 160,53 | 160,53 | 0,96 | 49,64 | 17,79 | 57,37 | 503 | 503 | 500 | 2504 |
+| B13 | 10 bin elemanda satır içi renk | 348,78 | 463,94 | 560,91 | 560,91 | 9,10 | 262,56 | 31,80 | 34,10 | 10003 | 10003 | 8000 | 26002 |
