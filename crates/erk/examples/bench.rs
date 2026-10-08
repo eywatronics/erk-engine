@@ -160,7 +160,7 @@ fn b3() -> Result {
 }
 
 fn b4() -> Result {
-    // `.card:has(input:checked)` needs forms (M5.9): a class on a
+    // `.card:has(input:checked)` needs forms (M5.10): a class on a
     // descendant stands in for the checked box.
     let mut html = String::from(
         "<style>.card { padding: 4px; margin: 2px; background: #f1f5f9 } \
@@ -254,6 +254,58 @@ fn b7() -> Result {
     )
 }
 
+/// 500 paragraphs of 20 words: 10 000 words, as a long document.
+fn words() -> String {
+    let mut html = String::from(
+        "<style>body { margin: 8px; font-family: 'Noto Sans'; font-size: 13px; width: 760px }</style><body>",
+    );
+    for i in 0..500 {
+        html.push_str(&format!("<p id=p{i}>"));
+        for w in 0..20 {
+            html.push_str(&format!("kelime{} ", i * 20 + w));
+        }
+        html.push_str("</p>");
+    }
+    html
+}
+
+fn b12() -> Result {
+    // A keystroke: one character more at the end of a paragraph in the
+    // middle of a 10 000-word document (the host has no text field before
+    // M5.8; this is what typing into one does to the document).
+    let mut app = app(&words());
+    let p = node(&app, "#p250");
+    let start = app.text(p).unwrap();
+    measure(
+        &mut app,
+        30,
+        "B12",
+        "one character typed into a paragraph of 10 000 words",
+        |app, run| {
+            let mut text = start.clone();
+            text.extend(std::iter::repeat_n('a', run + 1));
+            app.set_text(p, &text).unwrap();
+        },
+    )
+}
+
+fn b13() -> Result {
+    // A change only paint needs: an inline colour, 10 000 elements.
+    let mut app = app(&rows(2000));
+    let span = node(&app, "#s1000");
+    measure(
+        &mut app,
+        30,
+        "B13",
+        "an inline style colour changes, 10 000 elements",
+        |app, run| {
+            let color = if run % 2 == 0 { "#dc2626" } else { "#2563eb" };
+            app.set_attr(span, "style", &format!("color: {color}"))
+                .unwrap();
+        },
+    )
+}
+
 fn b10() -> Result {
     // 100 transactions in a frame; before M5.1 each is applied at once.
     let mut app = app(&rows(2000));
@@ -288,7 +340,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 8] = [
+    let all: [Scenario; 10] = [
         ("B1", b1),
         ("B2", b2),
         ("B3", b3),
@@ -297,6 +349,8 @@ fn main() {
         ("B6", b6),
         ("B7", b7),
         ("B10", b10),
+        ("B12", b12),
+        ("B13", b13),
     ];
     println!("{WIDTH}x{HEIGHT}, full recompute every frame, CPU raster");
     println!(
