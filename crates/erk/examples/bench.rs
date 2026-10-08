@@ -160,15 +160,16 @@ fn b3() -> Result {
 }
 
 fn b4() -> Result {
-    // `.card:has(input:checked)` needs forms (M5.10): a class on a
-    // descendant stands in for the checked box.
+    // `.card:has(input:checked)` was the case, but Stylo 0.20 does not
+    // parse `:has()` in Servo mode (M5.3): the card carries the class, and
+    // what it holds follows it.
     let mut html = String::from(
         "<style>.card { padding: 4px; margin: 2px; background: #f1f5f9 } \
-         .card:has(.checked) { background: #bbf7d0 }</style><body>",
+         .card.checked { background: #bbf7d0 } .checked span { font-weight: bold }</style><body>",
     );
     for i in 0..1000 {
         html.push_str(&format!(
-            "<div class=card><span id=c{i}>kart {i}</span></div>"
+            "<div class=card id=c{i}><span>kart {i}</span></div>"
         ));
     }
     let mut app = app(&html);
@@ -177,7 +178,7 @@ fn b4() -> Result {
         &mut app,
         30,
         "B4",
-        ":has() on 1000 cards, one toggled",
+        "a class on one of 1000 cards, its content following",
         |app, run| {
             let _ = if run % 2 == 0 {
                 app.add_class(mark, "checked")
@@ -370,7 +371,7 @@ fn main() {
         ("B12", b12),
         ("B13", b13),
     ];
-    println!("{WIDTH}x{HEIGHT}, full recompute every frame, CPU raster");
+    println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");
     println!(
         "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items | recorded | changes |"
     );

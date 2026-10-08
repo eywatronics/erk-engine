@@ -1,21 +1,23 @@
 //! A document that lives between frames (M2). It is parsed once, when it is
 //! loaded, and every frame styles, lays out and paints it again: the element
 //! state input brings (`:hover`, `:focus`), scroll positions and the host's
-//! changes need a document that outlasts a frame. Every frame is a full
-//! recompute on purpose; incremental work is M5's.
+//! changes need a document that outlasts a frame. Styling is incremental
+//! (M5.3): a frame restyles what the change journal and the user's input
+//! reach. Layout and the display list are still computed in full.
 //!
 //! Pointer input is answered from the last frame: its hit regions, in paint
 //! order, say which node is topmost at a point. What the user does (the
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use erk_dom::{Document, ElementData, NodeData, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
-use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
+use erk_style::{ComputedValues, Interaction, Restyler, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
@@ -62,6 +64,31 @@ pub(crate) struct Page {
     journal: Journal,
     /// What the last frame found had changed, coalesced.
     changes: Changes,
+    /// The page's key to what styling keeps between frames, and how many
+    /// frames it has prepared (see [`RESTYLERS`]).
+    style_key: Arc<()>,
+    frames: u64,
+}
+
+thread_local! {
+    /// What styling keeps between frames (M5.3), for each page whose
+    /// frames this thread prepares. It cannot travel with the page: Stylo's
+    /// stylist holds a font metrics provider that is not `Send`, and the
+    /// page goes to the frame thread and back every frame. So it stays on
+    /// the thread that made it, found by the page's key. An entry whose
+    /// page is gone is dropped at this thread's next frame.
+    static RESTYLERS: RefCell<Vec<Kept>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A page's restyler, kept on a thread.
+struct Kept {
+    page: Weak<()>,
+    /// The page's frame it last styled: one that missed frames knows
+    /// nothing of their changes.
+    frame: u64,
+    /// The viewport (CSS pixels) and scale it styles for.
+    viewport: (f32, f32, f32),
+    restyler: Restyler,
 }
 
 /// What [`Page::build`] makes of the document: the display list and what
@@ -75,6 +102,19 @@ struct Built {
     scrollers: Vec<Scroller>,
     hits: Vec<HitRegion>,
     stats: FrameStats,
+}
+
+/// The viewport of a `width` × `height` frame of device pixels at `scale`:
+/// its size in CSS pixels, and the device scale.
+fn viewport(width: u16, height: u16, scale: f32) -> (f32, f32, f32) {
+    let scale = crate::device_scale(scale);
+    (f32::from(width) / scale, f32::from(height) / scale, scale)
+}
+
+/// The style engine for a viewport.
+fn style_engine((width, height, scale): (f32, f32, f32)) -> StyleEngine {
+    StyleEngine::with_font_metrics(width, height, Arc::new(EmbeddedFontMetrics))
+        .with_device_scale(scale)
 }
 
 /// A scroll container of the last frame.
@@ -120,6 +160,8 @@ impl Page {
             stats: FrameStats::default(),
             journal: Journal::new_document(),
             changes: Changes::default(),
+            style_key: Arc::new(()),
+            frames: 0,
         }
     }
 
@@ -159,7 +201,10 @@ impl Page {
         mark: &mut dyn FnMut(Stage),
     ) -> (DisplayList, Vec<ResourceRequest>) {
         let (changes, recorded) = self.journal.take(&self.doc);
-        let (built, requests) = self.build(width, height, scale, resources, true, mark);
+        let viewport = viewport(width, height, scale);
+        let styles = self.restyle(viewport, &changes);
+        let (w, h, _) = viewport;
+        let (built, requests) = self.build((w, h), styles, resources, true, mark);
         let Built {
             list,
             styles,
@@ -183,6 +228,36 @@ impl Page {
         };
         self.changes = changes;
         (list, requests)
+    }
+
+    /// Style the document for `viewport` with what styling kept from the
+    /// last frame, `changes` being what changed since.
+    fn restyle(&mut self, viewport: (f32, f32, f32), changes: &Changes) -> Styles {
+        self.frames += 1;
+        let interaction = self.interaction();
+        RESTYLERS.with_borrow_mut(|kept| {
+            kept.retain(|entry| entry.page.strong_count() > 0);
+            let mine = kept
+                .iter()
+                .position(|entry| std::ptr::eq(entry.page.as_ptr(), Arc::as_ptr(&self.style_key)));
+            let mut entry = match mine.map(|at| kept.swap_remove(at)) {
+                // It saw every frame, at this viewport: another viewport may
+                // change media queries and viewport units anywhere.
+                Some(entry) if entry.frame + 1 == self.frames && entry.viewport == viewport => {
+                    entry
+                }
+                _ => Kept {
+                    page: Arc::downgrade(&self.style_key),
+                    frame: 0,
+                    viewport,
+                    restyler: Restyler::new(style_engine(viewport)),
+                },
+            };
+            entry.frame = self.frames;
+            let styles = entry.restyler.restyle(&self.doc, &interaction, changes);
+            kept.push(entry);
+            styles
+        })
     }
 
     /// The document's state now, to check the next frame's journal with.
@@ -215,31 +290,32 @@ impl Page {
         scale: f32,
         resources: &mut Resources,
     ) -> DisplayList {
-        self.build(width, height, scale, resources, false, &mut |_| {})
-            .0
-            .list
+        let viewport = viewport(width, height, scale);
+        let styles = style_engine(viewport).style_with(&self.doc, &self.interaction());
+        self.build(
+            (viewport.0, viewport.1),
+            styles,
+            resources,
+            false,
+            &mut |_| {},
+        )
+        .0
+        .list
     }
 
-    /// The whole pipeline, from the document to the display list, writing
-    /// nothing back: style, the requests for new URLs (when `ask`), layout,
+    /// The pipeline from the document's `styles` to the display list,
+    /// writing nothing back: the requests for new URLs (when `ask`), layout,
     /// scrolling, the display list, the hit regions and the highlight.
+    /// `(w, h)` is the viewport in CSS pixels.
     fn build(
         &self,
-        width: u16,
-        height: u16,
-        scale: f32,
+        (w, h): (f32, f32),
+        styles: Styles,
         resources: &mut Resources,
         ask: bool,
         mark: &mut dyn FnMut(Stage),
     ) -> (Built, Vec<ResourceRequest>) {
-        let scale = crate::device_scale(scale);
-        // The viewport in CSS pixels.
-        let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
-        let interaction = self.interaction();
         let doc = &self.doc;
-        let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics))
-            .with_device_scale(scale)
-            .style_with(doc, &interaction);
         let requests = if ask {
             resources.requests(doc, &styles)
         } else {

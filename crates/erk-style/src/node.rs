@@ -527,7 +527,7 @@ impl<'a> TElement for ErkNode<'a> {
     }
 
     fn has_snapshot(&self) -> bool {
-        false
+        self.slot().has_snapshot
     }
 
     fn handled_snapshot(&self) -> bool {

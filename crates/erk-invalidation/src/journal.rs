@@ -56,6 +56,18 @@ impl State {
     }
 }
 
+/// An element whose attributes changed this frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttrChange {
+    pub node: NodeId,
+    /// The names of the attributes that changed: added, removed or given
+    /// another value.
+    pub names: Vec<String>,
+    /// All its attributes as they were at the last frame, by name: what
+    /// Stylo's element snapshot matches the old selectors against (M5.3).
+    pub before: Vec<(String, String)>,
+}
+
 /// A frame's changes, coalesced: only what differs from the last frame, in
 /// nodes that are in the document now and were then.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -64,8 +76,8 @@ pub struct Changes {
     pub everything: bool,
     /// Text and comment nodes whose data changed.
     pub text: Vec<NodeId>,
-    /// Elements and the names of the attributes that changed.
-    pub attrs: Vec<(NodeId, Vec<String>)>,
+    /// Elements whose attributes changed.
+    pub attrs: Vec<AttrChange>,
     /// Nodes whose children changed: added, removed or moved.
     pub children: Vec<NodeId>,
 }
@@ -91,7 +103,11 @@ impl Changes {
                 .collect();
             names.sort();
             names.dedup();
-            self.attrs.push((id, names));
+            self.attrs.push(AttrChange {
+                node: id,
+                names,
+                before: before.attrs.clone(),
+            });
         }
         if before.children != after.children {
             self.children.push(id);
@@ -100,7 +116,7 @@ impl Changes {
 
     fn sort(&mut self) {
         self.text.sort_by_key(|id| id.index());
-        self.attrs.sort_by_key(|(id, _)| id.index());
+        self.attrs.sort_by_key(|change| change.node.index());
         self.children.sort_by_key(|id| id.index());
     }
 }
@@ -293,7 +309,12 @@ mod tests {
         }
         let (changes, recorded) = journal.take(&doc);
         assert_eq!(recorded, 3);
-        assert_eq!(changes.attrs, [(p, vec!["title".to_owned()])]);
+        assert_eq!(changes.attrs.len(), 1);
+        assert_eq!(changes.attrs[0].node, p);
+        assert_eq!(changes.attrs[0].names, ["title"]);
+        // The attributes as they were at the last frame, not after the
+        // first change.
+        assert_eq!(changes.attrs[0].before, [("id".to_owned(), "p".to_owned())]);
         // Added and removed again in one frame: nothing.
         journal.touch(&doc, p);
         doc.set_attr(p, "class", "on").unwrap();
@@ -346,7 +367,15 @@ mod tests {
         doc.set_text(text, "dört").unwrap();
         let (changes, _) = journal.take(&doc);
         assert_eq!(changes, difference(&before, &doc));
-        assert_eq!(changes.attrs, [(p, vec!["class".to_owned()])]);
+        assert_eq!(changes.attrs.len(), 1);
+        assert_eq!(changes.attrs[0].names, ["class"]);
+        assert_eq!(
+            changes.attrs[0].before,
+            [
+                ("class".to_owned(), "a".to_owned()),
+                ("id".to_owned(), "p".to_owned())
+            ]
+        );
         assert_eq!(changes.children, [q]);
     }
 }
