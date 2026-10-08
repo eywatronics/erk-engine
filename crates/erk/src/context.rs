@@ -43,6 +43,9 @@ pub enum Mutation {
     RemoveAttr(Ref, String),
     AddClass(Ref, String),
     RemoveClass(Ref, String),
+    /// Property, value.
+    SetStyleProperty(Ref, String, String),
+    RemoveStyleProperty(Ref, String),
 }
 
 /// Why a batch stopped: the mutation at `index` failed with `status`.
@@ -175,6 +178,12 @@ impl Context {
             }
             Mutation::AddClass(target, class) => self.add_class(node(target)?, class)?,
             Mutation::RemoveClass(target, class) => self.remove_class(node(target)?, class)?,
+            Mutation::SetStyleProperty(target, name, value) => {
+                self.set_style_property(node(target)?, name, value)?;
+            }
+            Mutation::RemoveStyleProperty(target, name) => {
+                self.remove_style_property(node(target)?, name)?;
+            }
         }
         Ok(None)
     }
@@ -249,6 +258,36 @@ impl Context {
     /// not an element.
     pub fn attr(&self, node: Node, name: &str) -> Result<Option<String>, Status> {
         Ok(self.engine.attr(self.inward(node), name)?)
+    }
+
+    /// Set property `name` of element `node`'s inline style to `value`, as
+    /// CSSOM's `element.style.setProperty` does: shorthands set their
+    /// longhands, custom properties (`--name`) are properties, an empty
+    /// value removes the property. The `style` attribute is rewritten with
+    /// it, and the next frame restyles the element. `InvalidArgument` for
+    /// a name Erk does not know or a value the property does not take, and
+    /// nothing changes.
+    pub fn set_style_property(
+        &mut self,
+        node: Node,
+        name: &str,
+        value: &str,
+    ) -> Result<(), Status> {
+        Ok(self
+            .engine
+            .set_style_property(self.inward(node), name, value)?)
+    }
+
+    /// Remove property `name` (a shorthand with its longhands) from element
+    /// `node`'s inline style.
+    pub fn remove_style_property(&mut self, node: Node, name: &str) -> Result<(), Status> {
+        Ok(self.engine.remove_style_property(self.inward(node), name)?)
+    }
+
+    /// Property `name` of element `node`'s inline style, serialized as
+    /// CSSOM's `getPropertyValue` does; `None` when it is not set.
+    pub fn style_property(&self, node: Node, name: &str) -> Result<Option<String>, Status> {
+        Ok(self.engine.style_property(self.inward(node), name)?)
     }
 
     /// Whether element `node`'s `class` holds `class`, as DOM's `classList`

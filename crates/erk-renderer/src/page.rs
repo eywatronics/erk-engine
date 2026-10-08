@@ -1030,6 +1030,38 @@ impl Page {
             .map(str::to_owned))
     }
 
+    /// Set property `name` of element `node`'s inline style to `value`, as
+    /// CSSOM's `style.setProperty` does: the `style` attribute is rewritten
+    /// with it, an empty value removes it. `InvalidArgument` for a name
+    /// Erk does not know or a value the property does not take; nothing
+    /// changes then.
+    pub(crate) fn set_style_property(
+        &mut self,
+        node: u64,
+        name: &str,
+        value: &str,
+    ) -> Result<(), Status> {
+        let style = self.attr(node, "style")?.unwrap_or_default();
+        let style = erk_style::set_style_property(&style, name, value)
+            .map_err(|_| Status::InvalidArgument)?;
+        self.set_attr(node, "style", &style)
+    }
+
+    /// Remove property `name` from element `node`'s inline style.
+    pub(crate) fn remove_style_property(&mut self, node: u64, name: &str) -> Result<(), Status> {
+        let style = self.attr(node, "style")?.unwrap_or_default();
+        let style =
+            erk_style::remove_style_property(&style, name).map_err(|_| Status::InvalidArgument)?;
+        self.set_attr(node, "style", &style)
+    }
+
+    /// Property `name` of element `node`'s inline style, as CSSOM's
+    /// `style.getPropertyValue` serializes it; `None` when it is not set.
+    pub(crate) fn style_property(&self, node: u64, name: &str) -> Result<Option<String>, Status> {
+        let style = self.attr(node, "style")?.unwrap_or_default();
+        erk_style::style_property(&style, name).map_err(|_| Status::InvalidArgument)
+    }
+
     /// Let go of the scroll positions of scroll containers no longer in the
     /// document: a page that keeps making and removing scrolled boxes would
     /// otherwise keep one entry for each. The hovered, pressed, focused and

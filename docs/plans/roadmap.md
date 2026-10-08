@@ -379,7 +379,7 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.0 | Ölçüm (B1–B11, taban) ve doğruluk kâhini (iki yol) | Bitti: taban ölçüldü (B1 p95 454 ms, karenin dörtte üçü yerleşim); hedef p95 ≤ 16,7 ms; her kare fuzz'da kâhinle karşılaştırılıyor |
 | M5.1 | Mutation journal, birleştirme, transaction | Bitti: değişiklikler hemen uygulanıyor, günlük ilk dokunuştaki durumu tutup karede birleştiriyor (aynı metin 100 kez: 1 değişiklik); işlemler, C-ABI 0.6 |
 | M5.2 | `erk-invalidation`: bitler, nedenler, cebir; bağımlılık muhafızı | Bitti: bitler, yayılma ve cebiri (10 bin durumlu özellik testleri), neden tamponu, yan tablo; günlük bu crate'e taşındı; yalnızca `erk-dom`'a bağımlılık CI'da |
-| M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Kalıcı stil bitti: snapshot'lar, ipuçları, stil farkından bitler; `:has()` Stylo 0.20'de ayrıştırılmıyor. CSSOM sırada |
+| M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Bitti: snapshot'lar, ipuçları, stil farkından bitler; satır içi tek özellik (CSSOM, C-ABI 0.7); değişen bir `<style>` yalnızca kurallarının eşleşebildiklerini stilliyor. `:has()` Stylo 0.20'de ayrıştırılmıyor |
 | M5.4 | Kalıcı layout: Taffy önbelleği, sınırlar, erken kesme | Yeni |
 | M5.5 | Kalıcı metin şekillendirmesi | Yeni |
 | M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Yeni |

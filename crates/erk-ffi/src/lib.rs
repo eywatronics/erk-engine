@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 6;
+pub const ERK_ABI_VERSION: u32 = 7;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -282,6 +282,8 @@ pub const ERK_MUTATION_SET_ATTR: u32 = 7;
 pub const ERK_MUTATION_REMOVE_ATTR: u32 = 8;
 pub const ERK_MUTATION_ADD_CLASS: u32 = 9;
 pub const ERK_MUTATION_REMOVE_CLASS: u32 = 10;
+pub const ERK_MUTATION_SET_STYLE_PROPERTY: u32 = 11;
+pub const ERK_MUTATION_REMOVE_STYLE_PROPERTY: u32 = 12;
 
 /// A node an earlier mutation of the same batch created, by its position:
 /// `ERK_NEW_NODE + i` names what mutation `i` created. No real node id is
@@ -301,6 +303,9 @@ pub const ERK_NEW_NODE: ErkNodeId = 1;
 /// - `ERK_MUTATION_SET_ATTR`: attribute `name` of `node` to `value`.
 /// - `ERK_MUTATION_REMOVE_ATTR`: attribute `name` of `node`.
 /// - `ERK_MUTATION_ADD_CLASS`, `ERK_MUTATION_REMOVE_CLASS`: class `value`.
+/// - `ERK_MUTATION_SET_STYLE_PROPERTY`: inline style property `name` of
+///   `node` to `value`, as `erk_node_set_style_property`.
+/// - `ERK_MUTATION_REMOVE_STYLE_PROPERTY`: inline style property `name`.
 #[repr(C)]
 pub struct ErkMutation {
     /// `sizeof(ErkMutation)`: also the stride of the array.
@@ -1158,6 +1163,66 @@ pub extern "C" fn erk_node_attr(
     })
 }
 
+/// Set property `name` of element `node`'s inline style to `value`, as
+/// CSSOM's `element.style.setProperty` does: a shorthand sets its
+/// longhands, `--name` is a custom property, an empty value removes the
+/// property. The `style` attribute is rewritten with it.
+/// `ERK_ERR_INVALID_ARGUMENT` for a name Erk does not know or a value the
+/// property does not take; nothing changes then.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_set_style_property(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+    value: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx()
+            .set_style_property(node(node_id)?, &text(name)?, &text(value)?)
+            .abi()
+    })
+}
+
+/// Remove property `name` (a shorthand with its longhands) from element
+/// `node`'s inline style.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_remove_style_property(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx()
+            .remove_style_property(node(node_id)?, &text(name)?)
+            .abi()
+    })
+}
+
+/// Property `name` of element `node`'s inline style, serialized as CSSOM's
+/// `getPropertyValue` does, into `buf` as `erk_node_text` writes it;
+/// `ERK_ERR_NOT_FOUND` when it is not set.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; writes at most `cap` bytes to `buf` and one size to `len`.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_style_property(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    name: ErkStr,
+    buf: *mut c_char,
+    cap: usize,
+    len: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let value = app
+            .cx()
+            .style_property(node(node_id)?, &text(name)?)
+            .abi()?
+            .ok_or(ERK_ERR_NOT_FOUND)?;
+        put_text(&value, buf, cap, len)
+    })
+}
+
 #[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
 #[unsafe(no_mangle)]
 pub extern "C" fn erk_node_add_class(
@@ -1277,6 +1342,8 @@ fn mutation(raw: *const ErkMutation) -> Result<Mutation, ErkStatus> {
         ERK_MUTATION_REMOVE_ATTR => Mutation::RemoveAttr(target()?, name()?),
         ERK_MUTATION_ADD_CLASS => Mutation::AddClass(target()?, value()?),
         ERK_MUTATION_REMOVE_CLASS => Mutation::RemoveClass(target()?, value()?),
+        ERK_MUTATION_SET_STYLE_PROPERTY => Mutation::SetStyleProperty(target()?, name()?, value()?),
+        ERK_MUTATION_REMOVE_STYLE_PROPERTY => Mutation::RemoveStyleProperty(target()?, name()?),
         _ => return Err(ERK_ERR_INVALID_ARGUMENT),
     })
 }

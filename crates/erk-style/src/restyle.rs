@@ -22,8 +22,10 @@
 //! found on the way up from a change, each ancestor and the siblings
 //! before it.
 //!
-//! A change of the sheets, the viewport or the whole document styles
-//! everything from nothing. The style each element ends up with must equal
+//! A `<style>` element whose text changed has its sheet replaced, and
+//! Stylo's stylesheet invalidation restyles what the rules it lost and
+//! gained can match. Sheets added or removed, another viewport or a new
+//! document style everything from nothing. The style each element ends up with must equal
 //! a full style's; the engine checks the frames against one (decision 9).
 
 use erk_dom::{Document, LocalName, NodeId, ns};
@@ -36,6 +38,7 @@ use style::properties::ComputedValues;
 use style::selector_parser::{RestyleDamage, Snapshot, SnapshotMap};
 use style::servo::attr::{AttrIdentifier, AttrValue};
 use style::servo_arc::Arc;
+use style::stylesheets::DocumentStyleSheet;
 use style::stylist::Stylist;
 use style::values::GenericAtomIdent;
 
@@ -48,7 +51,8 @@ use crate::{Interaction, StyleEngine, Styles, author_styles, primary, reacts, st
 pub struct Restyler {
     engine: StyleEngine,
     stylist: Option<Stylist>,
-    /// The author sheets the stylist holds.
+    /// The author sheets the stylist holds, and their text.
+    sheets: Vec<DocumentStyleSheet>,
     author: Vec<String>,
     slots: Vec<Slot>,
     /// Each slot's style at the last frame.
@@ -70,6 +74,7 @@ impl Restyler {
         Self {
             engine,
             stylist: None,
+            sheets: Vec::new(),
             author: Vec::new(),
             slots: Vec::new(),
             computed: Vec::new(),
@@ -85,13 +90,39 @@ impl Restyler {
         changes: &Changes,
     ) -> Styles {
         let author = author_styles(doc);
-        if changes.everything || self.stylist.is_none() || author != self.author {
-            // The first frame, a new document or other sheets: nothing
-            // kept is worth anything.
-            self.stylist = Some(self.engine.stylist(&author));
-            self.author = author;
-            self.slots.clear();
-            self.computed.clear();
+        match &mut self.stylist {
+            Some(stylist) if !changes.everything && author.len() == self.author.len() => {
+                // A sheet whose text changed is replaced in the stylist,
+                // and the stylist's next flush restyles the elements the
+                // rules it lost and gained can match (Stylo's stylesheet
+                // invalidation; a selector it cannot narrow restyles
+                // everything).
+                let read = self.engine.guard.read();
+                for (at, css) in author.iter().enumerate() {
+                    if *css == self.author[at] {
+                        continue;
+                    }
+                    let sheet = self.engine.sheet(css);
+                    match self.sheets.get(at + 1) {
+                        Some(next) => {
+                            stylist.insert_stylesheet_before(sheet.clone(), next.clone(), &read)
+                        }
+                        None => stylist.append_stylesheet(sheet.clone(), &read),
+                    }
+                    stylist
+                        .remove_stylesheet(std::mem::replace(&mut self.sheets[at], sheet), &read);
+                }
+                self.author = author;
+            }
+            _ => {
+                // The first frame, a new document, or sheets added or
+                // removed: nothing kept is worth anything.
+                self.sheets = author.iter().map(|css| self.engine.sheet(css)).collect();
+                self.stylist = Some(self.engine.stylist(&self.sheets));
+                self.author = author;
+                self.slots.clear();
+                self.computed.clear();
+            }
         }
         let size = doc.capacity_hint();
         if self.slots.len() < size {
@@ -102,6 +133,27 @@ impl Restyler {
         let mut frame = Frame::default();
         self.walk(doc, interaction, &mut frame);
         self.attributes(doc, changes, &mut frame);
+        // A snapshot of the state alone has the attributes as they are:
+        // they did not change. Stylo's stylesheet invalidation reads them
+        // from every snapshot.
+        for (opaque, snapshot) in frame.snapshots.iter_mut() {
+            if snapshot.attrs.is_none() {
+                let element = self.slots[opaque.0]
+                    .owner
+                    .and_then(|id| doc.node(id)?.as_element());
+                snapshot.attrs = Some(
+                    element
+                        .map(|element| {
+                            element
+                                .attrs
+                                .iter()
+                                .map(|attr| attribute(&attr.name.local, &attr.value))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                );
+            }
+        }
         let mut parents: Vec<NodeId> = changes.children.clone();
         parents.extend(
             changes

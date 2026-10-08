@@ -45,7 +45,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 6u));
+  CHECK(erk_abi_version() == ((0u << 16) | 7u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -85,6 +85,15 @@ int main(void) {
   CHECK(found == note);
   /* Into itself: refused. */
   CHECK(erk_node_append(app, note, note) == ERK_ERR_INVALID_ARGUMENT);
+  /* One property of its inline style, as CSSOM sets it. */
+  CHECK(erk_node_set_style_property(app, note, str("margin"), str("4px 8px")) == ERK_OK);
+  CHECK(erk_node_set_style_property(app, note, str("width"), str("red")) == ERK_ERR_INVALID_ARGUMENT);
+  char margin[16];
+  size_t margin_len = 0;
+  CHECK(erk_node_style_property(app, note, str("margin-left"), margin, sizeof margin, &margin_len) == ERK_OK);
+  CHECK(margin_len == 3 && memcmp(margin, "8px", 3) == 0);
+  CHECK(erk_node_remove_style_property(app, note, str("margin")) == ERK_OK);
+  CHECK(erk_node_style_property(app, note, str("margin-left"), margin, sizeof margin, &margin_len) == ERK_ERR_NOT_FOUND);
 
   /* The same in one call: a list of two items, the second naming the
    * first's element by its position in the batch. */

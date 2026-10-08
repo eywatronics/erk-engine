@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 6
+#define ERK_ABI_VERSION 7
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -130,6 +130,10 @@
 #define ERK_MUTATION_ADD_CLASS 9
 
 #define ERK_MUTATION_REMOVE_CLASS 10
+
+#define ERK_MUTATION_SET_STYLE_PROPERTY 11
+
+#define ERK_MUTATION_REMOVE_STYLE_PROPERTY 12
 
 #define ERK_NODE_DOCUMENT 1
 
@@ -288,6 +292,9 @@ typedef uint64_t ErkNodeId;
  - `ERK_MUTATION_SET_ATTR`: attribute `name` of `node` to `value`.
  - `ERK_MUTATION_REMOVE_ATTR`: attribute `name` of `node`.
  - `ERK_MUTATION_ADD_CLASS`, `ERK_MUTATION_REMOVE_CLASS`: class `value`.
+ - `ERK_MUTATION_SET_STYLE_PROPERTY`: inline style property `name` of
+   `node` to `value`, as `erk_node_set_style_property`.
+ - `ERK_MUTATION_REMOVE_STYLE_PROPERTY`: inline style property `name`.
  */
 typedef struct {
   /*
@@ -569,6 +576,34 @@ ErkStatus erk_node_attr(ErkApp *app,
                         char *buf,
                         size_t cap,
                         size_t *len);
+
+/*
+ Set property `name` of element `node`'s inline style to `value`, as
+ CSSOM's `element.style.setProperty` does: a shorthand sets its
+ longhands, `--name` is a custom property, an empty value removes the
+ property. The `style` attribute is rewritten with it.
+ `ERK_ERR_INVALID_ARGUMENT` for a name Erk does not know or a value the
+ property does not take; nothing changes then.
+ */
+ErkStatus erk_node_set_style_property(ErkApp *app, ErkNodeId node_id, ErkStr name, ErkStr value);
+
+/*
+ Remove property `name` (a shorthand with its longhands) from element
+ `node`'s inline style.
+ */
+ErkStatus erk_node_remove_style_property(ErkApp *app, ErkNodeId node_id, ErkStr name);
+
+/*
+ Property `name` of element `node`'s inline style, serialized as CSSOM's
+ `getPropertyValue` does, into `buf` as `erk_node_text` writes it;
+ `ERK_ERR_NOT_FOUND` when it is not set.
+ */
+ErkStatus erk_node_style_property(ErkApp *app,
+                                  ErkNodeId node_id,
+                                  ErkStr name,
+                                  char *buf,
+                                  size_t cap,
+                                  size_t *len);
 
 ErkStatus erk_node_add_class(ErkApp *app, ErkNodeId node_id, ErkStr class_);
 

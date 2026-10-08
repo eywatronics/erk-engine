@@ -324,6 +324,26 @@ impl Engine {
         self.page.attr(node, name)
     }
 
+    /// Set property `name` of element `node`'s inline style to `value`
+    /// (CSSOM's `style.setProperty`); an empty value removes it.
+    pub fn set_style_property(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
+        self.page.set_style_property(node, name, value)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Remove property `name` from element `node`'s inline style.
+    pub fn remove_style_property(&mut self, node: u64, name: &str) -> Result<(), Status> {
+        self.page.remove_style_property(node, name)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Property `name` of element `node`'s inline style, if it is set.
+    pub fn style_property(&self, node: u64, name: &str) -> Result<Option<String>, Status> {
+        self.page.style_property(node, name)
+    }
+
     /// `node`'s text as `textContent` reads it.
     pub fn text(&self, node: u64) -> Result<String, Status> {
         self.page.text(node)
@@ -765,6 +785,37 @@ mod tests {
                 changes: 0,
             }
         );
+    }
+
+    #[test]
+    fn a_style_property_restyles_its_element_and_nothing_else() {
+        let mut engine = Engine::new();
+        let items: String = (0..100).map(|i| format!("<p id=p{i}>{i}</p>")).collect();
+        engine.load_html(&format!(
+            "<style>p {{ margin: 0 }}</style><div>{items}</div>"
+        ));
+        engine.resize(200, 100);
+        engine.set_verifying(true);
+        assert!(engine.prepare().0.is_some());
+        // html, head, body, the div and the paragraphs.
+        assert_eq!(engine.stats().styled, 104);
+        let p = engine.query(None, "#p40").unwrap().unwrap();
+        engine.set_style_property(p, "color", "red").unwrap();
+        assert_eq!(
+            engine.style_property(p, "color").unwrap().as_deref(),
+            Some("red")
+        );
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.stats().styled, 1);
+        assert_eq!(
+            engine.set_style_property(p, "color", "1px"),
+            Err(Status::InvalidArgument)
+        );
+        engine.remove_style_property(p, "color").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.stats().styled, 1);
     }
 
     #[test]

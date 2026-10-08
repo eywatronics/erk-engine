@@ -369,19 +369,59 @@ fn the_style_attribute_restyles_the_element() {
 }
 
 #[test]
-fn other_sheets_style_everything_again() {
+fn a_changed_rule_restyles_only_what_it_can_match() {
     let html = format!(
-        "<style id=sheet>p {{ color: red }}</style><div>{}</div>",
+        "<style id=sheet>.a {{ color: red }}</style><style>p {{ margin: 0 }}</style><div>{}</div>",
+        items("p", 100)
+    );
+    let mut s = Session::new(&html);
+    for i in [3, 50, 97] {
+        let p = s.find(&format!("i{i}"));
+        s.set_attr(p, "class", "a");
+    }
+    s.frame();
+    let sheet = s.find("sheet");
+    s.set_text(sheet, ".a { color: blue }");
+    // The three paragraphs the rule matches, and their spans.
+    assert_eq!(s.frame().styled(), 6);
+    // The sheet is replaced whole, so what any of its rules can match
+    // restyles: the three paragraphs again, but not their spans, since
+    // the paragraphs' styles come out the same. The new rule matches
+    // nothing.
+    s.set_text(sheet, ".a { color: blue } .none { color: green }");
+    assert_eq!(s.frame().styled(), 3);
+    // A rule the type selector narrows to the paragraphs.
+    s.set_text(sheet, ".a { color: blue } p { padding: 1px }");
+    assert_eq!(s.frame().styled(), 200);
+}
+
+#[test]
+fn a_replaced_sheet_keeps_its_place_in_the_cascade() {
+    let mut s = Session::new(
+        "<style id=first>p { color: red }</style><style>p { color: blue }</style><p>x</p>",
+    );
+    let first = s.find("first");
+    // The later sheet still wins.
+    s.set_text(first, "p { color: green }");
+    s.frame();
+}
+
+#[test]
+fn a_sheet_added_or_removed_styles_everything_again() {
+    let html = format!(
+        "<style>p {{ color: red }}</style><div id=d>{}</div>",
         items("p", 20)
     );
     let mut s = Session::new(&html);
-    let sheet = s.find("sheet");
-    s.set_text(sheet, "p { color: blue }");
+    let d = s.find("d");
+    let style = s.create("style");
+    s.insert(d, style, None);
+    s.set_text(style, "p { color: blue }");
     let styles = s.frame();
     // Every element with a style: html, head, body, the div, 20 paragraphs
-    // and their spans. The `<style>` element is in `<head>`, which is not
-    // displayed, so it has none.
-    assert_eq!(styles.styled(), 44);
+    // and their spans, and the new `<style>`, which is in the body. The
+    // first `<style>` is in `<head>`, which is not displayed.
+    assert_eq!(styles.styled(), 45);
 }
 
 #[test]
@@ -425,13 +465,14 @@ fn random_changes_restyle_as_a_full_style_styles() {
     for seed in 1..=40u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         let mut s = Session::new(&format!(
-            "<style>{SHEET}</style><div id=root><div><ul><li>1</li><li class=a>2</li></ul></div><p class=b>t</p></div>"
+            "<style>{SHEET}</style><style id=extra></style><div id=root><div><ul><li>1</li><li class=a>2</li></ul></div><p class=b>t</p></div>"
         ));
         let root = s.find("root");
+        let extra = s.find("extra");
         let mut nodes = vec![root];
         for _ in 0..60 {
             let pick = nodes[rng.below(nodes.len())];
-            match rng.below(9) {
+            match rng.below(10) {
                 0 | 1 => {
                     let tag = ["div", "p", "li", "ul", "span"][rng.below(5)];
                     let made = s.create(tag);
@@ -468,7 +509,17 @@ fn random_changes_restyle_as_a_full_style_styles() {
                     nodes.retain(|id| s.doc.node(*id).is_some() && connected(&s.doc, *id));
                 }
                 7 => s.interaction.hover = Some(pick),
-                _ => s.set_text(pick, ["", "x"][rng.below(2)]),
+                8 => s.set_text(pick, ["", "x"][rng.below(2)]),
+                // A rule changes: the sheet is replaced.
+                _ => s.set_text(
+                    extra,
+                    [
+                        "",
+                        ".a { color: purple }",
+                        "li { margin: 3px } .b + .c { display: none }",
+                        ".c .a, :empty { padding: 4px }",
+                    ][rng.below(4)],
+                ),
             }
             nodes.retain(|id| s.doc.node(*id).is_some() && connected(&s.doc, *id));
             if !nodes.contains(&root) {

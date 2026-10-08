@@ -6,6 +6,7 @@
 //! them is an `unsafe_code` violation even with safe bodies. See
 //! docs/design/p0-architecture.md §6.1.
 
+mod inline;
 mod node;
 mod restyle;
 mod side;
@@ -42,6 +43,9 @@ pub use style::device::servo::FontMetricsProvider;
 pub use style::font_metrics::FontMetrics as StyleFontMetrics;
 pub use style::properties::ComputedValues;
 
+pub use crate::inline::{
+    InvalidProperty, remove_style_property, set_style_property, style_property,
+};
 pub use crate::restyle::Restyler;
 pub use erk_invalidation::Invalidation;
 
@@ -114,7 +118,11 @@ impl StyleEngine {
     /// `:focus-within` matching what the user is doing. Everything is styled
     /// from nothing: the oracle a [`Restyler`]'s frames must agree with.
     pub fn style_with(&self, doc: &Document, interaction: &Interaction) -> Styles {
-        let mut stylist = self.stylist(&author_styles(doc));
+        let sheets: Vec<_> = author_styles(doc)
+            .iter()
+            .map(|css| self.sheet(css))
+            .collect();
+        let mut stylist = self.stylist(&sheets);
         let slots = fresh_slots(doc, &self.url, &self.guard, &states(doc, interaction));
         self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new());
         let computed: Vec<_> = slots.iter().map(primary).collect();
@@ -126,18 +134,20 @@ impl StyleEngine {
         }
     }
 
-    /// A stylist with the UA stylesheet and `author`'s sheets, in order.
-    fn stylist(&self, author: &[String]) -> Stylist {
+    /// A stylist with the UA stylesheet and the author `sheets`, in order.
+    fn stylist(&self, sheets: &[DocumentStyleSheet]) -> Stylist {
         let mut stylist = Stylist::new(self.device(), QuirksMode::NoQuirks);
         let read = self.guard.read();
         stylist.append_stylesheet(self.user_agent.clone(), &read);
-        for css in author {
-            stylist.append_stylesheet(
-                stylesheet(css, Origin::Author, &self.guard, &self.url),
-                &read,
-            );
+        for sheet in sheets {
+            stylist.append_stylesheet(sheet.clone(), &read);
         }
         stylist
+    }
+
+    /// An author style sheet parsed from `css`.
+    fn sheet(&self, css: &str) -> DocumentStyleSheet {
+        stylesheet(css, Origin::Author, &self.guard, &self.url)
     }
 
     /// Run Stylo's traversal over `doc` from its root element: it styles

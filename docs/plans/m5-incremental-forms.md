@@ -173,7 +173,7 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   0.20 Servo kipinde `:has()`'ı ayrıştırmıyor (yürütme notları). Yalnızca
   rengi değiştiren bir değişikliğin yerleşimi çalıştırmaması M5.4'e
   taşındı.
-- [ ] Canlı düzenlemenin temeli: satır içi stilin bir özelliğini ve bir
+- [x] Canlı düzenlemenin temeli: satır içi stilin bir özelliğini ve bir
   kuralı değiştirip artımlı yeniden stil (M4.0'ın ertelediği
   `set_style_property`, Stylo'nun bildirim bloğuyla: CSSOM).
 
@@ -365,7 +365,7 @@ Tabana eklenenler (aynı oturumda B1 ile, M5.0'ın koşulları):
 
 ### M5.3
 
-İlk PR: kalıcı stil. CSSOM (`set_style_property`) aynı adımın ikinci PR'ı.
+İlk PR (#62): kalıcı stil. İkinci PR: CSSOM ve stil sayfası değişikliği.
 
 | Konu | Not |
 |---|---|
@@ -397,3 +397,15 @@ M5.3 (süreler ms, sayaçlar son kare):
 | B10 | bir karede 100 toplu işlem | 309,68 | 357,79 | 3,78 | 233,84 | 30,83 | 32,51 | 0 | 10003 | 8000 |
 | B12 | 10 bin kelimelik paragrafa bir harf | 125,25 | 138,27 | 0,30 | 49,80 | 17,31 | 58,15 | 0 | 503 | 500 |
 | B13 | satır içi stilde renk, 10 bin | 326,25 | 461,80 | 4,37 | 245,79 | 31,49 | 34,00 | 1 | 10003 | 8000 |
+
+İkinci PR: canlı düzenlemenin temeli.
+
+| Konu | Not |
+|---|---|
+| Tek özellik (CSSOM) | `erk_style::{set_style_property, remove_style_property, style_property}`: `style` özniteliğinin metni Stylo'nun bildirim bloğuna ayrıştırılıyor, özellik orada değişiyor, Stylo'nun serileştirmesiyle geri yazılıyor (M4.0'ın gerekçesi: `;`'den bölmek `url("a;b")`'de yanlış). Var olan bildirim yerinde değişiyor (CSSOM'un "set a CSS declaration"'ı; Stylo'nun `extend`'i sona taşıyordu, test yakaladı; Gecko'nun yolu `prepare_for_update`/`update`). Kısaltma uzunlarını kuruyor, boş değer siliyor, `--ad` özel özellik. Bilinmeyen ad ya da almadığı değer hata, hiçbir şey değişmiyor. Sonuç sıradan bir `style` özniteliği değişikliği: günlük ve kalıcı stil (`RESTYLE_STYLE_ATTRIBUTE`) onu zaten biliyor. `!important` önceliği yok: değerin parçası değil (CSSOM'da ayrı argüman), gerektiğinde eklenir |
+| Katmanlar | `Engine`, `erk::Context` (ve `Mutation::SetStyleProperty`/`RemoveStyleProperty`), C-ABI v0.7: `erk_node_set_style_property`, `erk_node_remove_style_property`, `erk_node_style_property`, toplulukta türler 11 ve 12. `erk.h` yeniden üretildi, C örneği üç işletim sisteminde onları da çağırıyor |
+| Bir kuralın değişmesi | Bir `<style>`'ın metni değişince yalnızca o sayfa stylist'te değiştiriliyor (yeni sayfa eskisinin yerine, sonrakinden önce ekleniyor; eskisi çıkıyor) ve Stylo'nun stil sayfası invalidation'ı, kaybedilen ve kazanılan kuralların eşleşebileceği elemanları yeniden stilliyor. Sayfa bütün olarak değiştiği için onun bütün kurallarının eşleşebildikleri yeniden stilleniyor, yalnızca değişen kuralınki değil (`.none` eklemek, sayfanın `.a`'larını da yeniden stilledi; stilleri eşit çıktığı için çocuklarına inmedi). Kural düzeyinde değişiklik (`CSSRule`'lar) bir sayfa nesnesi API'si ister: M7'nin araçlarıyla. Sayfa eklenip çıkarılınca her şey baştan |
+| Stylo'da bir panik | Stylo'nun stil sayfası invalidation'ı her snapshot'ın özniteliklerini okuyor ve öznitelik taşımayan (yalnızca durum, `:hover`) bir snapshot'ta `unwrap`'te düşüyor. Rastgele değişiklik testi, sayfa değişikliğini `:hover`'la aynı karede bulunca yakaladı. Artık durum snapshot'ı da elemanın (değişmemiş) özniteliklerini taşıyor |
+| Doğrulama | Rastgele değişiklik testine sayfa değişikliği eklendi (dört sayfa metni). Fuzz yorumlayıcısı satır içi özellikleri kuruyor, siliyor, okuyor (bilinen ve bilinmeyen adlar, kısaltma, özel özellik, uymayan değerler); kâhin her kareyi karşılaştırıyor. Yorumlayıcının işlem numaralandırması değişmesin diye yeni çağrılar sınıf işleminin (8) ve topluluğun son türünün içine girdi; yine de bu işlemlere düşen eski baytlar başka çağrılara çözülüyor, `FOUND`'daki iki betik genel girdi olarak koşmaya devam ediyor |
+| Mutasyonlar | Bildirimin sona taşınması, boş değerin silmemesi, silmenin hiçbir şey silmemesi, bilinmeyen adın kabulü, sayfanın özniteliği yazmaması, topluluğun özellikleri yok sayması, C'de silme türünün yanlış eşlenmesi, durum snapshot'ının özniteliksiz kalması, eski sayfanın stylist'te kalması, yeni sayfanın sona eklenmesi, sayfa değişikliğinin her şeyi baştan stillemesi: hepsi yakalandı. Sona ekleme ilk koşuda sağ çıktı (rastgele testte değişen sayfa hep sondaydı); önceki sayfanın değiştiği test eklendi |
+| İnceleme raporları | `m4_m5_continuation_review.md` ve `m5_1_to_3_review.md` onay; iş istemeyen iki olgu düzeltmesi: M5.1 raporu değişikliklerin günlükte biriktirilip sonra uygulandığını söylüyor, oysa belgeye hemen giriyorlar ve günlük yalnızca ilk dokunuştan önceki durumu tutuyor (M5.1 notları); M4.2 raporu 10 bin döngülük yığın testini fuzz testi sayıyor, ayrı bir bellek testi (`erk-ffi/tests/memory.rs`). Raporlar bu PR'la depoya girdi |
