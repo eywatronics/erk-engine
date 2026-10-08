@@ -56,8 +56,23 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_5() {
-    assert_eq!(erk_abi_version(), 5);
+fn the_abi_version_is_0_6() {
+    assert_eq!(erk_abi_version(), 6);
+}
+
+#[test]
+fn transactions_nest_and_a_commit_needs_a_begin() {
+    let app = app_with(PAGE);
+    assert_eq!(erk_transaction_begin(app), ERK_OK);
+    assert_eq!(erk_transaction_begin(app), ERK_OK);
+    assert_eq!(erk_transaction_commit(app), ERK_OK);
+    assert_eq!(erk_transaction_commit(app), ERK_OK);
+    assert_eq!(erk_transaction_commit(app), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(
+        erk_transaction_begin(std::ptr::null_mut()),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 
 fn change(kind: u32, node: ErkNodeId, parent: ErkNodeId, name: &str, value: &str) -> ErkMutation {

@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 5
+#define ERK_ABI_VERSION 6
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -502,6 +502,19 @@ ErkStatus erk_document_root(ErkApp *app, ErkNodeId *out);
  matching `selector`; `*out` is `ERK_NODE_NONE` when none does.
  */
 ErkStatus erk_query(ErkApp *app, ErkNodeId scope, ErkStr selector, ErkNodeId *out);
+
+/*
+ Open a transaction: until the outermost one is committed no frame is
+ prepared, so none shows the document halfway through a group of
+ changes (p1-contract §10, v0.6). Transactions nest.
+ */
+ErkStatus erk_transaction_begin(ErkApp *app);
+
+/*
+ Close the innermost transaction; `ERK_ERR_INVALID_ARGUMENT` if none is
+ open.
+ */
+ErkStatus erk_transaction_commit(ErkApp *app);
 
 ErkStatus erk_node_set_text(ErkApp *app, ErkNodeId node_id, ErkStr value);
 

@@ -18,6 +18,7 @@ use erk_style::style::values::computed::Display;
 use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
+use crate::journal::{Changes, Journal, Snapshot};
 use crate::layout;
 use crate::messages::{
     BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
@@ -57,6 +58,10 @@ pub(crate) struct Page {
     boxes: HashMap<NodeId, BoxModel>,
     /// What the last frame did, counted.
     stats: FrameStats,
+    /// What changed in the document since the last frame (M5.1).
+    journal: Journal,
+    /// What the last frame found had changed, coalesced.
+    changes: Changes,
 }
 
 /// What [`Page::build`] makes of the document: the display list and what
@@ -113,6 +118,8 @@ impl Page {
             scrollers: Vec::new(),
             boxes: HashMap::new(),
             stats: FrameStats::default(),
+            journal: Journal::new_document(),
+            changes: Changes::default(),
         }
     }
 
@@ -151,6 +158,7 @@ impl Page {
         resources: &mut Resources,
         mark: &mut dyn FnMut(Stage),
     ) -> (DisplayList, Vec<ResourceRequest>) {
+        let (changes, recorded) = self.journal.take(&self.doc);
         let (built, requests) = self.build(width, height, scale, resources, true, mark);
         let Built {
             list,
@@ -168,8 +176,28 @@ impl Page {
         self.scrollers = scrollers;
         self.hits = hits;
         self.styles = styles;
-        self.stats = stats;
+        self.stats = FrameStats {
+            recorded,
+            changes: changes.count(),
+            ..stats
+        };
+        self.changes = changes;
         (list, requests)
+    }
+
+    /// The document's state now, to check the next frame's journal with.
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        crate::journal::snapshot(&self.doc)
+    }
+
+    /// What really changed since `before`.
+    pub(crate) fn difference(&self, before: &Snapshot) -> Changes {
+        crate::journal::difference(before, &self.doc)
+    }
+
+    /// What the last frame found had changed.
+    pub(crate) fn changes(&self) -> &Changes {
+        &self.changes
     }
 
     /// What the last frame did, counted.
@@ -240,6 +268,8 @@ impl Page {
             laid_out,
             shaped,
             items: list.items.len(),
+            // The journal's counts are the frame's, set by `prepare`.
+            ..FrameStats::default()
         };
         let built = Built {
             boxes: boxes(doc, &layouts, &scrolling),
@@ -828,21 +858,35 @@ impl Page {
     /// Set `node`'s text as `textContent` does; the next frame shows it.
     pub(crate) fn set_text(&mut self, node: u64, text: &str) -> Result<(), Status> {
         let node = self.node(node)?;
+        self.journal.touch(&self.doc, node);
         self.doc
             .set_text(node, text)
             .map_err(|_| Status::StaleNode)?;
+        // An element's text is a new text node.
+        if self
+            .doc
+            .node(node)
+            .is_some_and(|n| n.as_element().is_some())
+            && let Some(child) = self.doc.children(node).next()
+        {
+            self.journal.created(child);
+        }
         self.forget_gone_nodes();
         Ok(())
     }
 
     /// A new element, not in the document yet (DOM's `createElement`).
     pub(crate) fn create_element(&mut self, tag: &str) -> Result<NodeId, Status> {
-        self.doc.create_element(tag).map_err(status)
+        let made = self.doc.create_element(tag).map_err(status)?;
+        self.journal.created(made);
+        Ok(made)
     }
 
     /// A new text node, not in the document yet.
     pub(crate) fn create_text(&mut self, text: &str) -> NodeId {
-        self.doc.create_text(text)
+        let made = self.doc.create_text(text);
+        self.journal.created(made);
+        made
     }
 
     /// Insert `child` into `parent`, before `before` or last, moving it from
@@ -855,13 +899,27 @@ impl Page {
     ) -> Result<(), Status> {
         let (parent, child) = (self.node(parent)?, self.node(child)?);
         let before = before.map(|before| self.node(before)).transpose()?;
-        self.doc.insert(parent, child, before).map_err(status)
+        // The parent it leaves and the one it joins.
+        if let Some(old) = self.doc.node(child).and_then(|n| n.parent()) {
+            self.journal.touch(&self.doc, old);
+        }
+        self.journal.touch(&self.doc, parent);
+        let joins = !crate::journal::connected(&self.doc, child);
+        self.doc.insert(parent, child, before).map_err(status)?;
+        // From outside the document into it: all of it is new there.
+        if joins && crate::journal::connected(&self.doc, child) {
+            self.journal.arrived(&self.doc, child);
+        }
+        Ok(())
     }
 
     /// Remove `node` and everything in it; their ids go stale. The document
     /// node stays.
     pub(crate) fn remove(&mut self, node: u64) -> Result<(), Status> {
         let node = self.node(node)?;
+        if let Some(parent) = self.doc.node(node).and_then(|n| n.parent()) {
+            self.journal.touch(&self.doc, parent);
+        }
         if !self.doc.remove(node) {
             return Err(Status::InvalidArgument);
         }
@@ -872,12 +930,14 @@ impl Page {
     /// Set attribute `name` of element `node`.
     pub(crate) fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
         let node = self.node(node)?;
+        self.journal.touch(&self.doc, node);
         self.doc.set_attr(node, name, value).map_err(status)
     }
 
     /// Remove attribute `name` of element `node`; whether it had one.
     pub(crate) fn remove_attr(&mut self, node: u64, name: &str) -> Result<bool, Status> {
         let node = self.node(node)?;
+        self.journal.touch(&self.doc, node);
         self.doc.remove_attr(node, name).map_err(status)
     }
 

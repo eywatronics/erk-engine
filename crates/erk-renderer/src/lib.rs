@@ -16,6 +16,7 @@ mod fonts;
 #[cfg(feature = "gpu")]
 mod gpu;
 mod gradient;
+mod journal;
 mod layout;
 mod list;
 mod messages;

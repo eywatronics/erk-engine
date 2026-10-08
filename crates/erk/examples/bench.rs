@@ -306,6 +306,23 @@ fn b13() -> Result {
     )
 }
 
+fn b2b() -> Result {
+    // Typing: the same text a hundred times in a frame, one change left.
+    let mut app = app(&rows(2000));
+    let span = node(&app, "#s1000");
+    measure(
+        &mut app,
+        30,
+        "B2b",
+        "one text set 100 times in one frame",
+        |app, run| {
+            for i in 0..100 {
+                app.set_text(span, &format!("{run}.{i}")).unwrap();
+            }
+        },
+    )
+}
+
 fn b10() -> Result {
     // 100 transactions in a frame; before M5.1 each is applied at once.
     let mut app = app(&rows(2000));
@@ -340,9 +357,10 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 10] = [
+    let all: [Scenario; 11] = [
         ("B1", b1),
         ("B2", b2),
+        ("B2b", b2b),
         ("B3", b3),
         ("B4", b4),
         ("B5", b5),
@@ -354,9 +372,9 @@ fn main() {
     ];
     println!("{WIDTH}x{HEIGHT}, full recompute every frame, CPU raster");
     println!(
-        "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items |"
+        "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items | recorded | changes |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for (name, run) in all {
         if !wanted.is_empty() && !wanted.iter().any(|w| w == name) {
             continue;
@@ -372,7 +390,7 @@ fn main() {
             ns.get(ns.len() / 2).map_or(0.0, |ns| *ns as f64 / 1e6)
         };
         println!(
-            "| {} | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} | {:.2} | {:.2} | {:.2} | {} | {} | {} | {} |",
+            "| {} | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} | {:.2} | {:.2} | {:.2} | {} | {} | {} | {} | {} | {} |",
             result.name,
             result.what,
             ms(percentile(t, 0.5)),
@@ -386,7 +404,9 @@ fn main() {
             s.styled,
             s.laid_out,
             s.shaped,
-            s.items
+            s.items,
+            s.recorded,
+            s.changes
         );
     }
     println!("B8 (accessibility) comes with M5.11, B9 (incremental against full) once there is an");

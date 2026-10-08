@@ -377,6 +377,30 @@ impl Context {
         self.engine.verify()
     }
 
+    /// Open a transaction: until the outermost one is committed no frame is
+    /// prepared, so none shows the document halfway through a group of
+    /// changes. Transactions nest. A host that awaits between changes (an
+    /// async binding) needs them; one that changes the document inside a
+    /// callback or a posted task is between frames anyway.
+    pub fn begin_transaction(&mut self) {
+        self.engine.begin();
+    }
+
+    /// Close the innermost transaction; `InvalidArgument` if none is open.
+    pub fn commit_transaction(&mut self) -> Result<(), Status> {
+        self.engine.commit()?;
+        Ok(())
+    }
+
+    /// Run `changes` in a transaction, committed when they return.
+    pub fn transaction<T>(&mut self, changes: impl FnOnce(&mut Self) -> T) -> T {
+        self.begin_transaction();
+        let result = changes(self);
+        // The one just opened: committing it cannot fail.
+        let _ = self.commit_transaction();
+        result
+    }
+
     /// Draw the developer tools' highlight over `node`'s boxes from the next
     /// frame on, or none. It is drawn over the page, never added to the
     /// document.

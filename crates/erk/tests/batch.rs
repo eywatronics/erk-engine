@@ -216,3 +216,29 @@ fn keys_reach_the_focused_element_and_bubble() {
         ]
     );
 }
+
+#[test]
+fn a_transaction_holds_frames_until_its_outermost_commit() {
+    let mut app = app(r#"<p id="p">bir</p>"#);
+    let p = node(&app, "#p");
+    let frame = |app: &App| app.last_frame_timings().map(|t| t.frame);
+    let shown = frame(&app);
+    app.begin_transaction();
+    app.set_text(p, "iki").unwrap();
+    app.tick(1);
+    assert_eq!(frame(&app), shown, "no frame inside a transaction");
+    // What the host reads is what it wrote, frame or not.
+    assert_eq!(app.text(p).unwrap(), "iki");
+    app.commit_transaction().unwrap();
+    app.tick(2);
+    assert_ne!(frame(&app), shown);
+    let shown = frame(&app);
+    let length = app.transaction(|cx| {
+        cx.set_text(p, "üç").unwrap();
+        cx.text(p).unwrap().len()
+    });
+    assert_eq!(length, "üç".len());
+    app.tick(3);
+    assert_ne!(frame(&app), shown);
+    assert_eq!(app.commit_transaction(), Err(Status::InvalidArgument));
+}
