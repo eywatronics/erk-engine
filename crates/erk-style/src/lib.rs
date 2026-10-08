@@ -302,6 +302,12 @@ impl Styles {
     pub fn computed(&self, id: NodeId) -> Option<Arc<ComputedValues>> {
         self.computed.get(id.index() as usize)?.clone()
     }
+
+    /// How many elements have a computed style: what styling cost (M5.0's
+    /// counters).
+    pub fn styled(&self) -> usize {
+        self.computed.iter().filter(|style| style.is_some()).count()
+    }
 }
 
 /// The text of every `<style>` element, in tree order.

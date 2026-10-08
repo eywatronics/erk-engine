@@ -20,8 +20,8 @@ use erk_style::{ComputedValues, Interaction, StyleEngine, Styles};
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    BoxModel, Cursor, Event, EventKind, Frame, Key, KeyInput, KeyState, Modifiers, NodeKind,
-    PointerButton, PointerInput, PointerKind, ResourceRequest, Stage, Status,
+    BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
+    NodeKind, PointerButton, PointerInput, PointerKind, ResourceRequest, Stage, Status,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -55,6 +55,21 @@ pub(crate) struct Page {
     scrollers: Vec<Scroller>,
     /// The last frame's element boxes, for the inspection queries.
     boxes: HashMap<NodeId, BoxModel>,
+    /// What the last frame did, counted.
+    stats: FrameStats,
+}
+
+/// What [`Page::build`] makes of the document: the display list and what
+/// the page keeps of the frame.
+struct Built {
+    list: DisplayList,
+    styles: Styles,
+    viewport: (f32, f32),
+    boxes: HashMap<NodeId, BoxModel>,
+    offsets: Offsets,
+    scrollers: Vec<Scroller>,
+    hits: Vec<HitRegion>,
+    stats: FrameStats,
 }
 
 /// A scroll container of the last frame.
@@ -97,6 +112,7 @@ impl Page {
             offsets: Offsets::new(),
             scrollers: Vec::new(),
             boxes: HashMap::new(),
+            stats: FrameStats::default(),
         }
     }
 
@@ -135,16 +151,72 @@ impl Page {
         resources: &mut Resources,
         mark: &mut dyn FnMut(Stage),
     ) -> (DisplayList, Vec<ResourceRequest>) {
+        let (built, requests) = self.build(width, height, scale, resources, true, mark);
+        let Built {
+            list,
+            styles,
+            viewport,
+            boxes,
+            offsets,
+            scrollers,
+            hits,
+            stats,
+        } = built;
+        self.viewport = viewport;
+        self.boxes = boxes;
+        self.offsets = offsets;
+        self.scrollers = scrollers;
+        self.hits = hits;
+        self.styles = styles;
+        self.stats = stats;
+        (list, requests)
+    }
+
+    /// What the last frame did, counted.
+    pub(crate) fn stats(&self) -> FrameStats {
+        self.stats
+    }
+
+    /// The display list of the page as it is now, recomputed from nothing
+    /// and changing nothing: the oracle every incremental path must agree
+    /// with (M5 plan, decision 9). Today the frame is built the same way.
+    pub(crate) fn oracle(
+        &self,
+        width: u16,
+        height: u16,
+        scale: f32,
+        resources: &mut Resources,
+    ) -> DisplayList {
+        self.build(width, height, scale, resources, false, &mut |_| {})
+            .0
+            .list
+    }
+
+    /// The whole pipeline, from the document to the display list, writing
+    /// nothing back: style, the requests for new URLs (when `ask`), layout,
+    /// scrolling, the display list, the hit regions and the highlight.
+    fn build(
+        &self,
+        width: u16,
+        height: u16,
+        scale: f32,
+        resources: &mut Resources,
+        ask: bool,
+        mark: &mut dyn FnMut(Stage),
+    ) -> (Built, Vec<ResourceRequest>) {
         let scale = crate::device_scale(scale);
         // The viewport in CSS pixels.
         let (w, h) = (f32::from(width) / scale, f32::from(height) / scale);
-        self.viewport = (w, h);
         let interaction = self.interaction();
         let doc = &self.doc;
         let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics))
             .with_device_scale(scale)
             .style_with(doc, &interaction);
-        let requests = resources.requests(doc, &styles);
+        let requests = if ask {
+            resources.requests(doc, &styles)
+        } else {
+            Vec::new()
+        };
         mark(Stage::Style);
         let mut text = TextEngine::with_fonts(resources.fonts());
         let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
@@ -153,36 +225,48 @@ impl Page {
         let bars = self.bars(self.hover);
         let (mut list, _) =
             DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
-        self.boxes = boxes(doc, &layouts, &scrolling);
-        // What the user scrolled, as far as it still goes.
-        self.offsets = scrolling
-            .scopes
-            .iter()
-            .filter(|scope| scope.offset != (0.0, 0.0))
-            .map(|scope| (scope.node, scope.offset))
-            .collect();
-        self.scrollers = scrolling
-            .scopes
-            .iter()
-            .filter(|scope| scope.user && (scope.max.0 > 0.0 || scope.max.1 > 0.0))
-            .map(|scope| Scroller {
-                node: scope.node,
-                max: scope.max,
-            })
-            .collect();
-        self.hits = hits(&list.items);
+        let hits = hits(&list.items);
         if let Some(node) = self.highlight {
             list.items.extend(
-                self.hits
-                    .iter()
+                hits.iter()
                     .filter(|hit| hit.node == node)
                     .filter_map(HitRegion::frame)
                     .map(DisplayItem::Highlight),
             );
         }
-        self.styles = styles;
+        let (laid_out, shaped) = layouts.counts();
+        let stats = FrameStats {
+            styled: styles.styled(),
+            laid_out,
+            shaped,
+            items: list.items.len(),
+        };
+        let built = Built {
+            boxes: boxes(doc, &layouts, &scrolling),
+            // What the user scrolled, as far as it still goes.
+            offsets: scrolling
+                .scopes
+                .iter()
+                .filter(|scope| scope.offset != (0.0, 0.0))
+                .map(|scope| (scope.node, scope.offset))
+                .collect(),
+            scrollers: scrolling
+                .scopes
+                .iter()
+                .filter(|scope| scope.user && (scope.max.0 > 0.0 || scope.max.1 > 0.0))
+                .map(|scope| Scroller {
+                    node: scope.node,
+                    max: scope.max,
+                })
+                .collect(),
+            list,
+            styles,
+            viewport: (w, h),
+            hits,
+            stats,
+        };
         mark(Stage::DisplayList);
-        (list, requests)
+        (built, requests)
     }
 
     /// Whether what the user is doing now looks different from `before`

@@ -376,7 +376,7 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 
 | Adım | Kapsam | Durum |
 |---|---|---|
-| M5.0 | Ölçüm (B1–B11, taban) ve doğruluk kâhini (iki yol) | Yeni |
+| M5.0 | Ölçüm (B1–B11, taban) ve doğruluk kâhini (iki yol) | Bitti: taban ölçüldü (B1 p95 454 ms, karenin dörtte üçü yerleşim); hedef p95 ≤ 16,7 ms; her kare fuzz'da kâhinle karşılaştırılıyor |
 | M5.1 | Mutation journal, birleştirme, transaction | Yeni |
 | M5.2 | `erk-invalidation`: bitler, nedenler, cebir; bağımlılık muhafızı | Yeni |
 | M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Yeni |

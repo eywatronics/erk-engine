@@ -31,7 +31,7 @@ forbid() {
 expected='pub use engine::Engine;
 pub use gpu::Window;
 pub use list::Prepared;
-pub use messages::{ BoxModel, Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, GenericFamilies, Key, KeyInput, KeyState, Modifiers, NodeKind, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Stage, Status, TextBox, };
+pub use messages::{ BoxModel, Cursor, ElementBox, Event, EventKind, FontCatalog, Frame, FrameStats, GenericFamilies, Key, KeyInput, KeyState, Modifiers, NodeKind, Painted, PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest, ResourceResponse, ScriptFallback, Stage, Status, TextBox, };
 pub use raster::RasterThread;
 pub fn to_png(&self) -> Option<Vec<u8>> {
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {

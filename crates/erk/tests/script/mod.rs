@@ -207,6 +207,7 @@ pub fn run(app: &mut App, script: &[u8]) {
         nodes: vec![app.root()],
         subscriptions: Vec::new(),
     };
+    app.set_verifying(true);
     let mut now = 0;
     while !bytes.0.is_empty() {
         match bytes.below(18) {
@@ -266,6 +267,7 @@ pub fn run(app: &mut App, script: &[u8]) {
             10 => {
                 now += 16_000_000;
                 app.tick(now);
+                check(app);
             }
             11 => {
                 let state = if bytes.byte().is_multiple_of(2) {
@@ -328,4 +330,14 @@ pub fn run(app: &mut App, script: &[u8]) {
         }
     }
     app.tick(now + 16_000_000);
+    check(app);
+}
+
+/// The frame just made agrees with the document recomputed from nothing
+/// (M5 plan, decision 9): an incremental path that forgets something
+/// shows here first.
+fn check(app: &mut App) {
+    if let Err(parted) = app.verify_frame() {
+        panic!("the frame is not what the document recomputed gives: {parted}");
+    }
 }

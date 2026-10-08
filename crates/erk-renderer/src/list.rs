@@ -12,12 +12,14 @@
 /// Straight (non-premultiplied) sRGB bytes, `[r, g, b, a]`.
 pub(crate) type Rgba = [u8; 4];
 
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DisplayList {
     /// The canvas colour behind everything (CSS 2 §14.2).
     pub(crate) canvas: Rgba,
     pub(crate) items: Vec<DisplayItem>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum DisplayItem {
     Rect {
         x: f32,
@@ -152,6 +154,7 @@ pub(crate) struct GradientStop {
     pub(crate) color: Rgba,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GlyphRun {
     pub(crate) font: FontId,
     pub(crate) size: f32,
@@ -161,7 +164,7 @@ pub(crate) struct GlyphRun {
     pub(crate) text: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PositionedGlyph {
     pub(crate) id: u32,
     pub(crate) x: f32,

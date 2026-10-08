@@ -419,6 +419,9 @@ modeline bağlar:
 
 ## 9. Açık sorular (M5'in ilk adımında kapanır)
 
+**Kapandı (M5.0):** cevaplar [m5-incremental-forms.md](../plans/m5-incremental-forms.md)'nin
+M5.0 yürütme notlarında.
+
 - Stylo snapshot'ı için `TElement` ve `ElementSnapshot` uygulaması
   `erk-style`'ın beş `unsafe fn` imzalı yüzeyini değiştiriyor mu?
   Değiştiriyorsa muhafız ve gerekçe aynı PR'da güncellenir.
