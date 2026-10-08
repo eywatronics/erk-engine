@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 app_units = "0.7.5"
 erk-dom = { path = "../erk-dom" }
+erk-invalidation = { path = "../erk-invalidation" }
 euclid = "0.22"
 selectors = "=0.40.0"
 style = { version = "=0.20.0", package = "stylo" }

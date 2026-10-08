@@ -835,6 +835,7 @@ version = "0.1.0"
 dependencies = [
  "app_units",
  "erk-dom",
+ "erk-invalidation",
  "euclid",
  "selectors",
  "stylo",

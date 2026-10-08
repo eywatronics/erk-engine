@@ -148,9 +148,10 @@ pub enum KeyState {
 }
 
 /// What the last frame did, counted (M5.0): how many elements were styled,
-/// boxes laid out, paragraphs shaped and display list items made. Today
-/// every frame does all of them; M5's incremental steps are measured by
-/// how far these fall.
+/// boxes laid out, paragraphs shaped and display list items made. M5's
+/// incremental steps are measured by how far these fall: styling counts
+/// only the elements it styled again (M5.3); layout and the display list
+/// still do everything.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
     pub styled: usize,

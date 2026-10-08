@@ -33,8 +33,10 @@ does not lay out or paint is not supported.
 | `<style>` blocks, `style` attribute, inheritance | Supported | `author_stylesheet_applies`, `style_attribute_applies`, `inherited_properties_flow_down` |
 | Custom properties (`--name`, `var()`), which utility CSS such as Tailwind relies on | Supported | `css_custom_properties_resolve` |
 | User agent stylesheet (headings, block elements) | Supported | `user_agent_stylesheet_makes_headings_blocks_with_larger_text` |
-| `:hover`, `:active`, `:focus`, `:focus-within` | Supported | `hover_active_and_focus_match_the_element_the_user_points_at`, `hover_and_active_restyle_the_element_under_the_pointer`, `the_states_reference_page_follows_the_pointer_and_the_focus`. A state change restyles the whole page; a page whose selectors do not use a state is not painted again when it changes (`styles_say_which_states_their_selectors_depend_on`) |
+| `:hover`, `:active`, `:focus`, `:focus-within` | Supported | `hover_active_and_focus_match_the_element_the_user_points_at`, `hover_and_active_restyle_the_element_under_the_pointer`, `the_states_reference_page_follows_the_pointer_and_the_focus`. A state change restyles the elements whose state changed and what their selectors reach (`hovering_restyles_the_hovered_chain_only`); a page whose selectors do not use a state is not painted again when it changes (`styles_say_which_states_their_selectors_depend_on`) |
 | `:focus-visible`, form pseudo-classes (`:checked`, `:disabled`) | M5 | With form controls |
+| `:has()` | Later | Stylo 0.20 does not parse it in Servo mode, so a rule using it is dropped; `has_is_not_parsed_yet` fails the day it parses, and restyling then has to restyle the elements anchoring it |
+| A change restyles only what it reaches: attributes, classes, `id`, the `style` attribute, sibling and descendant combinators, positional pseudo-classes (`:nth-child`, `:first-child`, `:empty`), elements added, removed and moved | Supported | `erk-style/tests/restyle.rs`: `random_changes_restyle_as_a_full_style_styles` (every frame equals a full style), `a_class_restyles_only_the_element_it_is_on`, `appending_to_a_list_styles_only_the_new_item`. Other style sheets or another viewport style everything again |
 
 ## Box model and layout
 

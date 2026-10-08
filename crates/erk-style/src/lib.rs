@@ -7,6 +7,7 @@
 //! docs/design/p0-architecture.md §6.1.
 
 mod node;
+mod restyle;
 mod side;
 
 use std::sync::Arc as StdArc;
@@ -41,8 +42,11 @@ pub use style::device::servo::FontMetricsProvider;
 pub use style::font_metrics::FontMetrics as StyleFontMetrics;
 pub use style::properties::ComputedValues;
 
+pub use crate::restyle::Restyler;
+pub use erk_invalidation::Invalidation;
+
 use crate::node::{ErkNode, NoPainters, RecalcStyle};
-use crate::side::StyledTree;
+use crate::side::{Slot, StyledTree, fresh_slots};
 
 const UA_CSS: &str = include_str!("ua.css");
 
@@ -107,42 +111,70 @@ impl StyleEngine {
     }
 
     /// Like [`StyleEngine::style`], with `:hover`, `:active`, `:focus` and
-    /// `:focus-within` matching what the user is doing.
+    /// `:focus-within` matching what the user is doing. Everything is styled
+    /// from nothing: the oracle a [`Restyler`]'s frames must agree with.
     pub fn style_with(&self, doc: &Document, interaction: &Interaction) -> Styles {
+        let mut stylist = self.stylist(&author_styles(doc));
+        let slots = fresh_slots(doc, &self.url, &self.guard, &states(doc, interaction));
+        self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new());
+        let computed: Vec<_> = slots.iter().map(primary).collect();
+        Styles {
+            reacts: reacts(&stylist),
+            styled: computed.iter().flatten().count(),
+            damage: Vec::new(),
+            computed,
+        }
+    }
+
+    /// A stylist with the UA stylesheet and `author`'s sheets, in order.
+    fn stylist(&self, author: &[String]) -> Stylist {
         let mut stylist = Stylist::new(self.device(), QuirksMode::NoQuirks);
         let read = self.guard.read();
         stylist.append_stylesheet(self.user_agent.clone(), &read);
-        for css in author_styles(doc) {
+        for css in author {
             stylist.append_stylesheet(
-                stylesheet(&css, Origin::Author, &self.guard, &self.url),
+                stylesheet(css, Origin::Author, &self.guard, &self.url),
                 &read,
             );
         }
+        stylist
+    }
 
-        let tree = StyledTree::new(doc, &self.guard);
-        tree.populate(&self.url, interaction);
+    /// Run Stylo's traversal over `doc` from its root element: it styles
+    /// the elements without style, those with a restyle hint and those a
+    /// snapshot in `snapshots` invalidates, and goes down only where an
+    /// element has dirty descendants.
+    fn traverse(
+        &self,
+        stylist: &mut Stylist,
+        doc: &Document,
+        slots: &[Slot],
+        snapshots: &SnapshotMap,
+    ) {
+        let tree = StyledTree::new(doc, &self.guard, slots);
+        tree.link();
         let Some(root) = TDocument::as_node(&ErkNode::new(&tree, doc.root())).first_element_child()
         else {
-            return Styles::default();
+            return;
         };
 
+        let read = self.guard.read();
         thread_state::enter(ThreadState::LAYOUT);
         let guards = StylesheetGuards {
             author: &read,
             ua_or_user: &read,
         };
-        let snapshots = SnapshotMap::new();
-        stylist.flush(&guards).process_style(root, Some(&snapshots));
+        stylist.flush(&guards).process_style(root, Some(snapshots));
 
         let context = SharedStyleContext {
             traversal_flags: TraversalFlags::empty(),
-            stylist: &stylist,
+            stylist,
             options: GLOBAL_STYLE_DATA.options.clone(),
             guards,
             visited_styles_enabled: false,
             animations: Default::default(),
             current_time_for_animations: 0.0,
-            snapshot_map: &snapshots,
+            snapshot_map: snapshots,
             registered_speculative_painters: &NoPainters,
         };
         let token = RecalcStyle::pre_traverse(root, &context);
@@ -152,25 +184,6 @@ impl StyleEngine {
             style::driver::traverse_dom(&RecalcStyle::new(context), token, None);
         }
         thread_state::exit(ThreadState::LAYOUT);
-
-        // The styled tree borrows the document; keep only the results.
-        let depends = |state| {
-            stylist
-                .iter_origins()
-                .any(|(data, _)| data.has_state_dependency(state))
-        };
-        Styles {
-            reacts: Reacts {
-                hover: depends(ElementState::HOVER),
-                active: depends(ElementState::ACTIVE),
-                focus: depends(ElementState::FOCUS | ElementState::FOCUS_WITHIN),
-            },
-            computed: tree
-                .nodes()
-                .iter()
-                .map(|node| node.borrow_data()?.styles.get_primary().cloned())
-                .collect(),
-        }
     }
 
     fn device(&self) -> Device {
@@ -217,8 +230,9 @@ pub fn query(
     let list = SelectorParser::parse_author_origin_no_namespace(selector, &url)
         .map_err(|_| InvalidSelector)?;
     let guard = SharedRwLock::new();
-    let tree = StyledTree::new(doc, &guard);
-    tree.populate(&url, interaction);
+    let slots = fresh_slots(doc, &url, &guard, &states(doc, interaction));
+    let tree = StyledTree::new(doc, &guard, &slots);
+    tree.link();
     if tree.node(scope).id.is_none() {
         return Ok(Vec::new());
     }
@@ -274,6 +288,10 @@ pub struct Interaction {
 pub struct Styles {
     computed: Vec<Option<Arc<ComputedValues>>>,
     reacts: Reacts,
+    /// How many elements were styled.
+    styled: usize,
+    /// What each element whose style changed makes dirty (M5.3).
+    damage: Vec<(NodeId, Invalidation)>,
 }
 
 /// Which parts of an [`Interaction`] some selector of the document's
@@ -303,11 +321,116 @@ impl Styles {
         self.computed.get(id.index() as usize)?.clone()
     }
 
-    /// How many elements have a computed style: what styling cost (M5.0's
-    /// counters).
+    /// How many elements were styled: all of them when styling from
+    /// nothing, those whose style was computed again when restyling. What
+    /// styling cost (M5.0's counters).
     pub fn styled(&self) -> usize {
-        self.computed.iter().filter(|style| style.is_some()).count()
+        self.styled
     }
+
+    /// The elements whose style changed since the last frame, each with
+    /// what the change makes dirty: repainting, layout, shaping (M5 plan,
+    /// decision 10). Empty when styling from nothing.
+    pub fn damage(&self) -> &[(NodeId, Invalidation)] {
+        &self.damage
+    }
+}
+
+/// Which parts of an [`Interaction`] some selector of `stylist`'s sheets
+/// depends on.
+fn reacts(stylist: &Stylist) -> Reacts {
+    let depends = |state| {
+        stylist
+            .iter_origins()
+            .any(|(data, _)| data.has_state_dependency(state))
+    };
+    Reacts {
+        hover: depends(ElementState::HOVER),
+        active: depends(ElementState::ACTIVE),
+        focus: depends(ElementState::FOCUS | ElementState::FOCUS_WITHIN),
+    }
+}
+
+/// A slot's element style, if it has one.
+fn primary(slot: &Slot) -> Option<Arc<ComputedValues>> {
+    slot.borrow_data()?.styles.get_primary().cloned()
+}
+
+/// Each arena slot's element state: a link's, and what `interaction` puts
+/// on the element under the pointer, the pressed one and the focused one
+/// and on their ancestors.
+fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
+    let mut states = vec![ElementState::empty(); doc.capacity_hint()];
+    let mut stack = vec![doc.root()];
+    while let Some(id) = stack.pop() {
+        stack.extend(doc.children(id));
+        if let Some(element) = doc.node(id).and_then(|node| node.as_element())
+            && element.name.local == local_name!("a")
+            && element.attr(&local_name!("href")).is_some()
+        {
+            states[id.index() as usize] = ElementState::UNVISITED;
+        }
+    }
+    let mut mark = |node: Option<NodeId>, own: ElementState, inherited: ElementState| {
+        let Some(node) = node.filter(|id| doc.node(*id).is_some()) else {
+            return;
+        };
+        states[node.index() as usize] |= own;
+        let mut current = Some(node);
+        while let Some(id) = current {
+            let Some(found) = doc.node(id) else {
+                break;
+            };
+            if found.as_element().is_some() {
+                states[id.index() as usize] |= inherited;
+            }
+            current = found.parent();
+        }
+    };
+    mark(
+        interaction.hover,
+        ElementState::empty(),
+        ElementState::HOVER,
+    );
+    mark(
+        interaction.active,
+        ElementState::empty(),
+        ElementState::ACTIVE,
+    );
+    mark(
+        interaction.focus,
+        ElementState::FOCUS,
+        ElementState::FOCUS_WITHIN,
+    );
+    states
+}
+
+/// Whether two computed styles are equal, property by property.
+pub fn same_style(a: &ComputedValues, b: &ComputedValues) -> bool {
+    a.custom_properties() == b.custom_properties()
+        && a.writing_mode == b.writing_mode
+        && a.effective_zoom == b.effective_zoom
+        && a.get_background() == b.get_background()
+        && a.get_border() == b.get_border()
+        && a.get_box() == b.get_box()
+        && a.get_column() == b.get_column()
+        && a.get_counters() == b.get_counters()
+        && a.get_effects() == b.get_effects()
+        && a.get_font() == b.get_font()
+        && a.get_inherited_box() == b.get_inherited_box()
+        && a.get_inherited_svg() == b.get_inherited_svg()
+        && a.get_inherited_table() == b.get_inherited_table()
+        && a.get_inherited_text() == b.get_inherited_text()
+        && a.get_inherited_ui() == b.get_inherited_ui()
+        && a.get_list() == b.get_list()
+        && a.get_margin() == b.get_margin()
+        && a.get_outline() == b.get_outline()
+        && a.get_padding() == b.get_padding()
+        && a.get_position() == b.get_position()
+        && a.get_svg() == b.get_svg()
+        && a.get_table() == b.get_table()
+        && a.get_text() == b.get_text()
+        && a.get_ui() == b.get_ui()
 }
 
 /// The text of every `<style>` element, in tree order.

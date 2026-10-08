@@ -167,17 +167,23 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.3: Kalıcı stil
 
-- [ ] Stylo'nun snapshot'ları ve yeniden stil ipuçları; hesaplanan stil
+- [x] Stylo'nun snapshot'ları ve yeniden stil ipuçları; hesaplanan stil
   farkı Erk'in bitlerine. Bir sınıf değişikliği yalnızca etkilenen
-  elemanları stilliyor; `.card:has(input:checked)` vakası (B4). Yalnızca
-  rengi değiştiren bir sınıf ya da satır içi stil yerleşimi çalıştırmıyor
-  (karar 10; B13, `laid_out` ve `shaped` 0).
+  elemanları stilliyor. `.card:has(input:checked)` vakası düştü: Stylo
+  0.20 Servo kipinde `:has()`'ı ayrıştırmıyor (yürütme notları). Yalnızca
+  rengi değiştiren bir değişikliğin yerleşimi çalıştırmaması M5.4'e
+  taşındı.
 - [ ] Canlı düzenlemenin temeli: satır içi stilin bir özelliğini ve bir
   kuralı değiştirip artımlı yeniden stil (M4.0'ın ertelediği
   `set_style_property`, Stylo'nun bildirim bloğuyla: CSSOM).
 
 ### M5.4: Kalıcı layout
 
+- [ ] Yalnızca rengi değiştiren bir sınıf ya da satır içi stil yerleşimi
+  çalıştırmıyor (karar 10; B13, `laid_out` ve `shaped` 0). M5.3'ten
+  taşındı: önceki karenin yerleşimini tutmak bu adımın işi, ve metnin
+  rengi bugün Parley'nin şekillendirilmiş satırlarında duruyor; display
+  list'e çözülmesi gerekiyor (M5.3 notları).
 - [ ] Bir genişlik değişikliği metni yeniden şekillendirmiyor, yalnızca
   yeniden satırlara bölüyor (karar 10; `shaped` 0).
 - [ ] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı;
@@ -356,3 +362,38 @@ Tabana eklenenler (aynı oturumda B1 ile, M5.0'ın koşulları):
 | Mutasyonlar | Koşulsuz terfi (planın beklediği; boş girdi testi yakaladı), soğurmanın yok sayılması, yürüyüşün erken durmaması, nesil denetiminin kalkması, zincirin ilk kayıtta durması, en yeni kaydın önce ezilmesi: yakalandı. "Hiçbir şey geçmeyince dur" dalı mutasyondan sağ çıktı: ölü kod, çünkü boş küme her kümenin altkümesi ve "ata hepsini taşıyor" denetimi onu zaten durduruyor; silindi, yorum ikisini birden söylüyor |
 | Fuzz kilidi | M4.4'te unutulan ders: yeni crate fuzz workspace'inin kilidine de girdi (`fuzz/Cargo.lock`), aynı PR'da |
 | Fuzz bulgusu | `fuzz render_html (none)` M5.2'yle ilgisiz, eski bir panik buldu: Parley'nin satır kırıcısı satırın düzenden geniş olmadığını assert ediyor ve taşmış bir genişlikte hiçbir karşılaştırma bunu sağlamıyor. Genişliği kadar dolgusu olan 3e38px'lik bir kutuda metnin sarıldığı genişlik NaN, otomatik genişlikli dar bir kutuda f32'den geniş dolguyla eksi sonsuz. İlk düzeltme yalnızca NaN'ı "genişlik yok" saydı; CI'da fuzzer korpusa giren sayfayı 36 denemede değiştirip eksi sonsuzu buldu. Son hâli: ikisi de en dar sonlu genişlik (`max(f32::MIN)`, `max` NaN'ı yok sayıyor); ayrı bir NaN dalı mutasyondan sağ çıktığı için yok. Sayfa `tests/robustness/overflowed-wrap-width.html`; kıskaç kaldırılınca korpus testi Parley'nin assert'iyle düşüyor. Uç genişlik, dolgu, kenar boşluğu ve `display` birleşimlerinden üretilen 3584 sayfa yerelde paniklemedi |
+
+### M5.3
+
+İlk PR: kalıcı stil. CSSOM (`set_style_property`) aynı adımın ikinci PR'ı.
+
+| Konu | Not |
+|---|---|
+| Model | `erk_style::Restyler`: Stylo'nun eleman verisi (`ElementData`), seçici bayrakları ve ayrıştırılmış `style` özniteliği yuva başına (`side.rs`'in `Slot`'u) kareden kareye kalıyor; her kare yalnızca o karenin tutamaklarını (`StyledNode`) kuruyor. Yuva bir düğüme id'si ve nesliyle ait: arena yuvayı başka düğüme verince sıfırdan başlıyor, belgeden çıkan düğümün yuvası boşalıyor. Stil sayfaları (`<style>` metinleri), görüntü alanı ya da belgenin tamamı değişince her şey baştan |
+| Stylo'ya ne söyleniyor | Snapshot: öznitelikleri değişen her stillenmiş elemana son karedeki öznitelikleri (günlük artık onları da taşıyor: `AttrChange::before`), durumu değişene (`:hover`, `:focus`) eski durumu. Hangi elemanın, kardeşin, torunun yeniden stilleneceğini Stylo çıkarıyor. İpucu: `style` özniteliği değişince `RESTYLE_STYLE_ATTRIBUTE`; başka ebeveyne taşınan düğüme alt ağaç; çocukları ya da metni değişen ebeveynde, eşleşmenin bıraktığı seçici bayrakları konuma bağlı bir seçici söylüyorsa (`:nth-child`, `:first-child`, kardeş birleştiricileri) ebeveynin alt ağacı, `:empty` soruluyorsa ebeveynin ebeveyninin alt ağacı. Yeni düğümler zaten stilsiz: geçiş onlara ulaşsın diye ataları işaretleniyor |
+| `:has()` | **Planın varsayımı yanlış çıktı:** Stylo 0.20 Servo kipinde `:has()`'ı ayrıştırmıyor (`parse_has` sabit `false`), onu kullanan kural düşüyor. Tasarımın §3.4'teki `:has()` invalidation'ı ve B4'ün `.card:has(...)` sayfası hiç eşleşmemiş bir kuralı ölçtü. Çapaları bulma yolu tasarlandı (bir değişiklikten yukarı her ata ve ondan önceki kardeşler; `ANCHORS_RELATIVE_SELECTOR` bayrağı) ama yazılmadı: test edilemeyen kod olurdu. `has_is_not_parsed_yet` testi Stylo onu ayrıştırdığı gün düşüyor; o gün çapa yolu gelir. css-support'ta "Later" |
+| Çocuklar da stilleniyor | Stylo, stili değişen bir elemanın çocuklarını, değişiklik nasıl olursa olsun yeniden basamaklıyor (Stylo'daki `reset_only` FIXME'si); torunlara, çocuğun stili eşit çıkınca inmiyor. Sayılar bu yüzden "eleman ve çocukları": tek bir `<p><span>`'de 2 |
+| Bitler (karar 10) | Stilin farkı Stylo'nun `ServoRestyleDamage`'inden: yalnızca `REPAINT` → `PAINT_SELF`, `HIT_TEST`, `A11Y_SELF`; yığın bağlamı → ek olarak `PAINT_SUBTREE`; daha fazlası → `LAYOUT_SELF`, ve `Font` ya da kalıtılan metin yapısı değiştiyse `TEXT_SHAPE`; gelen ya da giden stil → stil bitleri dışında hepsi. `Styles::damage()`. Bugün bitleri hiçbir aşama tüketmiyor; yerleşim hâlâ tam (M5.4) |
+| Doğrulama | Her test karesi tam stille özellik özellik karşılaştırılıyor (`same_style`: Servo'daki her stil yapısı, özel özellikler, yazım kipi, yakınlaştırma). Rastgele değişiklik testi: 40 tohum, her biri 60 değişiklik (eleman ekleme, taşıma, silme, sınıf, `id`, öznitelik, metin, `:hover`), birleştirici ve konum seçicileriyle dolu bir sayfa. Kâhin (fuzz yorumlayıcısı) display list'i tam hesapla karşılaştırıyor |
+| Kâhinin bulduğu | Kök elemanın yanına (belge düğümünün ikinci eleman çocuğu) taşınan bir eleman eski stilini koruyordu; tam stil oraya hiç ulaşmaz. `tests/mutations.rs`'in sabit tohumu yakaladı. Artık kök elemanın dışındaki elemanların yuvası her kare boşalıyor, içeri dönen yeniden stilleniyor (`an_element_outside_the_root_element_has_no_style`) |
+| İş parçacığı | Stylo'nun `Stylist`'i `Send` değil: `Device` bir `Box<dyn FontMetricsProvider>` tutuyor, trait `Sync` ama `Send` değil. Sayfa ise her kare kare iş parçacığına gidip geliyor. `Restyler` bu yüzden sayfayla gitmiyor: onu kuran iş parçacığının yerel tablosunda (`RESTYLERS`) kalıyor, sayfa onu bir `Arc<()>` anahtarıyla buluyor. Kayıt sayfanın kare sayısını tutuyor: bir kareyi kaçıran (başka bir iş parçacığında hazırlanmış) restyler o karenin değişikliklerini bilmez, baştan stiller. Sayfası düşen kayıt o iş parçacığının sonraki karesinde siliniyor. Reddedilen: her kare yeni bir `Stylist` kurup eski eleman verisini tutmak; eleman verisi eski kural ağacının düğümlerine işaret eder ve Stylo iki ağacın karışmasını taahhüt etmiyor |
+| §9: `unsafe` yüzeyi | Değişmedi: beş imzalı yüzey aynı, `has_snapshot` güvenli bir yöntem |
+| Bellek | Belgenin ömrü boyunca yaşayan bir `Stylist`'in kural ağacı, hiçbir stilin kullanmadığı düğümleri toplayana kadar tutuyor; eskiden her kare yeni bir ağaç kurulup atıldığı için görünmüyordu. C-ABI'nin 10 bin satırlık bellek testi yakaladı (yığın büyüdü); artık her kare `rule_tree().gc()`: büyüme 0 bayt. Servo `maybe_gc` kullanıyor (300 boş düğümde bir); test eşiği (16 KiB) altında kalmak için her kare toplanıyor, maliyeti boş listenin uzunluğu kadar |
+| Mutasyonlar | Snapshot'ların hiç verilmemesi, eski yerine yeni özniteliklerin verilmesi, taşınan düğümün, konum seçicilerinin, `:empty`'nin unutulması, yeniden kullanılan yuvanın eski verisi, ataların işaretlenmemesi, özniteliklerin yeniden okunmaması, `style` ipucu, durum snapshot'ı, şekillendirme ve yerleşim bitleri, belgeden çıkan düğümün yuvası, yuvanın eski stili, kök dışı eleman ve içeri dönüşü: hepsi yakalandı. İki mutasyon ilk koşuda sağ çıktı: biri ölü bir satırdı (kare stilleri toplarken zaten siliyordu), silindi; diğeri için belge dışındayken değişip aynı yere dönen düğüm testi eklendi |
+| B4 | `.card:has(...)` yerine kartın kendisinde sınıf, içindeki metin ona bağlı (`.checked span`) |
+| Ölçüm | Aşağıda; M5.0'ın tabanıyla aynı makinede. Stillenen eleman sayısı 10 binden değişenlere indi (B1, B2, B5, B10, B12'de 0: metin stili değiştirmiyor; B3, B6, B7, B13'te 1; B4'te kart ve metni, 2). Stil süresi yarıya indi (B1'de 8,60'tan 4,36 ms'ye): kalan, belgenin her kare baştan sona yürünmesi (stil sayfası metinleri, durumlar, yuvalar, tutamaklar, sonuçların toplanması), O(n) ama eşleştirme ve basamaklama yok. Karenin toplamı değişmedi, çünkü dörtte üçü yerleşim: kazanç M5.4'le görünür. B9 (artımlı / tam) de ilk artımlı yerleşimle anlam kazanıyor |
+
+M5.3 (süreler ms, sayaçlar son kare):
+
+| | Senaryo | medyan | p95 | stil | yerleşim | display list | raster | stillenen | yerleşen | şekillenen |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 344,83 | 511,64 | 4,36 | 258,92 | 32,34 | 35,64 | 0 | 10003 | 8000 |
+| B2 | bir karede 100 metin | 319,48 | 372,90 | 4,03 | 240,37 | 31,06 | 34,20 | 0 | 10003 | 8000 |
+| B3 | 1000 düzey, yaprağa sınıf | 7,67 | 12,89 | 0,69 | 4,11 | 0,78 | 1,99 | 1 | 1004 | 1 |
+| B4 | 1000 karttan birine sınıf | 41,47 | 54,52 | 1,43 | 21,16 | 5,82 | 11,93 | 2 | 1003 | 1000 |
+| B5 | `contain: size layout` içinde, 10 bin | 316,12 | 332,81 | 4,12 | 238,13 | 30,46 | 33,17 | 0 | 10004 | 8001 |
+| B6 | 5000 elemanda imleç | 157,51 | 179,48 | 2,17 | 118,40 | 14,42 | 17,04 | 1 | 5005 | 4001 |
+| B7 | 5000 elemanda sürükleme | 164,36 | 208,05 | 2,19 | 123,76 | 16,91 | 17,16 | 1 | 5004 | 4000 |
+| B10 | bir karede 100 toplu işlem | 309,68 | 357,79 | 3,78 | 233,84 | 30,83 | 32,51 | 0 | 10003 | 8000 |
+| B12 | 10 bin kelimelik paragrafa bir harf | 125,25 | 138,27 | 0,30 | 49,80 | 17,31 | 58,15 | 0 | 503 | 500 |
+| B13 | satır içi stilde renk, 10 bin | 326,25 | 461,80 | 4,37 | 245,79 | 31,49 | 34,00 | 1 | 10003 | 8000 |
