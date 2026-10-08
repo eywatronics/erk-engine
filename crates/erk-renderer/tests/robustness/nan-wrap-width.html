@@ -1,0 +1,7 @@
+<!doctype html>
+<!-- Found by the render_html fuzzer (M5.2): padding as large as the width
+     overflows the box to infinity, and the width text wraps at becomes
+     NaN, which Parley's line breaker asserts on. -->
+<div style="width: 3e38px; padding: 0 3e38px">a b c</div>
+<div style="display: inline-block; width: 3e38px; padding: 0 3e38px">a b c</div>
+<div style="display: flex"><div style="width: 3e38px; padding: 3e38px">a b c</div></div>
