@@ -133,6 +133,9 @@ pub enum Key {
     Enter,
     Space,
     Escape,
+    /// The key that deletes backwards: what a host entering text itself
+    /// needs (M4 plan, decision 4).
+    Backspace,
     /// A key that types `text`.
     Character(String),
     Other,

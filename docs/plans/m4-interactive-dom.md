@@ -108,16 +108,16 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 
 ### M4.5: TodoMVC ve kabul
 
-- [ ] Rust host'lu TodoMVC (`crates/erk/examples/todomvc.rs`): görev ekleme,
+- [x] Rust host'lu TodoMVC (`crates/erk/examples/todomvc.rs`): görev ekleme,
   tamamlama, silme, filtreler, sayaç; altın görüntülü uçtan uca test
   (ekransız).
-- [ ] 10 bin döngü bellek testi ve fuzz yeşil; `roadmap.md`'de M4 "Bitti".
+- [x] 10 bin döngü bellek testi ve fuzz yeşil; `roadmap.md`'de M4 "Bitti".
 
 ### M4 kabulü
 
-- [ ] Rust host'lu bir TodoMVC çalışıyor (otomatik test).
-- [ ] 10 bin oluştur/sil döngüsünde bellek büyümüyor (test).
-- [ ] `Mutation` fuzz'ı yeşil.
+- [x] Rust host'lu bir TodoMVC çalışıyor (otomatik test).
+- [x] 10 bin oluştur/sil döngüsünde bellek büyümüyor (test).
+- [x] `Mutation` fuzz'ı yeşil.
 
 ---
 
@@ -193,3 +193,29 @@ M2'den beri var (`erk-dom`); M4 bunları API'ye açar ve sınar.
 | Hinting | Dönen metinde hinting'i kapatmak denendi (Chrome kapatıyor): skor iki ondalıkta aynı kaldı, geri alındı |
 | Chrome | `transforms` sayfası 15 kutu: içerik skoru **%99,00**, 38 blok kutusunun hepsi 1 px içinde, metin satırları eşleşiyor. Kalan fark dönen kenarların kenar yumuşatması ve dönen metnin glifleri |
 | Mutasyonlar | Bireysel özelliklerin yok sayılması, `transform`'un önce gelmesi, origin'in yok sayılması, yüzdelerin boş kutuya göre çözülmesi, tersinmez dönüşümün çizilmesi, dönüşen kutunun katman olmaması, boyayıcının dönüşümü yok sayması, isabetin dönüşümü yok sayması, kırpmaların dönüşümler arasında kesiştirilmesi, dönüşümün kapsayan blok olmaması, sabitlerin hep görüntü alanına gitmesi, kaydırma kapsamlarının dönüşen kapları yok sayması, sabitlerin her kapsamdan kaçması: 13'ü de yakalandı. Kırpma mutasyonu ilk testten sağ çıktı (kırpma ve bölge aynı dönüşümdeydi); dönmeyen bir kırpmanın içinde dönen kutuyla yakalandı |
+
+### M4.5
+
+| Konu | Not |
+|---|---|
+| TodoMVC | `crates/erk/examples/todomvc/` (planın `todomvc.rs`'i yerine dizin: sayfa ve mantık `todos.rs`'te, `main.rs` pencereyi açıyor; test aynı dosyayı `#[path]` ile çalıştırıyor, test edilen kod örneğin kodu). Görev ekleme toplu `Mutation` ile (satırın üç elemanı, metni ve sınıfları tek `apply`, `Ref::New` ile); tamamlama sınıfla, silme `remove` ile (satırın abonelikleri satırla bitiyor), filtreler listedeki bir sınıf ve CSS seçicileriyle, sayaç `set_text`, alt bilgi ve temizle düğmesi `hidden` özniteliğiyle. Durum host'ta (`Rc<RefCell<Todos>>`); satırların abonelikleri `Weak` taşıyor, döngü yok. Düzenleme (çift tıklama) ve "hepsini işaretle" yok: ikisi de metin alanı ister (M5) |
+| Metin girişi (karar 4) | Yeni görev alanı `tabindex`'li bir `div`: tıklanınca odak alıyor, tuş olayları ona geliyor, host karakterleri, boşluğu ve Backspace'i kendisi işliyor; Enter ekliyor, Escape temizliyor. Boşluktan ibaret görev eklenmiyor |
+| `ERK_KEY_BACKSPACE` | Backspace bugüne kadar `Other` geliyordu, host metni silemiyordu. `Key::Backspace` motor, pencere eşlemesi ve C-ABI'de (`ERK_KEY_BACKSPACE = 6`, iki yönde); aynı tuş başka bir değerle geldiği için C-ABI 0.5. Sözleşme §10: tanımadığı `ERK_KEY_*` değerini host `OTHER` gibi okumalı |
+| Uçtan uca test | `crates/erk/tests/todomvc.rs`: ekransız, kullanıcı gibi: alana tıklama, yazma, Backspace, Enter, boş görev, tamamlama, filtreler, silme, temizleme, son görevle alt bilginin kaybolması. Bir görev tamamlanmış ve yarım yazılmış bir görevle altın görüntü (`tests/golden/todomvc.png`, PNG baytları karşılaştırılıyor; `ERK_BLESS=1`). Görüntüye bakınca iki şey çıktı: (1) toggle'a tıklamak odağı alandan alıyor (tarayıcıdaki gibi) ve testin yazdığı taslak hiçbir yere gitmiyordu, test Escape'ten sonraki denetimle bunu örtüyordu; şimdi odağın gittiği, yazılanın kaybolduğu ve alana yeniden tıklayınca yazının göründüğü test ediliyor. (2) Alt bilgi satırı sıkışıp kırılıyordu: `white-space: nowrap`, daha geniş uygulama, kısa düğme metni |
+| Satır içi kutular | Filtre bağlantıları (`<a>`) satır içi; Erk'in kutu sorgusu satır içi elemanlara kutu vermiyor (bilinen sınır, M7'nin denetim işiyle). Bağlantılar `inline-block` yapıldı; test bağlantılara kutularından tıklıyor |
+| Mutasyonlar | Backspace'in yok sayılması, silinen satırın sayfada kalması, temizle düğmesinin hiç gizlenmemesi, boş görevin eklenmesi, motorda tıklamanın odak vermemesi, tamamlanan görevin aynı görünmesi (altın görüntü): altısı da yakalandı |
+
+### M4 kabulü (2026-10-08)
+
+- **Rust host'lu TodoMVC çalışıyor:** `cargo run -p erk --example todomvc`;
+  `todomvc_adds_ticks_filters_and_removes_tasks` uçtan uca ve altın
+  görüntüyle, CI'da üç işletim sisteminde.
+- **10 bin oluştur/sil döngüsünde bellek büyümüyor:**
+  `ten_thousand_rows_made_and_removed_leave_the_heap_as_it_was` (M4.2):
+  C-ABI üzerinden, büyüme 0 bayt.
+- **`Mutation` fuzz'ı yeşil:** `fuzz mutations (none)` ve
+  `fuzz mutations (address)` her PR'da beşer dakika; sabit tohumlu
+  `random_scripts_of_host_calls_never_panic`.
+- Planın dışında gelenler: gradyanlar (M4.3, Chrome %99,72), 2D `transform`
+  (M4.4, Chrome %99,00), `<script>`'in hiçbir zaman çalışmaması ve muhafızı,
+  bütün bağlamaların C-ABI'den olması kararı.
