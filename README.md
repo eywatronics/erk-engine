@@ -19,10 +19,11 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 *Rendered by Erk, not a browser: `cargo run -p erk-renderer --example png`.*
 
 > **Erk is early.** It renders pages to a window or a PNG, reacts to input
-> (pointer, wheel, keyboard focus), and can be embedded from Rust or C: load
-> a page, find nodes, change their text, subscribe to events. It cannot yet
-> create or remove nodes (M4) or show form controls (M5). See
-> [current limitations](#current-limitations).
+> (pointer, wheel, keys), and can be embedded from Rust or C: load a page,
+> find nodes, build and change the document (one call at a time or in
+> batches), subscribe to events. A TodoMVC with its host in Rust runs on it
+> (`cargo run -p erk --example todomvc`). It cannot yet show form controls
+> or render incrementally (M5). See [current limitations](#current-limitations).
 
 ## The Vision: Built for Embedded Systems & the AI Era
 
@@ -146,7 +147,6 @@ cargo run -p erk-shell -- examples/m2-demo.html
 
 Today Erk does **not**:
 
-- create, move or remove nodes, or change attributes, from the host (M4);
 - show form controls (`input`, `textarea`, `select`), or style `button` as
   a native control (M5);
 - decode images other than PNG and JPEG, or load stylesheets and fonts
@@ -195,9 +195,9 @@ and may only rise unless a written reason says otherwise.
 | M0 | First pixel | Done |
 | M0.5 | The embedding contract | Done |
 | M1 | Static UI: inline layout, flexbox, positioning, borders, images, system fonts | Done |
-| M2 | Input, hit testing, scrolling, GPU rendering; the counter demo | Planned |
-| M3 | Rust API and C ABI | Planned |
-| M4 | Mutable DOM and events; TodoMVC | Planned |
+| M2 | Input, hit testing, scrolling, GPU rendering; the counter demo | Done |
+| M3 | Rust API and C ABI | Done |
+| M4 | Mutable DOM and events, gradients, 2D transforms; TodoMVC | Done |
 | M5 | Incremental rendering, forms, IME, accessibility | Planned |
 | M6 | Bindings: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Planned |
 | M7 | Developer tools, written with Erk | Planned |

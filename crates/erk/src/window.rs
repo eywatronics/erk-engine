@@ -343,6 +343,7 @@ fn key(logical: &WinitKey) -> Key {
         WinitKey::Named(NamedKey::Enter) => Key::Enter,
         WinitKey::Named(NamedKey::Space) => Key::Space,
         WinitKey::Named(NamedKey::Escape) => Key::Escape,
+        WinitKey::Named(NamedKey::Backspace) => Key::Backspace,
         // Some platforms report the space bar as the character it types.
         WinitKey::Character(text) if text.as_str() == " " => Key::Space,
         WinitKey::Character(text) => Key::Character(text.to_string()),
@@ -490,6 +491,7 @@ mod tests {
             (WinitKey::Named(NamedKey::Space), Key::Space),
             (WinitKey::Character(" ".into()), Key::Space),
             (WinitKey::Named(NamedKey::Escape), Key::Escape),
+            (WinitKey::Named(NamedKey::Backspace), Key::Backspace),
             (
                 WinitKey::Character("ş".into()),
                 Key::Character("ş".to_owned()),

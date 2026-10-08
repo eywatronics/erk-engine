@@ -29,7 +29,7 @@ yapılır; etmiyorsa ilgili taşın planına açık soru olarak yazılır.
 | **M1** | Statik UI | Bitti |
 | **M2** | Etkileşim temeli | Bitti ([m2-interaction.md](m2-interaction.md)) |
 | **M3** | Kütüphane (Rust API, C-ABI) | Bitti ([m3-library.md](m3-library.md)) |
-| **M4** | Etkileşimli DOM | Sürüyor ([m4-interactive-dom.md](m4-interactive-dom.md)) |
+| **M4** | Etkileşimli DOM | Bitti ([m4-interactive-dom.md](m4-interactive-dom.md)) |
 | **M5** | Artımlı render ve formlar | Yeni |
 | **M6** | Bağlamalar: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Yeni |
 | **M7** | Geliştirici araçları | Yeni |
@@ -319,7 +319,7 @@ M4 de adımlara bölünür; her adım kendi PR'ı ([m4-interactive-dom.md](m4-in
 | M4.2 | `Mutation` fuzz'ı, 10 bin döngü bellek testi | Bitti: fuzz bağlanmamış kapsamlı sorguda bir panik buldu (düzeltildi); 10 bin döngüde yığın büyümesi 0 bayt |
 | M4.3 | `linear-gradient`, `radial-gradient` | Bitti: tekrarlayanlar, ara noktalar, elipsler, döşeme; Chrome skoru %99,72, CPU ve GPU aynı |
 | M4.4 | 2D `transform`, hit-test ters dönüşümle | Bitti: bireysel özellikler, origin, iç içe dönüşüm, kapsayan blok; Chrome skoru %99,00 |
-| M4.5 | TodoMVC, kabul | Yeni |
+| M4.5 | TodoMVC, kabul | Bitti: Rust host'lu TodoMVC uçtan uca ve altın görüntüyle test ediliyor; `ERK_KEY_BACKSPACE` (C-ABI 0.5) |
 
 **Karar (plan):** girdi, değişiklik ve gönderim olayları form denetimleri
 olmadan oluşamaz; M5'e kaldı. M4'ün TodoMVC'si yeni görevi klavye

@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_4() {
-    assert_eq!(erk_abi_version(), 4);
+fn the_abi_version_is_0_5() {
+    assert_eq!(erk_abi_version(), 5);
 }
 
 fn change(kind: u32, node: ErkNodeId, parent: ErkNodeId, name: &str, value: &str) -> ErkMutation {
@@ -295,6 +295,14 @@ fn a_key_event_names_its_key_and_what_it_typed() {
         ERK_OK
     );
     assert_eq!(seen(), (ERK_EVENT_KEY_UP, ERK_KEY_ESCAPE, String::new()));
+    assert_eq!(
+        erk_app_input(app, &key(ERK_INPUT_KEY_DOWN, ERK_KEY_BACKSPACE, "")),
+        ERK_OK
+    );
+    assert_eq!(
+        seen(),
+        (ERK_EVENT_KEY_DOWN, ERK_KEY_BACKSPACE, String::new())
+    );
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 

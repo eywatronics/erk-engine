@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 4;
+pub const ERK_ABI_VERSION: u32 = 5;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -206,6 +206,7 @@ pub const ERK_KEY_SPACE: u32 = 3;
 pub const ERK_KEY_ESCAPE: u32 = 4;
 /// The key typed `text`.
 pub const ERK_KEY_CHARACTER: u32 = 5;
+pub const ERK_KEY_BACKSPACE: u32 = 6;
 
 pub const ERK_MOD_SHIFT: u32 = 1;
 pub const ERK_MOD_CONTROL: u32 = 2;
@@ -901,6 +902,7 @@ pub extern "C" fn erk_app_input(app: *mut ErkApp, input: *const ErkInput) -> Erk
                 ERK_KEY_ENTER => Key::Enter,
                 ERK_KEY_SPACE => Key::Space,
                 ERK_KEY_ESCAPE => Key::Escape,
+                ERK_KEY_BACKSPACE => Key::Backspace,
                 ERK_KEY_CHARACTER => Key::Character(text(field!(input, ErkInput, text, none))?),
                 _ => return Err(ERK_ERR_INVALID_ARGUMENT),
             };
@@ -1395,6 +1397,7 @@ fn subscribe(
                     Some(Key::Enter) => ERK_KEY_ENTER,
                     Some(Key::Space) => ERK_KEY_SPACE,
                     Some(Key::Escape) => ERK_KEY_ESCAPE,
+                    Some(Key::Backspace) => ERK_KEY_BACKSPACE,
                     Some(Key::Character(_)) => ERK_KEY_CHARACTER,
                 },
             };
