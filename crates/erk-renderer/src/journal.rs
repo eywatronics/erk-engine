@@ -176,6 +176,28 @@ impl Journal {
         });
     }
 
+    /// `id` and everything in it are joining the document: new to it,
+    /// whenever they were made. A node made in an earlier frame and kept
+    /// outside the document was never in a frame to compare with.
+    pub(crate) fn arrived(&mut self, doc: &Document, id: NodeId) {
+        let mut stack = vec![id];
+        while let Some(node) = stack.pop() {
+            stack.extend(doc.children(node));
+            let at = node.index() as usize;
+            if self.slots.len() <= at {
+                self.slots.resize_with(at + 1, || None);
+            }
+            if self.slots[at].is_none() {
+                self.touched.push(at);
+            }
+            self.slots[at] = Some(Slot {
+                id: node,
+                created: true,
+                before: State::default(),
+            });
+        }
+    }
+
     /// The frame's changes, coalesced, and how many were recorded; the
     /// journal starts the next frame empty.
     pub(crate) fn take(&mut self, doc: &Document) -> (Changes, usize) {
@@ -200,7 +222,7 @@ impl Journal {
 }
 
 /// Whether `id` is alive and in the document.
-fn connected(doc: &Document, mut id: NodeId) -> bool {
+pub(crate) fn connected(doc: &Document, mut id: NodeId) -> bool {
     loop {
         if id == doc.root() {
             return true;

@@ -29,6 +29,13 @@ const FOUND: &[&[u8]] = &[
     &[
         237, 145, 7, 120, 186, 35, 112, 72, 199, 137, 74, 81, 230, 254, 171,
     ],
+    // A node made in one frame and attached in the next was taken for an
+    // old node whose attributes changed (M5.1's journal, found by the CI
+    // fuzz job).
+    &[
+        54, 54, 0, 0, 115, 116, 33, 43, 136, 136, 136, 136, 136, 218, 3, 0, 203, 136, 136, 136,
+        218, 54, 67, 204, 3,
+    ],
 ];
 
 fn app() -> App {

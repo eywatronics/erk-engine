@@ -904,7 +904,13 @@ impl Page {
             self.journal.touch(&self.doc, old);
         }
         self.journal.touch(&self.doc, parent);
-        self.doc.insert(parent, child, before).map_err(status)
+        let joins = !crate::journal::connected(&self.doc, child);
+        self.doc.insert(parent, child, before).map_err(status)?;
+        // From outside the document into it: all of it is new there.
+        if joins && crate::journal::connected(&self.doc, child) {
+            self.journal.arrived(&self.doc, child);
+        }
+        Ok(())
     }
 
     /// Remove `node` and everything in it; their ids go stale. The document

@@ -651,6 +651,33 @@ mod tests {
     }
 
     #[test]
+    fn a_node_that_joins_the_document_is_new_however_long_it_waited_outside() {
+        // Found by the mutation fuzz: a node made in one frame, attached in
+        // the next and changed after that was taken for an old node whose
+        // attributes changed; to the document it is all new.
+        let mut engine = Engine::new();
+        engine.load_html("<ul id=list></ul>");
+        engine.resize(100, 50);
+        engine.set_verifying(true);
+        let list = engine.query(None, "#list").unwrap().unwrap();
+        let item = engine.create_element("li").unwrap();
+        let inner = engine.create_element("b").unwrap();
+        engine.insert(item, inner, None).unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        engine.insert(list, item, None).unwrap();
+        engine.set_attr(item, "id", "yeni").unwrap();
+        engine.set_attr(inner, "title", "iç").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(
+            engine.stats().changes,
+            1,
+            "the list's children, nothing else"
+        );
+    }
+
+    #[test]
     fn no_frame_shows_a_transaction_halfway() {
         let mut engine = Engine::new();
         engine.load_html("<p id=p>bir</p>");
