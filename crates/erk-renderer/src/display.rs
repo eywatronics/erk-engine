@@ -611,6 +611,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
                 shaped,
                 (content_x, content_y),
                 walk.resources,
+                walk.styles,
             ));
         }
         text_hits(walk, &fragments, &mut items);
@@ -628,7 +629,12 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         let fragments = text_fragments(&anonymous.text, origin);
         let mut items = Vec::new();
         if visible {
-            items.extend(inline_content(&anonymous.text, origin, walk.resources));
+            items.extend(inline_content(
+                &anonymous.text,
+                origin,
+                walk.resources,
+                walk.styles,
+            ));
         }
         text_hits(walk, &fragments, &mut items);
         context.inline.extend(tag(items, inner));
@@ -659,6 +665,7 @@ fn inline_content(
     shaped: &ShapedText,
     origin: (f32, f32),
     resources: &Resources,
+    styles: &Styles,
 ) -> Vec<DisplayItem> {
     let mut items: Vec<DisplayItem> = shaped
         .decorations
@@ -670,13 +677,19 @@ fn inline_content(
             let right = (origin.0 + rect.x + rect.width).round();
             let bottom = (origin.1 + rect.y + rect.height).round();
             let mut items = Vec::new();
-            if rect.color[3] != 0 {
+            // The colours are the frame's, not the layout's (M5.4).
+            let Some((color, border_colors, true)) =
+                style_of(styles, rect.element).map(|style| crate::text::decoration_colors(&style))
+            else {
+                return items;
+            };
+            if color[3] != 0 {
                 items.push(DisplayItem::Rect {
                     x: left,
                     y: top,
                     width: right - left,
                     height: bottom - top,
-                    color: rect.color,
+                    color,
                 });
             }
             if rect.border.iter().any(|width| *width > 0.0) {
@@ -688,15 +701,24 @@ fn inline_content(
                         height: bottom - top,
                     },
                     widths: rect.border,
-                    colors: rect.border_colors,
+                    colors: border_colors,
                     radii: [(0.0, 0.0); 4],
                 });
             }
             items
         })
         .collect();
-    items.extend(glyph_runs(shaped, origin, resources));
+    items.extend(glyph_runs(shaped, origin, resources, styles));
     items
+}
+
+/// The style of the element whose `NodeId` bits are `element`, in this
+/// frame's styles.
+fn style_of(
+    styles: &Styles,
+    element: u64,
+) -> Option<erk_style::style::servo_arc::Arc<ComputedValues>> {
+    styles.computed(NodeId::from_bits(element)?)
 }
 
 /// How far the relatively positioned inline element `relative` (as
@@ -825,6 +847,7 @@ fn glyph_runs(
     paragraph: &ShapedText,
     origin: (f32, f32),
     resources: &Resources,
+    styles: &Styles,
 ) -> Vec<DisplayItem> {
     let (text, shaped) = (&paragraph.text, &paragraph.layout);
     let mut runs = Vec::new();
@@ -851,7 +874,8 @@ fn glyph_runs(
             runs.push(DisplayItem::Glyphs(GlyphRun {
                 font: resources.font_id(run.run().font()),
                 size: run.run().font_size(),
-                color: run.style().brush.color,
+                color: style_of(styles, run.style().brush.element)
+                    .map_or([0, 0, 0, 255], |style| srgb_bytes(style.clone_color())),
                 glyphs,
                 text: text.get(range).unwrap_or_default().to_owned(),
             }));

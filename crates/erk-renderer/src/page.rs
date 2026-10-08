@@ -3,7 +3,8 @@
 //! state input brings (`:hover`, `:focus`), scroll positions and the host's
 //! changes need a document that outlasts a frame. Styling is incremental
 //! (M5.3): a frame restyles what the change journal and the user's input
-//! reach. Layout and the display list are still computed in full.
+//! reach. A frame whose changes only repaint keeps the last frame's layout
+//! (M5.4); otherwise layout and the display list are computed in full.
 //!
 //! Pointer input is answered from the last frame: its hit regions, in paint
 //! order, say which node is topmost at a point. What the user does (the
@@ -17,7 +18,7 @@ use std::sync::{Arc, Weak};
 use erk_dom::{Document, ElementData, NodeData, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
-use erk_style::{ComputedValues, Interaction, Restyler, StyleEngine, Styles};
+use erk_style::{ComputedValues, Interaction, Invalidation, Restyler, StyleEngine, Styles};
 
 use crate::display::{DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
@@ -68,6 +69,53 @@ pub(crate) struct Page {
     /// frames it has prepared (see [`RESTYLERS`]).
     style_key: Arc<()>,
     frames: u64,
+    /// The last frame's layout, for a frame whose changes only repaint.
+    layout: Option<KeptLayout>,
+}
+
+/// A frame's layout, and the resources' revision it was made at. Another
+/// viewport needs no check here: it styles everything from nothing, and a
+/// style that comes is layout's damage.
+struct KeptLayout {
+    layouts: layout::Layouts,
+    revision: u64,
+}
+
+/// The attributes layout reads besides those styles see: an image's
+/// source, and the language that picks fonts and case mapping.
+const LAYOUT_ATTRIBUTES: [&str; 2] = ["src", "lang"];
+
+/// Whether an element with `style` puts a decoration (a background or a
+/// border) in its paragraph: an inline element that paints one.
+fn decorated(style: &ComputedValues) -> bool {
+    style.clone_display() == Display::Inline && crate::text::decoration_colors(style).2
+}
+
+/// Whether going from `old` to `new` styles, with `changes`, only
+/// repaints (M5 plan, decision 10): no node or text came, went or moved,
+/// no attribute layout reads changed, and every element whose style
+/// changed needs no layout or shaping, and paints an inline background or
+/// border only if it did before (whether one paints decides the
+/// paragraph's decorations; their colours are the frame's).
+fn only_repaints(old: &Styles, new: &Styles, changes: &Changes) -> bool {
+    let layout =
+        Invalidation::LAYOUT_SELF | Invalidation::LAYOUT_ANCESTOR | Invalidation::TEXT_SHAPE;
+    !changes.everything
+        && changes.children.is_empty()
+        && changes.text.is_empty()
+        && changes.attrs.iter().all(|change| {
+            !change
+                .names
+                .iter()
+                .any(|name| LAYOUT_ATTRIBUTES.contains(&name.as_str()))
+        })
+        && new.damage().iter().all(|(node, bits)| {
+            !bits.intersects(layout)
+                && match (old.computed(*node), new.computed(*node)) {
+                    (Some(old), Some(new)) => decorated(&old) == decorated(&new),
+                    _ => false,
+                }
+        })
 }
 
 thread_local! {
@@ -96,6 +144,7 @@ struct Kept {
 struct Built {
     list: DisplayList,
     styles: Styles,
+    layouts: layout::Layouts,
     viewport: (f32, f32),
     boxes: HashMap<NodeId, BoxModel>,
     offsets: Offsets,
@@ -162,6 +211,7 @@ impl Page {
             changes: Changes::default(),
             style_key: Arc::new(()),
             frames: 0,
+            layout: None,
         }
     }
 
@@ -204,10 +254,24 @@ impl Page {
         let viewport = viewport(width, height, scale);
         let styles = self.restyle(viewport, &changes);
         let (w, h, _) = viewport;
-        let (built, requests) = self.build((w, h), styles, resources, true, mark);
+        let revision = resources.revision();
+        let last = self.layout.take();
+        let reusable = last.as_ref().is_some_and(|kept| {
+            kept.revision == revision && only_repaints(&self.styles, &styles, &changes)
+        });
+        // A layout that does not hold is dropped after the frame: freeing
+        // ten thousand boxes takes milliseconds, which are no stage's.
+        let (kept, stale) = if reusable {
+            (last.map(|kept| kept.layouts), None)
+        } else {
+            (None, last)
+        };
+        let (built, requests) = self.build((w, h), styles, kept, resources, true, mark);
+        drop(stale);
         let Built {
             list,
             styles,
+            layouts,
             viewport,
             boxes,
             offsets,
@@ -215,6 +279,7 @@ impl Page {
             hits,
             stats,
         } = built;
+        self.layout = Some(KeptLayout { layouts, revision });
         self.viewport = viewport;
         self.boxes = boxes;
         self.offsets = offsets;
@@ -295,6 +360,7 @@ impl Page {
         self.build(
             (viewport.0, viewport.1),
             styles,
+            None,
             resources,
             false,
             &mut |_| {},
@@ -304,13 +370,15 @@ impl Page {
     }
 
     /// The pipeline from the document's `styles` to the display list,
-    /// writing nothing back: the requests for new URLs (when `ask`), layout,
-    /// scrolling, the display list, the hit regions and the highlight.
-    /// `(w, h)` is the viewport in CSS pixels.
+    /// writing nothing back: the requests for new URLs (when `ask`), layout
+    /// (unless the last frame's, `kept`, still holds), scrolling, the
+    /// display list, the hit regions and the highlight. `(w, h)` is the
+    /// viewport in CSS pixels.
     fn build(
         &self,
         (w, h): (f32, f32),
         styles: Styles,
+        kept: Option<layout::Layouts>,
         resources: &mut Resources,
         ask: bool,
         mark: &mut dyn FnMut(Stage),
@@ -322,8 +390,11 @@ impl Page {
             Vec::new()
         };
         mark(Stage::Style);
-        let mut text = TextEngine::with_fonts(resources.fonts());
-        let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
+        let reused = kept.is_some();
+        let layouts = kept.unwrap_or_else(|| {
+            let mut text = TextEngine::with_fonts(resources.fonts());
+            layout::layout(doc, &styles, resources, &mut text, w, h)
+        });
         mark(Stage::Layout);
         let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
         let bars = self.bars(self.hover);
@@ -338,7 +409,7 @@ impl Page {
                     .map(DisplayItem::Highlight),
             );
         }
-        let (laid_out, shaped) = layouts.counts();
+        let (laid_out, shaped) = if reused { (0, 0) } else { layouts.counts() };
         let stats = FrameStats {
             styled: styles.styled(),
             laid_out,
@@ -367,6 +438,7 @@ impl Page {
                 .collect(),
             list,
             styles,
+            layouts,
             viewport: (w, h),
             hits,
             stats,

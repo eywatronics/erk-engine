@@ -818,6 +818,116 @@ mod tests {
         assert_eq!(engine.stats().styled, 1);
     }
 
+    /// An engine showing `html`, verifying, with its first frame made.
+    fn verifying(html: &str) -> Engine {
+        let mut engine = Engine::new();
+        engine.load_html(html);
+        engine.resize(300, 200);
+        engine.set_verifying(true);
+        assert!(engine.prepare().0.is_some());
+        engine
+    }
+
+    /// Make a frame, check it against the oracle, and say whether it laid
+    /// anything out.
+    fn laid_out(engine: &mut Engine) -> bool {
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        let stats = engine.stats();
+        assert_eq!(stats.laid_out == 0, stats.shaped == 0, "{stats:?}");
+        stats.laid_out > 0
+    }
+
+    #[test]
+    fn a_frame_that_only_repaints_keeps_the_layout() {
+        let mut engine = verifying(
+            "<style>li:hover { color: red } .on { background: yellow }</style>             <p id=p>bir <span id=s style='background: #eee'>iki</span> üç</p>             <ul><li id=li>dört</li></ul>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (p, s, li) = (
+            find(&engine, "#p"),
+            find(&engine, "#s"),
+            find(&engine, "#li"),
+        );
+        // A text colour (B13), a block's background, a class.
+        engine.set_style_property(p, "color", "blue").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.stats().laid_out, 0);
+        // The kept text is painted in the frame's colour.
+        let (list, ..) = engine.last.as_ref().expect("verifying keeps the frame");
+        let blue = list.items.iter().any(|item| {
+            matches!(item, crate::list::DisplayItem::Glyphs(run)
+                if run.text.contains("bir") && run.color == [0, 0, 255, 255])
+        });
+        assert!(blue, "the text is not blue");
+        engine.set_attr(li, "class", "on").unwrap();
+        assert!(!laid_out(&mut engine));
+        // An inline background that was painted before.
+        engine.set_style_property(s, "background", "red").unwrap();
+        assert!(!laid_out(&mut engine));
+        // The pointer over an element whose colour follows it.
+        let li_box = engine.node_box(li).unwrap().unwrap();
+        engine.pointer(&PointerInput {
+            kind: PointerKind::Move,
+            x: li_box.x + 2.0,
+            y: li_box.y + 2.0,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::default(),
+        });
+        assert!(!laid_out(&mut engine));
+    }
+
+    #[test]
+    fn a_frame_that_changes_the_layout_lays_out_again() {
+        let mut engine =
+            verifying("<p id=p lang=en>bir <span id=s>iki</span></p><img id=img src=a.png>");
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (p, s, img) = (
+            find(&engine, "#p"),
+            find(&engine, "#s"),
+            find(&engine, "#img"),
+        );
+        engine.set_style_property(p, "width", "50px").unwrap();
+        assert!(laid_out(&mut engine));
+        // An inline background where none was painted: the paragraph gets
+        // a decoration.
+        engine.set_style_property(s, "background", "red").unwrap();
+        assert!(laid_out(&mut engine));
+        // Hidden: its decoration goes.
+        engine
+            .set_style_property(s, "visibility", "hidden")
+            .unwrap();
+        assert!(laid_out(&mut engine));
+        engine.set_text(s, "üç").unwrap();
+        assert!(laid_out(&mut engine));
+        // A text node's data, its element's children unchanged.
+        let text = engine.child_at(s, 0).unwrap().unwrap();
+        engine.set_text(text, "beş").unwrap();
+        assert!(laid_out(&mut engine));
+        // Attributes layout reads without styles: the language, the image.
+        engine.set_attr(p, "lang", "tr").unwrap();
+        assert!(laid_out(&mut engine));
+        engine.set_attr(img, "src", "b.png").unwrap();
+        let (_, requests) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        // An image arriving changes the layout without any change to the
+        // document.
+        let request = requests
+            .iter()
+            .find(|r| r.url == "b.png")
+            .expect("b.png is asked for");
+        engine.complete_resource(&ResourceResponse {
+            id: request.id,
+            mime: "image/png".to_owned(),
+            data: crate::resources::tests::tiny_png(),
+        });
+        assert!(laid_out(&mut engine));
+        // A viewport of another size.
+        engine.resize(200, 200);
+        assert!(laid_out(&mut engine));
+    }
+
     #[test]
     fn the_deepest_document_runs_on_a_main_threads_stack() {
         // A stack overflow aborts the process: the test fails loudly, not

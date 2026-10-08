@@ -692,6 +692,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                                 style.clone(),
                                 text_language(doc, parent),
                                 child,
+                                parent,
                             )],
                             Vec::new(),
                         ));
@@ -753,7 +754,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                 }
             }
             if let Some(computed) = parent_style {
-                let paragraph = Paragraph::new(&tokens, &computed);
+                let paragraph = Paragraph::new(&tokens, &computed, parent);
                 if !paragraph.is_empty() {
                     let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms, container);
                     let node = &mut nodes[parent.index() as usize];
@@ -1053,7 +1054,7 @@ impl Run {
         self.tokens.iter().any(|token| match token {
             InlineToken::Text(text, ..) => text.chars().any(|c| !c.is_ascii_whitespace()),
             InlineToken::Atom(..) | InlineToken::Anchor(_) | InlineToken::Break => true,
-            InlineToken::Open(_) | InlineToken::Close => false,
+            InlineToken::Open(..) | InlineToken::Close => false,
         })
     }
 
@@ -1074,7 +1075,7 @@ impl Run {
         let Some(style) = parent_style else {
             return;
         };
-        let paragraph = Paragraph::new(&tokens, style);
+        let paragraph = Paragraph::new(&tokens, style, parent);
         if paragraph.is_empty() {
             return;
         }
@@ -1165,7 +1166,7 @@ fn inline_tokens(
         tokens.push(InlineToken::Break);
         return;
     }
-    tokens.push(InlineToken::Open(style.clone()));
+    tokens.push(InlineToken::Open(style.clone(), id));
     for child in doc.children(id) {
         match doc.node(child).map(|node| &node.data) {
             Some(NodeData::Text(content)) => {
@@ -1174,6 +1175,7 @@ fn inline_tokens(
                     style.clone(),
                     text_language(doc, id),
                     child,
+                    id,
                 ));
             }
             Some(NodeData::Element(_)) => {

@@ -263,8 +263,8 @@ fn whitespace_between_blocks_makes_no_anonymous_box() {
 }
 
 /// The text of each glyph run of `id`'s paragraph, with whether it was
-/// shaped with the bold face and its colour.
-fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, [u8; 4])> {
+/// shaped with the bold face and the element whose colour it takes.
+fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, u64)> {
     let shaped = layouts.text(id).expect("a paragraph");
     let mut runs = Vec::new();
     for line in shaped.layout.layout.lines() {
@@ -275,7 +275,11 @@ fn runs(layouts: &Layouts, id: NodeId) -> Vec<(String, bool, [u8; 4])> {
         });
         for (run, range) in glyph_runs.zip(ranges) {
             let bold = crate::text::is_bold_face(run.run().font());
-            runs.push((shaped.text[range].to_owned(), bold, run.style().brush.color));
+            runs.push((
+                shaped.text[range].to_owned(),
+                bold,
+                run.style().brush.element,
+            ));
         }
     }
     runs
@@ -301,9 +305,10 @@ fn an_inline_element_keeps_its_own_colour() {
     let (doc, layouts) =
         lay_out(r#"<p style="color: black">x<span style="color: red">kırmızı</span>y</p>"#);
     let p = all(&doc, &local_name!("p"))[0];
+    let span = all(&doc, &local_name!("span"))[0];
     let red: Vec<String> = runs(&layouts, p)
         .into_iter()
-        .filter(|(.., colour)| *colour == [255, 0, 0, 255])
+        .filter(|(.., element)| *element == span.to_bits())
         .map(|(text, ..)| text)
         .collect();
     assert_eq!(red, ["kırmızı"]);
