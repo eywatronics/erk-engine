@@ -40,6 +40,22 @@ const VALUES: &[&str] = &[
     "url(\"file:///etc/passwd\")",
 ];
 
+/// Inline style properties and values, CSSOM style (M5.3): known and
+/// unknown names, shorthands, custom properties, values that do and do not
+/// fit.
+const PROPERTIES: &[&str] = &["color", "margin", "display", "width", "--x", "colour", ""];
+
+const PROPERTY_VALUES: &[&str] = &[
+    "",
+    "red",
+    "1px 2px",
+    "none",
+    "flex",
+    "50%",
+    "1e30px",
+    "url(\"a;b\")",
+];
+
 const SELECTORS: &[&str] = &[
     "*",
     "div",
@@ -147,7 +163,18 @@ fn mutation(state: &State, bytes: &mut Bytes) -> Mutation {
         ),
         7 => Mutation::RemoveAttr(state.reference(bytes), bytes.pick(NAMES).to_owned()),
         8 => Mutation::AddClass(state.reference(bytes), bytes.pick(VALUES).to_owned()),
-        _ => Mutation::RemoveClass(state.reference(bytes), bytes.pick(VALUES).to_owned()),
+        _ => match bytes.below(3) {
+            0 => Mutation::RemoveClass(state.reference(bytes), bytes.pick(VALUES).to_owned()),
+            1 => Mutation::SetStyleProperty(
+                state.reference(bytes),
+                bytes.pick(PROPERTIES).to_owned(),
+                bytes.pick(PROPERTY_VALUES).to_owned(),
+            ),
+            _ => Mutation::RemoveStyleProperty(
+                state.reference(bytes),
+                bytes.pick(PROPERTIES).to_owned(),
+            ),
+        },
     }
 }
 
@@ -247,12 +274,26 @@ pub fn run(app: &mut App, script: &[u8]) {
             }
             8 => {
                 let node = state.node(&mut bytes);
-                let class = bytes.pick(VALUES);
-                let _ = if bytes.byte().is_multiple_of(2) {
-                    app.add_class(node, class)
-                } else {
-                    app.remove_class(node, class)
-                };
+                match bytes.below(5) {
+                    0 | 1 => {
+                        let class = bytes.pick(VALUES);
+                        let _ = if bytes.byte().is_multiple_of(2) {
+                            app.add_class(node, class)
+                        } else {
+                            app.remove_class(node, class)
+                        };
+                    }
+                    2 => {
+                        let (name, value) = (bytes.pick(PROPERTIES), bytes.pick(PROPERTY_VALUES));
+                        let _ = app.set_style_property(node, name, value);
+                    }
+                    3 => {
+                        let _ = app.remove_style_property(node, bytes.pick(PROPERTIES));
+                    }
+                    _ => {
+                        let _ = app.style_property(node, bytes.pick(PROPERTIES));
+                    }
+                }
             }
             9 => {
                 let batch: Vec<Mutation> = (0..1 + bytes.below(8))

@@ -318,8 +318,11 @@ okunur sorgularıyla bakar; aynı API'yi host da kullanabilir.
   da yüklenemeyen kaynak); DevTools'un Console paneli bunları ve host'un
   loglarını gösterir.
 - **Canlı düzenleme** (M5): stil değişikliği sıradan bir değişikliktir
-  (`erk_node_set_attr(node, "style", ...)` ya da stil sayfası güncellemesi),
-  artımlı yeniden stille görünür. DevTools'a özel bir yazma yolu yoktur.
+  (`erk_node_set_attr(node, "style", ...)`, tek bir özellik için
+  `erk_node_set_style_property` ya da bir `<style>` elemanının metni),
+  artımlı yeniden stille görünür: bir kuralın değişmesi yalnızca o stil
+  sayfasının kurallarının eşleşebileceği elemanları yeniden stiller (M5.3).
+  DevTools'a özel bir yazma yolu yoktur.
 - **Taşıma:** DevTools önce aynı süreçte ikinci bir pencere olarak çalışır.
   Ayrı süreçte bir DevTools ancak host açıkça etkinleştirirse ve yerel bir
   kanal üzerinden bağlanır; motor varsayılan olarak hiçbir portu dinlemez.
@@ -416,6 +419,15 @@ gerekçeli bir daraltma:
   sayıyordu; ayrı bir çift gerekti, çünkü bir değişiklik grubunu birden
   çok çağrıyla yapan ve aralarında bekleyen (async) bir bağlama, araya
   giren bir kareyle yarım bir belge gösterebilirdi.
+- **v0.7 (M5.3):** satır içi stilin tek bir özelliği, CSSOM'un
+  `element.style`'ı gibi: `erk_node_set_style_property` (kısaltma
+  uzunlarını kurar, `--ad` özel özellik, boş değer özelliği siler),
+  `erk_node_remove_style_property`, `erk_node_style_property` (yoksa
+  `ERK_ERR_NOT_FOUND`); toplulukta `ERK_MUTATION_SET_STYLE_PROPERTY` ve
+  `ERK_MUTATION_REMOVE_STYLE_PROPERTY`. `style` özniteliği Stylo'nun
+  bildirim bloğuyla ayrıştırılıp yeniden yazılır, sıradan bir öznitelik
+  değişikliği olarak yeniden stillenir. Bilinmeyen ad ya da özelliğin
+  almadığı değer `ERK_ERR_INVALID_ARGUMENT`, hiçbir şey değişmez.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_6() {
-    assert_eq!(erk_abi_version(), 6);
+fn the_abi_version_is_0_7() {
+    assert_eq!(erk_abi_version(), 7);
 }
 
 #[test]
@@ -256,6 +256,70 @@ unsafe extern "C" fn remember_key(user_data: *mut c_void, _: *mut ErkApp, event:
     last.key.store(event.key, Ordering::SeqCst);
     last.kind.store(event.kind, Ordering::SeqCst);
     *last.typed.lock().unwrap() = String::from_utf8(typed.to_vec()).unwrap();
+}
+
+fn style_property_of(app: *mut ErkApp, node: ErkNodeId, name: &str) -> Result<String, ErkStatus> {
+    let mut buf = [0u8; 64];
+    let mut len = 0;
+    match erk_node_style_property(
+        app,
+        node,
+        s(name),
+        buf.as_mut_ptr().cast(),
+        buf.len(),
+        &mut len,
+    ) {
+        ERK_OK => Ok(String::from_utf8(buf[..len].to_vec()).unwrap()),
+        status => Err(status),
+    }
+}
+
+#[test]
+fn one_inline_style_property_is_set_read_and_removed_from_c() {
+    let app = app_with("<p id=p style='color: blue'>x</p>");
+    let p = query(app, "#p");
+    assert_eq!(
+        erk_node_set_style_property(app, p, s("margin"), s("4px 8px")),
+        ERK_OK
+    );
+    assert_eq!(style_property_of(app, p, "margin-left").unwrap(), "8px");
+    assert_eq!(style_property_of(app, p, "color").unwrap(), "blue");
+    // What the property does not take, or a name Erk does not know:
+    // refused, and nothing changes.
+    assert_eq!(
+        erk_node_set_style_property(app, p, s("width"), s("red")),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        erk_node_set_style_property(app, p, s("colour"), s("red")),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(style_property_of(app, p, "width"), Err(ERK_ERR_NOT_FOUND));
+    assert_eq!(erk_node_remove_style_property(app, p, s("margin")), ERK_OK);
+    assert_eq!(
+        style_property_of(app, p, "margin-left"),
+        Err(ERK_ERR_NOT_FOUND)
+    );
+    // And in a batch.
+    let mut batch = [
+        change(ERK_MUTATION_SET_STYLE_PROPERTY, p, 0, "width", "10px"),
+        change(ERK_MUTATION_REMOVE_STYLE_PROPERTY, p, 0, "color", ""),
+    ];
+    let mut failed_at = usize::MAX;
+    assert_eq!(
+        erk_apply(
+            app,
+            batch.as_mut_ptr(),
+            batch.len(),
+            std::ptr::null_mut(),
+            &mut failed_at
+        ),
+        ERK_OK
+    );
+    assert_eq!(style_property_of(app, p, "width").unwrap(), "10px");
+    assert_eq!(style_property_of(app, p, "color"), Err(ERK_ERR_NOT_FOUND));
+    assert_eq!(erk_app_tick(app, 16_000_000), ERK_OK);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 
 #[test]
