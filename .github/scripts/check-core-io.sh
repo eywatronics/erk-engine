@@ -6,7 +6,7 @@
 # content such as url("file:///etc/passwd") unable to read anything.
 set -euo pipefail
 
-core="crates/erk-dom/src crates/erk-style/src crates/erk-renderer/src"
+core="crates/erk-dom/src crates/erk-invalidation/src crates/erk-style/src crates/erk-renderer/src"
 for dir in $core; do
   [ -d "$dir" ] || { echo "$dir is missing"; exit 1; }
 done

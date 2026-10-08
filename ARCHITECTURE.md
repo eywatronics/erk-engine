@@ -96,6 +96,7 @@ plain data, but is not planned.
 | Crate | Responsibility | Arrives in |
 |---|---|---|
 | `erk-dom` | Arena DOM and the html5ever tree sink. Depends on no other `erk-*` crate | M0 |
+| `erk-invalidation` | What changed since the last frame (the change journal) and what it makes dirty: the dirt bits, how they cross the tree, why each node became dirty, data per node in side tables. Depends on `erk-dom` alone | M5.1, M5.2 |
 | `erk-style` | Stylo adapter and style engine. A named `unsafe` exception, because Stylo's `TElement` requires five `unsafe fn`s | M0 |
 | `erk-renderer` | The engine (document, input, style, layout, display list) on the caller's thread, the raster on its own | M0, split in M3.1 |
 | `erk-shell` | The demo host, the first user of `erk`: files, resources, the counter. Depends on no project crate but `erk` | M0, on `erk` since M3.3 |

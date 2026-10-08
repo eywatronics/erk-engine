@@ -22,7 +22,7 @@ use erk_dom::{Document, NodeData, NodeId};
 
 /// A node's state as the journal compares it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct State {
+pub struct State {
     /// A text or comment node's data.
     text: Option<String>,
     /// An element's attributes, by name.
@@ -59,20 +59,20 @@ impl State {
 /// A frame's changes, coalesced: only what differs from the last frame, in
 /// nodes that are in the document now and were then.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Changes {
+pub struct Changes {
     /// The whole document was replaced: everything is new.
-    pub(crate) everything: bool,
+    pub everything: bool,
     /// Text and comment nodes whose data changed.
-    pub(crate) text: Vec<NodeId>,
+    pub text: Vec<NodeId>,
     /// Elements and the names of the attributes that changed.
-    pub(crate) attrs: Vec<(NodeId, Vec<String>)>,
+    pub attrs: Vec<(NodeId, Vec<String>)>,
     /// Nodes whose children changed: added, removed or moved.
-    pub(crate) children: Vec<NodeId>,
+    pub children: Vec<NodeId>,
 }
 
 impl Changes {
     /// How many changes there are.
-    pub(crate) fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.text.len() + self.attrs.len() + self.children.len()
     }
 
@@ -115,7 +115,7 @@ struct Slot {
 }
 
 #[derive(Default)]
-pub(crate) struct Journal {
+pub struct Journal {
     /// The touched nodes, by `NodeId::index()` (a side table: p2-incremental
     /// §3.12), and which entries are in use.
     slots: Vec<Option<Slot>>,
@@ -127,7 +127,7 @@ pub(crate) struct Journal {
 
 impl Journal {
     /// A journal for a document that is all new.
-    pub(crate) fn new_document() -> Self {
+    pub fn new_document() -> Self {
         Self {
             everything: true,
             ..Self::default()
@@ -136,7 +136,7 @@ impl Journal {
 
     /// `id` is about to change: its text, its attributes or its children.
     /// The first touch this frame keeps its state before.
-    pub(crate) fn touch(&mut self, doc: &Document, id: NodeId) {
+    pub fn touch(&mut self, doc: &Document, id: NodeId) {
         self.recorded += 1;
         let at = id.index() as usize;
         if self.slots.len() <= at {
@@ -160,7 +160,7 @@ impl Journal {
     }
 
     /// `id` was made this frame.
-    pub(crate) fn created(&mut self, id: NodeId) {
+    pub fn created(&mut self, id: NodeId) {
         self.recorded += 1;
         let at = id.index() as usize;
         if self.slots.len() <= at {
@@ -179,7 +179,7 @@ impl Journal {
     /// `id` and everything in it are joining the document: new to it,
     /// whenever they were made. A node made in an earlier frame and kept
     /// outside the document was never in a frame to compare with.
-    pub(crate) fn arrived(&mut self, doc: &Document, id: NodeId) {
+    pub fn arrived(&mut self, doc: &Document, id: NodeId) {
         let mut stack = vec![id];
         while let Some(node) = stack.pop() {
             stack.extend(doc.children(node));
@@ -200,7 +200,7 @@ impl Journal {
 
     /// The frame's changes, coalesced, and how many were recorded; the
     /// journal starts the next frame empty.
-    pub(crate) fn take(&mut self, doc: &Document) -> (Changes, usize) {
+    pub fn take(&mut self, doc: &Document) -> (Changes, usize) {
         let mut changes = Changes {
             everything: std::mem::take(&mut self.everything),
             ..Changes::default()
@@ -222,7 +222,7 @@ impl Journal {
 }
 
 /// Whether `id` is alive and in the document.
-pub(crate) fn connected(doc: &Document, mut id: NodeId) -> bool {
+pub fn connected(doc: &Document, mut id: NodeId) -> bool {
     loop {
         if id == doc.root() {
             return true;
@@ -235,9 +235,9 @@ pub(crate) fn connected(doc: &Document, mut id: NodeId) -> bool {
 }
 
 /// The state of every node in the document, for checking the journal.
-pub(crate) type Snapshot = HashMap<NodeId, State>;
+pub type Snapshot = HashMap<NodeId, State>;
 
-pub(crate) fn snapshot(doc: &Document) -> Snapshot {
+pub fn snapshot(doc: &Document) -> Snapshot {
     let mut states = HashMap::new();
     let mut stack = vec![doc.root()];
     while let Some(id) = stack.pop() {
@@ -250,7 +250,7 @@ pub(crate) fn snapshot(doc: &Document) -> Snapshot {
 
 /// What really changed between `before` and the document now, in the
 /// nodes in both: what the journal must have found.
-pub(crate) fn difference(before: &Snapshot, doc: &Document) -> Changes {
+pub fn difference(before: &Snapshot, doc: &Document) -> Changes {
     let mut changes = Changes::default();
     for (id, after) in snapshot(doc) {
         if let Some(before) = before.get(&id) {

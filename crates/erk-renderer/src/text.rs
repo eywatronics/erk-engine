@@ -1227,7 +1227,12 @@ fn token_collapse<S: AsRef<ComputedValues>>(token: &InlineToken<S>) -> Option<Wh
 /// before the last word the closing edge belongs to. It keeps its full
 /// width for alignment.
 fn break_lines(layout: &mut Layout<TextBrush>, paragraph: &Paragraph, max_advance: Option<f32>) {
-    let Some(max) = max_advance else {
+    // Parley asserts that a line is no wider than the layout, which no
+    // comparison satisfies for a width that overflowed to NaN (infinite
+    // padding taken from an infinite box) or minus infinity (padding wider
+    // than f32 inside a narrow box). Both become the narrowest finite width;
+    // `max` ignores NaN.
+    let Some(max) = max_advance.map(|max| max.max(f32::MIN)) else {
         // Nothing wraps.
         layout.break_all_lines(None);
         return;

@@ -133,6 +133,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | CSS matrisindeki her "Supported" satırın testi var | `css-support.md` host geliştiricisine verilen söz; testsiz bir "Supported" söz değildir | CI `guards` (`check-css-support.sh`): her Supported satır var olan bir testi adlandırır | M1.0 |
 | C-ABI korumadan geçer, `erk.h` güncel | Panik C'ye geçerse tanımsız davranış; UI iş parçacığı dışından gelen çağrı belgeyi bozar; elle değişen başlık ABI'den sapar | `check-ffi.sh`: `erk-ffi`'nin dışa açılan her işlevi `guard`/`guard_free`/`subscribe`'dan geçer, her `unsafe` izni (`src` ve `tests`) `// SAFETY:` gerekçeli. `erk-ffi`'nin testi `include/erk.h`'yi cbindgen ile üretip karşılaştırır; C örneği (`examples/c/hello.c`) üç işletim sisteminde, Linux'ta AddressSanitizer'la derlenip çalışır | M3.5 |
 | Erk'te JS motoru yok, `<script>` hiçbir zaman çalışmaz | İçerik hiçbir zaman kod çalıştıramamalı; JS/TS Erk'i yalnızca host dili olarak dışarıdan sürer (p1-embedded §3.3) | `check-no-js-engine.sh`: `Cargo.lock` ve `fuzz/Cargo.lock`'ta bilinen JS motorları yok (kilit her özelliği, hedefi ve dev-dependency'yi çözer; yeniden adlandırma paket adıyla görünür; altı eşdeğer ihlalle denendi). Belge betiği kapalı ayrıştırılır (`documents_are_parsed_as_with_scripting_disabled`) | 2026-10-07 |
+| `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı | Kirlenme çekirdeği hizmet ettiği aşamaları (stil, layout, display list) bilmemeli; onu onlar tüketir (p2-incremental §3.12) | CI `guards` (`check-invalidation-deps.sh`): normal ve derleme bağımlılıkları, her hedef ve özellik, derinlik 1'de projeden yalnızca `erk-dom`; beş eşdeğer ihlalle denendi. Crate çekirdeğin parçası: `check-core-io.sh` onu da tarar | M5.2 |
 | Her kare, belgenin baştan hesabıyla aynı display list'i verir | Artımlılığın en sinsi hatası ekranda unutulmuş eski bir parça; tam yeniden hesap her artımlı yolun doğruluk kâhini (M5 planı, karar 9) | Fuzz yorumlayıcısı (`crates/erk/tests/script/`) her `tick`'ten sonra `verify_frame` ile son kareyi kâhinle, değişiklik günlüğünü belgenin gerçek farkıyla karşılaştırır: sabit tohumlu test ve `fuzz mutations` job'ları. Karenin isabet bölgelerini ya da tuval rengini değiştiren ve günlüğün kayıt yollarını silen kasıtlı ihlallerle denendi | M5.0, M5.1 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
@@ -144,7 +145,7 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | Taş | Gelen kural |
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
-| M5 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı (M5.2); kısmi kare ile tam kare piksel piksel aynı (M5.6) |
+| M5 | Kısmi kare ile tam kare piksel piksel aynı (M5.6) |
 | M6 | Bağlamalar (Python, Go, Node.js/Bun) yalnızca C-ABI'ye bağlanır: workspace'te `erk`'e bağımlı olan yalnızca `erk-ffi` ve kabuk (`cargo tree --invert`); bağlama paketleri yalnızca `erk.h`'yi ve paylaşımlı kütüphaneyi kullanır |
 
 ## unsafe ve C/C++ politikası
@@ -173,8 +174,8 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 
 - **Telemetri yok, ağ yok.** Motor hiçbir ağ isteği atmaz ve varsayılan olarak
   hiçbir portu dinlemez (inspector dahil).
-- **G/Ç yalnızca host'ta.** Çekirdek crate'ler (`erk-dom`, `erk-style`,
-  `erk-renderer`) dosya, ağ, süreç, ortam değişkeni ve saat kullanmaz;
+- **G/Ç yalnızca host'ta.** Çekirdek crate'ler (`erk-dom`, `erk-invalidation`,
+  `erk-style`, `erk-renderer`) dosya, ağ, süreç, ortam değişkeni ve saat kullanmaz;
   kaynaklar host'un callback'inden, zaman host'un `now_ns`'inden gelir.
   İçerikteki `url("file:///etc/passwd")` hiçbir şey okuyamaz. Erk
   `<script>`'i hiçbir zaman çalıştırmaz; içerik kod çalıştıramaz.

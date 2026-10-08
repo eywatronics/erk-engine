@@ -254,6 +254,7 @@ crates/
   erk-shell/     window, event loop, the demo host
   erk-renderer/  the engine (layout, display list) and the raster
   erk-style/     CSS styling with Stylo
+  erk-invalidation/ what changed since the last frame, and what it makes dirty
   erk-dom/       arena DOM and HTML parsing
 docs/
   design/        architecture decisions (Turkish)
