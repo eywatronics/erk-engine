@@ -58,6 +58,7 @@ use taffy::{
 use std::sync::Arc;
 
 use self::calc::CalcTable;
+use crate::color::{Rgba, srgb_bytes};
 use crate::resources::{Image, Resources};
 use crate::text::{AtomBox, DecorationRect, InlineLayout, InlineToken, Paragraph, TextEngine};
 
@@ -86,6 +87,9 @@ pub(crate) struct ShapedText {
     pub(crate) text: String,
     /// Each text node and its range of `text`.
     pub(crate) sources: Vec<(NodeId, std::ops::Range<usize>)>,
+    /// Each text node's colour (its element's) when the text was laid out:
+    /// where it changes, glyph runs split.
+    pub(crate) colours: Vec<Rgba>,
     /// How far each relatively positioned inline element moves what it
     /// holds, as [`crate::text::TextBrush::relative`] counts them.
     pub(crate) relative: Vec<(f32, f32)>,
@@ -129,10 +133,44 @@ impl Layouts {
             .map_or(&[], Vec::as_slice)
     }
 
+    /// Whether `styles` split every paragraph's text into the same runs of
+    /// one colour as the styles it was laid out with: wherever two text
+    /// nodes next to each other had the same colour they still have, and
+    /// wherever they had not they still have not. Then a fresh layout would
+    /// split the glyph runs where these are split (M5.4).
+    pub(crate) fn colours_split_alike(&self, doc: &Document, styles: &Styles) -> bool {
+        let anonymous = self.anonymous.iter().flatten().map(|text| &text.text);
+        self.text.iter().flatten().chain(anonymous).all(|shaped| {
+            let now = source_colours(doc, styles, &shaped.sources);
+            now.len() == shaped.colours.len()
+                && now
+                    .windows(2)
+                    .zip(shaped.colours.windows(2))
+                    .all(|(now, then)| (now[0] == now[1]) == (then[0] == then[1]))
+        })
+    }
+
     /// The image an `<img>` shows, if it has arrived.
     pub(crate) fn image(&self, id: NodeId) -> Option<&Arc<Image>> {
         self.images.get(id.index() as usize)?.as_ref()
     }
+}
+
+/// The colour of each text node in `sources`: its element's in `styles`.
+pub(crate) fn source_colours(
+    doc: &Document,
+    styles: &Styles,
+    sources: &[(NodeId, std::ops::Range<usize>)],
+) -> Vec<Rgba> {
+    sources
+        .iter()
+        .map(|(node, _)| {
+            doc.node(*node)
+                .and_then(|node| node.parent())
+                .and_then(|element| styles.computed(element))
+                .map_or([0, 0, 0, 255], |style| srgb_bytes(style.clone_color()))
+        })
+        .collect()
 }
 
 /// Lay out `doc` in a viewport of `width` × `height` CSS pixels.
@@ -181,6 +219,7 @@ pub(crate) fn layout(
                 relative: relative_offsets(paragraph, &node.layout),
                 text: paragraph.text.clone(),
                 sources: paragraph.sources.clone(),
+                colours: source_colours(doc, styles, &paragraph.sources),
                 preserved: paragraph.preserved.clone(),
                 atom_boxes: paragraph
                     .items
@@ -692,7 +731,6 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                                 style.clone(),
                                 text_language(doc, parent),
                                 child,
-                                parent,
                             )],
                             Vec::new(),
                         ));
@@ -754,7 +792,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                 }
             }
             if let Some(computed) = parent_style {
-                let paragraph = Paragraph::new(&tokens, &computed, parent);
+                let paragraph = Paragraph::new(&tokens, &computed);
                 if !paragraph.is_empty() {
                     let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms, container);
                     let node = &mut nodes[parent.index() as usize];
@@ -1075,7 +1113,7 @@ impl Run {
         let Some(style) = parent_style else {
             return;
         };
-        let paragraph = Paragraph::new(&tokens, style, parent);
+        let paragraph = Paragraph::new(&tokens, style);
         if paragraph.is_empty() {
             return;
         }
@@ -1175,7 +1213,6 @@ fn inline_tokens(
                     style.clone(),
                     text_language(doc, id),
                     child,
-                    id,
                 ));
             }
             Some(NodeData::Element(_)) => {

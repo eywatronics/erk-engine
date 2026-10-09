@@ -607,12 +607,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         let fragments = text_fragments(shaped, (content_x, content_y));
         let mut items = Vec::new();
         if visible {
-            items.extend(inline_content(
-                shaped,
-                (content_x, content_y),
-                walk.resources,
-                walk.styles,
-            ));
+            items.extend(inline_content(shaped, (content_x, content_y), walk, id));
         }
         text_hits(walk, &fragments, &mut items);
         context.inline.extend(tag(items, inner));
@@ -629,12 +624,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         let fragments = text_fragments(&anonymous.text, origin);
         let mut items = Vec::new();
         if visible {
-            items.extend(inline_content(
-                &anonymous.text,
-                origin,
-                walk.resources,
-                walk.styles,
-            ));
+            items.extend(inline_content(&anonymous.text, origin, walk, id));
         }
         text_hits(walk, &fragments, &mut items);
         context.inline.extend(tag(items, inner));
@@ -661,12 +651,64 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 /// text and fall between pixels; they are snapped to whole pixels, as
 /// Chrome snaps them (found by the Chrome reference test: unsnapped, every
 /// edge is a column of blended pixels).
+///
+/// The colours are the frame's, not the layout's (M5.4): a glyph run is
+/// painted in the colour of the element its text node is in, text outside
+/// any text node (a collapsed space) in that of `block`, whose paragraph
+/// it is.
 fn inline_content(
     shaped: &ShapedText,
     origin: (f32, f32),
-    resources: &Resources,
-    styles: &Styles,
+    walk: &Walk<'_>,
+    block: NodeId,
 ) -> Vec<DisplayItem> {
+    let (doc, styles, resources) = (walk.doc, walk.styles, walk.resources);
+    let color_of = |element: NodeId| {
+        styles
+            .computed(element)
+            .map(|style| srgb_bytes(style.clone_color()))
+    };
+    let block_color = color_of(block).unwrap_or([0, 0, 0, 255]);
+    // A glyph run's text had one colour when it was laid out, its brush's:
+    // the run is painted in the frame's colour of the element whose text
+    // had it. Shaping can give a run the glyphs of a neighbour's joiner, so
+    // that its text range holds none of that text: the nearest text node
+    // that had the colour is taken then.
+    let element_colour = |node: NodeId| {
+        doc.node(node)
+            .and_then(|node| node.parent())
+            .and_then(color_of)
+            .unwrap_or(block_color)
+    };
+    let colors = |range: &std::ops::Range<usize>, laid_out: Rgba| -> Rgba {
+        // Most often the text node the run starts in, found by its start:
+        // the sources are in text order.
+        let sources = &shaped.sources;
+        let at = sources.partition_point(|(_, source)| source.start <= range.start);
+        if let Some(at) = at.checked_sub(1)
+            && sources[at].1.contains(&range.start)
+            && shaped.colours.get(at) == Some(&laid_out)
+        {
+            return element_colour(sources[at].0);
+        }
+        let distance = |source: &std::ops::Range<usize>| {
+            if source.start < range.end.max(range.start + 1) && range.start < source.end {
+                0
+            } else {
+                source
+                    .start
+                    .abs_diff(range.start)
+                    .min(source.end.abs_diff(range.start))
+            }
+        };
+        shaped
+            .sources
+            .iter()
+            .zip(&shaped.colours)
+            .filter(|(_, colour)| **colour == laid_out)
+            .min_by_key(|((_, source), _)| distance(source))
+            .map_or(block_color, |((node, _), _)| element_colour(*node))
+    };
     let mut items: Vec<DisplayItem> = shaped
         .decorations
         .iter()
@@ -708,7 +750,7 @@ fn inline_content(
             items
         })
         .collect();
-    items.extend(glyph_runs(shaped, origin, resources, styles));
+    items.extend(glyph_runs(shaped, origin, resources, &colors));
     items
 }
 
@@ -847,7 +889,7 @@ fn glyph_runs(
     paragraph: &ShapedText,
     origin: (f32, f32),
     resources: &Resources,
-    styles: &Styles,
+    colors: &dyn Fn(&std::ops::Range<usize>, Rgba) -> Rgba,
 ) -> Vec<DisplayItem> {
     let (text, shaped) = (&paragraph.text, &paragraph.layout);
     let mut runs = Vec::new();
@@ -874,8 +916,9 @@ fn glyph_runs(
             runs.push(DisplayItem::Glyphs(GlyphRun {
                 font: resources.font_id(run.run().font()),
                 size: run.run().font_size(),
-                color: style_of(styles, run.style().brush.element)
-                    .map_or([0, 0, 0, 255], |style| srgb_bytes(style.clone_color())),
+                // All of a run's text had one colour when it was laid out,
+                // and still has (`Layouts::colours_split_alike`).
+                color: colors(&range, run.style().brush.color),
                 glyphs,
                 text: text.get(range).unwrap_or_default().to_owned(),
             }));

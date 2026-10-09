@@ -257,7 +257,9 @@ impl Page {
         let revision = resources.revision();
         let last = self.layout.take();
         let reusable = last.as_ref().is_some_and(|kept| {
-            kept.revision == revision && only_repaints(&self.styles, &styles, &changes)
+            kept.revision == revision
+                && only_repaints(&self.styles, &styles, &changes)
+                && kept.layouts.colours_split_alike(&self.doc, &styles)
         });
         // A layout that does not hold is dropped after the frame: freeing
         // ten thousand boxes takes milliseconds, which are no stage's.

@@ -55,13 +55,15 @@ const FAMILY: &str = "Noto Sans";
 /// above the line's baseline, and which relatively positioned inline
 /// element moves it (an index into [`Paragraph::relative`] plus one; 0 for
 /// none). Text whose raise or offset differs gets glyph runs of its own.
+///
+/// The colour splits glyph runs, and Parley picks fonts again where a run
+/// starts, so it belongs to the layout; but the display list paints a run
+/// in the frame's colour of its text's element (M5.4). A frame whose
+/// colours split the text the same way keeps the layout
+/// ([`crate::layout::Layouts::colours_split_alike`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TextBrush {
-    /// The element whose `color` the text is painted in (its `NodeId`
-    /// bits): the display list reads the colour from the frame's styles,
-    /// so that a frame whose only change is a colour can keep the shaped
-    /// text (M5.4).
-    pub(crate) element: u64,
+    pub(crate) color: [u8; 4],
     pub(crate) raise: f32,
     pub(crate) relative: u16,
 }
@@ -160,7 +162,11 @@ impl TextStyle {
             italic: fonts::is_italic(style),
             families: fonts::families(style),
             language: None,
-            brush: TextBrush::default(),
+            brush: TextBrush {
+                color: srgb_bytes(style.clone_color()),
+                raise: 0.0,
+                relative: 0,
+            },
             wrap: style.get_inherited_text().clone_text_wrap_mode() != TextWrapModeCss::Nowrap,
         }
     }
@@ -304,9 +310,8 @@ impl VerticalAlign {
 /// One item of a block's inline content, in tree order.
 pub(crate) enum InlineToken<S> {
     /// The text of a text node, with the style of its element, the
-    /// language it is written in (for `text-transform`), the text node and
-    /// the element.
-    Text(String, S, LanguageIdentifier, NodeId, NodeId),
+    /// language it is written in (for `text-transform`) and the text node.
+    Text(String, S, LanguageIdentifier, NodeId),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
     Open(S, NodeId),
@@ -486,10 +491,8 @@ impl Paragraph {
     pub(crate) fn new<S: AsRef<ComputedValues>>(
         tokens: &[InlineToken<S>],
         block: &ComputedValues,
-        block_node: NodeId,
     ) -> Self {
-        let mut base = TextStyle::of(block);
-        base.brush.element = block_node.to_bits();
+        let base = TextStyle::of(block);
         let mut paragraph = Self {
             text: String::new(),
             base,
@@ -530,7 +533,7 @@ impl Paragraph {
 
         for token in tokens {
             match token {
-                InlineToken::Text(raw, style, lang, node, element) => {
+                InlineToken::Text(raw, style, lang, node) => {
                     // Case mapping never makes or removes white space, so
                     // it can come before the collapsing below.
                     let case = style
@@ -543,7 +546,6 @@ impl Paragraph {
                     if *lang != LanguageIdentifier::UNKNOWN {
                         style.language = fonts::language(&lang.to_string());
                     }
-                    style.brush.element = element.to_bits();
                     style.brush.raise = open.last().map_or(0.0, |element| element.raise);
                     style.brush.relative = open.last().map_or(0, |element| element.relative);
                     // `white-space`: `pre-line` keeps newlines, `pre` and

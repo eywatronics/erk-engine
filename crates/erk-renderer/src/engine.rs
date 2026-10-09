@@ -839,6 +839,26 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_element_is_painted_in_its_own_colour() {
+        let engine =
+            verifying("<p style='color: black'>x <span style='color: red'>kırmızı</span> y</p>");
+        let (list, ..) = engine.last.as_ref().expect("verifying keeps the frame");
+        let painted = |color: [u8; 4]| -> String {
+            list.items
+                .iter()
+                .filter_map(|item| match item {
+                    crate::list::DisplayItem::Glyphs(run) if run.color == color => {
+                        Some(run.text.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(painted([255, 0, 0, 255]).trim(), "kırmızı");
+        assert_eq!(painted([0, 0, 0, 255]).replace(' ', ""), "xy");
+    }
+
+    #[test]
     fn a_frame_that_only_repaints_keeps_the_layout() {
         let mut engine = verifying(
             "<style>li:hover { color: red } .on { background: yellow }</style>             <p id=p>bir <span id=s style='background: #eee'>iki</span> üç</p>             <ul><li id=li>dört</li></ul>",
@@ -876,6 +896,52 @@ mod tests {
             modifiers: Modifiers::default(),
         });
         assert!(!laid_out(&mut engine));
+    }
+
+    #[test]
+    fn a_colour_that_splits_the_text_otherwise_lays_it_out_again() {
+        // A colour splits glyph runs, and fonts are picked per run: a
+        // colour may change without layout only where the text stays split
+        // as it was.
+        let mut engine = verifying("<p>bir <span id=s>iki</span> üç</p>");
+        let s = engine.query(None, "#s").unwrap().unwrap();
+        // Like its neighbours before, unlike them now.
+        engine.set_style_property(s, "color", "red").unwrap();
+        assert!(laid_out(&mut engine));
+        // Unlike them before and after.
+        engine.set_style_property(s, "color", "blue").unwrap();
+        assert!(!laid_out(&mut engine));
+        // Like them again.
+        engine.set_style_property(s, "color", "black").unwrap();
+        assert!(laid_out(&mut engine));
+    }
+
+    #[test]
+    fn a_joiner_shaped_with_its_neighbour_keeps_its_colour() {
+        // The joiner at the start of the span shapes with the letter before
+        // it, so the run in the span's colour holds text of the paragraph's:
+        // it is still painted in the span's colour.
+        let engine = verifying(
+            "<div dir=rtl style='font-size: 40px'>\u{639}\u{200d}<span style='color: blue'>\u{200d}\u{639}\u{200d}</span>\u{200d}\u{639}</div>",
+        );
+        let (list, ..) = engine.last.as_ref().expect("verifying keeps the frame");
+        let colours: Vec<(String, [u8; 4])> = list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) => Some((run.text.clone(), run.color)),
+                _ => None,
+            })
+            .collect();
+        let (black, blue) = ([0, 0, 0, 255], [0, 0, 255, 255]);
+        assert_eq!(
+            colours,
+            [
+                ("\u{639}".to_owned(), black),
+                ("\u{200d}".to_owned(), blue),
+                ("\u{200d}\u{639}\u{200d}".to_owned(), black)
+            ]
+        );
     }
 
     #[test]
