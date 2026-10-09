@@ -186,9 +186,13 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   list'e çözülmesi gerekiyor (M5.3 notları).
 - [x] Bir genişlik değişikliği metni yeniden şekillendirmiyor, yalnızca
   yeniden satırlara bölüyor (karar 10; `shaped` 0).
-- [ ] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı;
-  hesaplanmış stilden sınırlar (`contain: size layout`, sabit boyut) ve
-  erken kesme. B1, B3 ve B5 tabana karşı.
+- [x] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı.
+  B1'de yerleşen kutu 10003'ten 5'e indi.
+- [ ] Ağaç yalnızca değişen bloklar için yeniden kuruluyor; şekillendirilmiş
+  metin sonuca kopyalanmıyor. Hesaplanmış stilden sınırlar (`contain: size
+  layout`, sabit boyut) ve erken kesme, ölçüm gerektirirse. B1, B3 ve B5
+  tabana karşı (M5.4 notları: Taffy'nin hesabı artık 1,5 ms; kalan süre
+  ağacın her kare kurulması).
 
 ### M5.5: Kalıcı metin
 
@@ -450,3 +454,16 @@ M5.4 ikinci PR (süreler ms, sayaçlar son kare):
 | B10 | bir karede 100 toplu işlem | 179,14 | 196,20 | 3,97 | 103,73 | 30,30 | 34,17 | 0 | 10003 | 100 |
 | B12 | 10 bin kelimelik paragrafa bir harf | 93,87 | 216,81 | 0,31 | 14,03 | 18,65 | 60,91 | 0 | 503 | 1 |
 | B13 | satır içi stilde renk, 10 bin | 72,96 | 84,65 | 5,76 | 0,00 | 29,86 | 34,98 | 1 | 0 | 0 |
+
+Üçüncü PR: kalıcı yerleşim ağacı.
+
+| Konu | Not |
+|---|---|
+| Model | Ağaç her kare yine baştan kuruluyor (`build`), ama son yerleşimin ağacı (`LayoutState`) tutuluyor ve her kutu onunkiyle eşleşiyor: elemanın kutusu elemanıyla, anonim paragraf bloğu ve şekillendirme anahtarıyla, yer tutucu mutlak konumlu elemanıyla (`BoxKey`). Taffy'nin yerleştirdiği girdiler (stil, paragraf, görüntü, çocuklar) aynıysa kutu temiz; kirli kutunun bütün ataları kirli. Temiz kutu Taffy'nin önbelleğini, yuvarlanmamış konumunu ve paragrafın satırlarını eski ağaçtan alıyor; Taffy önbellekte bulduğu kutuyu yeniden yerleştirmiyor, yalnızca değişen yolu yerleştiriyor. Bu, Taffy'nin kendi kalıcı ağacının (`TaffyTree`, `mark_dirty`) modeli |
+| `calc()` adresleri | Taffy'nin stili bir `calc()` değerini `ComputedValues`'taki adresiyle tutuyor. Eski stil serbest kalıp adresi yeniden kullanılırsa iki farklı değer eşit görünürdü. Her eleman kutusu stilini tutuyor (`style_source`): karşılaştırılan iki adres canlı iki nesnenin, eşitlerse aynı nesnenin |
+| Float'lar | Taffy'nin önbelleği kutuyu girdileriyle anahtarlıyor, çevresindeki float'larla değil; `TaffyTree` de öyle. Bir float değişince kardeşi kirli olur, ortak ebeveyn kirlenir ve yeniden yerleştirir. Float yüksekliği ve yönü değişen sayfa kâhinle karşılaştırılıyor |
+| İş parçacığı | Ağaç `Send` değil (`calc()` adresi bir `*const ()`), restyler'la aynı yerel kayıtta duruyor; kare kaçıran kayıt ağacı da bırakıyor. Kaynak revizyonu değişince ağaç bırakılıyor |
+| `laid_out` sayacı | Artık Taffy'nin gerçekten yerleştirdiği kutular (önbellek ıskaları). Bir paragrafın metni, dolgusu, yeni ya da silinen bir paragraf: belge, html, body, kap ve paragraf (5; silmede 4) |
+| Gereksiz denetimler | İlk sürüm ağaçta olmayı, blok düzeyini, `order`'ı, anonim ebeveyni ve statik konumu da karşılaştırıyordu; mutasyonları sağ çıktı: ağaca girip çıkmak ve `order` ebeveynin çocuk listesinde, blok düzeyi stilde, anonim ebeveyn anahtarda, statik konum Taffy'den sonra her kare hesaplanıyor. Silindiler |
+| Mutasyonlar | Stilin, paragrafın, görüntünün, çocuk sayısının karşılaştırılmaması, ataların kirlenmemesi, satırların, yuvarlanmamış konumun, önbelleğin taşınmaması: yakalandı. Görüntü ve çocuk sayısı ilk koşuda sağ çıktı: görüntünün oranı stile yazılıyor (aynı oranda farklı boyutta iki satır içi görüntüyle test edildi), çocuk sayısı yalnızca son çocuk silinince fark ediyor (test eklendi) |
+| Ölçüm | Makine gürültülüydü (aynı `main` B1'i iki koşuda 197 ve 293 ms); yerleşim aşaması aynı koşudaki display list aşamasına oranla yaklaşık %30 kısaldı. Geçici bir ölçümde B1'in yerleşimi: ağacı kurmak 40–50 ms, eşleştirme 20 ms, Taffy 1,5 ms, yuvarlama ve konumlar 4 ms, paragrafların sonuca kopyalanması 20 ms. Kalan iş Taffy değil, her kare O(n) kurulum: sıradaki madde |

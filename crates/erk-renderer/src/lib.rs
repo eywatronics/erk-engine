@@ -230,9 +230,10 @@ pub fn element_boxes(
         &styles,
         &resources,
         &mut TextEngine::with_fonts(resources.fonts()),
-        w,
-        h,
-    );
+        (w, h),
+        None,
+    )
+    .0;
     let mut boxes = Vec::new();
     let mut index = 0;
     collect_boxes(
@@ -268,9 +269,10 @@ pub fn text_boxes(
         &styles,
         &resources,
         &mut TextEngine::with_fonts(resources.fonts()),
-        w,
-        h,
-    );
+        (w, h),
+        None,
+    )
+    .0;
     let scrolling =
         scroll::Scrolling::new(&doc, &styles, &layouts, (w, h), &scroll::Offsets::new());
     let (_, text) =
