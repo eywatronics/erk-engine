@@ -55,6 +55,7 @@ use taffy::{
     compute_leaf_layout, compute_root_layout, round_layout,
 };
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use self::calc::CalcTable;
@@ -74,6 +75,9 @@ pub(crate) struct Layouts {
     images: Vec<Option<Arc<Image>>>,
     /// How many paragraphs were shaped: those the shape cache did not hold.
     shaped: usize,
+    /// How many boxes were laid out: those whose inputs or descendants
+    /// changed since the layout before (M5.4).
+    laid_out: usize,
 }
 
 /// An anonymous paragraph box: a run of inline content between the block
@@ -110,11 +114,7 @@ impl Layouts {
     /// anonymous paragraphs counted as both: what layout cost (M5.0's
     /// counters).
     pub(crate) fn counts(&self) -> (usize, usize) {
-        let anonymous: usize = self.anonymous.iter().map(Vec::len).sum();
-        (
-            self.nodes.iter().filter(|node| node.is_some()).count() + anonymous,
-            self.shaped,
-        )
+        (self.laid_out, self.shaped)
     }
 
     /// The final (pixel-rounded) layout of a box, relative to its parent box.
@@ -189,14 +189,17 @@ fn shape_key(owner: NodeId, paragraph: &Paragraph) -> ShapeKey {
 }
 
 /// Lay out `doc` in a viewport of `width` × `height` CSS pixels.
+/// `previous` is the tree the last layout left: its unchanged boxes are not
+/// laid out again (M5.4). The tree this layout leaves comes back with the
+/// result.
 pub(crate) fn layout(
     doc: &Document,
     styles: &Styles,
     resources: &Resources,
     text: &mut TextEngine,
-    width: f32,
-    height: f32,
-) -> Layouts {
+    (width, height): (f32, f32),
+    previous: Option<LayoutState>,
+) -> (Layouts, LayoutState) {
     let slots = doc.capacity_hint();
     let (mut nodes, calcs) = build(doc, styles, resources);
     // The initial containing block is the viewport (CSS 2 §10.1).
@@ -204,10 +207,15 @@ pub(crate) fn layout(
         width: Dimension::length(width),
         height: Dimension::length(height),
     };
+    if let Some(previous) = previous {
+        keep_unchanged(&mut nodes, previous.nodes);
+    }
+    let computed = vec![false; nodes.len()];
     let mut tree = LayoutTree {
         nodes,
         calcs: &calcs,
         text,
+        computed,
     };
     let root = taffy_id(doc.root());
     compute_root_layout(
@@ -221,6 +229,7 @@ pub(crate) fn layout(
     round_layout(&mut tree, root);
 
     let shaped_count = tree.text.shaped();
+    let laid_out_count = tree.computed.iter().filter(|computed| **computed).count();
     let LayoutTree { mut nodes, .. } = tree;
     snap_locations(&mut nodes, usize::from(root));
     place_at_static_positions(doc, &mut nodes);
@@ -230,7 +239,7 @@ pub(crate) fn layout(
         .iter_mut()
         .map(|node| {
             let paragraph = node.paragraph.as_ref().filter(|_| node.in_tree)?;
-            let layout = node.shaped.take()?;
+            let layout = node.shaped.clone()?;
             Some(ShapedText {
                 relative: relative_offsets(paragraph, &node.layout),
                 text: paragraph.text.clone(),
@@ -268,17 +277,19 @@ pub(crate) fn layout(
                 .and_then(|replaced| replaced.image.clone())
         })
         .collect();
-    Layouts {
+    let layouts = Layouts {
+        laid_out: laid_out_count,
         shaped: shaped_count,
         nodes: nodes
-            .into_iter()
+            .iter()
             .take(slots)
             .map(|node| node.in_tree.then_some(node.layout))
             .collect(),
         text,
         anonymous,
         images,
-    }
+    };
+    (layouts, LayoutState { nodes })
 }
 
 /// Taffy rounds each box's position relative to its parent's, so a
@@ -566,6 +577,12 @@ struct LayoutNode {
     order: i32,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
+    /// Which box this is from frame to frame (M5.4).
+    key: Option<BoxKey>,
+    /// An element's computed style, held while the box is: Taffy's style
+    /// names its `calc()` values by their address in it, and an address
+    /// compared with the next frame's must not have been reused.
+    style_source: Option<StyleArc>,
     cache: Cache,
     unrounded: Layout,
     layout: Layout,
@@ -575,6 +592,8 @@ struct LayoutTree<'t> {
     nodes: Vec<LayoutNode>,
     calcs: &'t CalcTable,
     text: &'t mut TextEngine,
+    /// The boxes laid out this time, Taffy's cache not having them.
+    computed: Vec<bool>,
 }
 
 type StyleArc = erk_style::style::servo_arc::Arc<ComputedValues>;
@@ -598,7 +617,7 @@ enum Entry {
 }
 
 /// Where an absolutely positioned element would have been in the flow.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum StaticPosition {
     /// A zero-size placeholder box between blocks, by index.
     Placeholder(usize),
@@ -607,6 +626,104 @@ enum StaticPosition {
     Line(usize),
     /// The content edge of a flex or grid container, by index.
     ContentStart(usize),
+}
+
+/// Which box a layout box is, from frame to frame: an element's, an
+/// anonymous paragraph box (its block and its shape key), or the
+/// placeholder of an absolutely positioned element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum BoxKey {
+    Element(u64),
+    Anonymous(u64, ShapeKey),
+    Placeholder(u64),
+}
+
+/// The layout tree of the last frame that was laid out, kept for the next
+/// (M5.4): a box whose inputs are what they were, and all of whose
+/// descendants' are, keeps Taffy's cache and its results, so Taffy lays
+/// out only what changed and the ancestors that hold it.
+pub(crate) struct LayoutState {
+    nodes: Vec<LayoutNode>,
+}
+
+/// Give the boxes of `nodes` that are unchanged since `old` what they had:
+/// Taffy's cache, the unrounded layout and a paragraph's lines. A box is
+/// unchanged when what Taffy lays it out from (its style, paragraph, image
+/// and children) equals the old box's and no descendant changed.
+fn keep_unchanged(nodes: &mut [LayoutNode], old: Vec<LayoutNode>) {
+    let mut old = old;
+    let by_key: HashMap<BoxKey, usize> = old
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| Some((node.key?, index)))
+        .collect();
+    let matching: Vec<Option<usize>> = nodes
+        .iter()
+        .map(|node| node.key.and_then(|key| by_key.get(&key).copied()))
+        .collect();
+    let mut parents = vec![None; nodes.len()];
+    for (index, node) in nodes.iter().enumerate() {
+        for child in &node.children {
+            parents[usize::from(*child)] = Some(index);
+        }
+    }
+    let mapped = |index: usize| matching.get(index).copied().flatten();
+    let same = |index: usize, node: &LayoutNode| {
+        let Some(then) = mapped(index).map(|at| &old[at]) else {
+            return false;
+        };
+        // A box's place among its siblings, its display and its static
+        // position are in its parent's children and its style, or come
+        // after Taffy; what Taffy reads besides is here.
+        node.style == then.style
+            && node.paragraph == then.paragraph
+            && match (&node.replaced, &then.replaced) {
+                (Some(now), Some(then)) => match (&now.image, &then.image) {
+                    (Some(now), Some(then)) => Arc::ptr_eq(now, then),
+                    (None, None) => true,
+                    _ => false,
+                },
+                (None, None) => true,
+                _ => false,
+            }
+            && node.children.len() == then.children.len()
+            && node
+                .children
+                .iter()
+                .zip(&then.children)
+                .all(|(now, then)| mapped(usize::from(*now)) == Some(usize::from(*then)))
+    };
+    let mut dirty: Vec<bool> = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| node.in_tree && !same(index, node))
+        .collect();
+    // What holds a changed box changes with it.
+    for index in 0..nodes.len() {
+        if !dirty[index] {
+            continue;
+        }
+        // A parent already marked has its own chain marked, or will.
+        let mut up = parents[index];
+        while let Some(parent) = up {
+            if dirty[parent] {
+                break;
+            }
+            dirty[parent] = true;
+            up = parents[parent];
+        }
+    }
+    for (index, node) in nodes.iter_mut().enumerate() {
+        if dirty[index] || !node.in_tree {
+            continue;
+        }
+        if let Some(at) = mapped(index) {
+            let then = &mut old[at];
+            node.cache = std::mem::take(&mut then.cache);
+            node.unrounded = then.unrounded;
+            node.shaped = then.shaped.take();
+        }
+    }
 }
 
 /// Build the layout tree: which slots generate boxes, their Taffy styles,
@@ -875,6 +992,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                                 display: Display::Block,
                                 ..Style::DEFAULT
                             },
+                            key: Some(BoxKey::Placeholder(child.to_bits())),
                             ..LayoutNode::default()
                         });
                         let placeholder = nodes.len() - 1;
@@ -996,6 +1114,16 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
         }
     }
 
+    // Each element's box, by the element, holding its style.
+    let mut walk = vec![doc.root()];
+    while let Some(id) = walk.pop() {
+        walk.extend(doc.children(id));
+        let node = &mut nodes[id.index() as usize];
+        if node.in_tree {
+            node.key = Some(BoxKey::Element(id.to_bits()));
+            node.style_source = styles.computed(id);
+        }
+    }
     (nodes, calcs)
 }
 
@@ -1151,6 +1279,10 @@ impl Run {
                 ..Style::DEFAULT
             },
             shape_key: Some(shape_key(parent, &paragraph)),
+            key: Some(BoxKey::Anonymous(
+                parent.to_bits(),
+                shape_key(parent, &paragraph),
+            )),
             paragraph: Some(paragraph),
             anonymous_parent: Some(parent.index() as usize),
             ..LayoutNode::default()
@@ -1310,6 +1442,7 @@ impl<'t> LayoutTree<'t> {
         inputs: LayoutInput,
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
+        self.computed[usize::from(id)] = true;
         if let Some(replaced) = &self.node(id).replaced {
             // Sized by its style, else by its image's natural size; an image
             // that has not arrived has none.

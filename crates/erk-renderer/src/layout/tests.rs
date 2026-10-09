@@ -24,9 +24,10 @@ fn lay_out(body: &str) -> (Document, Layouts) {
         &styles,
         &crate::resources::Resources::default(),
         &mut TextEngine::new(),
-        WIDTH,
-        HEIGHT,
-    );
+        (WIDTH, HEIGHT),
+        None,
+    )
+    .0;
     (doc, layouts)
 }
 

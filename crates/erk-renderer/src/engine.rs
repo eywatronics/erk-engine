@@ -876,6 +876,87 @@ mod tests {
         assert_eq!(engine.stats().shaped, 1);
     }
 
+    /// How many boxes the last frame laid out, checked against the oracle.
+    fn boxes_laid_out(engine: &mut Engine) -> usize {
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        engine.stats().laid_out
+    }
+
+    #[test]
+    fn only_the_boxes_a_change_reaches_are_laid_out_again() {
+        let items: String = (0..100)
+            .map(|i| format!("<p id=p{i}>satır {i}</p>"))
+            .collect();
+        let mut engine = verifying(&format!("<div id=d>{items}</div>"));
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (d, p) = (find(&engine, "#d"), find(&engine, "#p7"));
+        // The paragraph and the boxes that hold it: the document's, html,
+        // body, the div.
+        engine.set_text(p, "yeni ve daha uzun bir satır").unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 5);
+        engine.set_style_property(p, "padding", "4px").unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 5);
+        // A new paragraph: it and its ancestors.
+        let made = engine.create_element("p").unwrap();
+        engine.set_text(made, "eklendi").unwrap();
+        engine.insert(d, made, Some(p)).unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 5);
+        engine.remove(made).unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 4);
+        // The last one: what is left is what was before it.
+        let last = find(&engine, "#p99");
+        engine.remove(last).unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 4);
+        // Another width for the div: what is in it is laid out again.
+        engine.set_style_property(d, "width", "80px").unwrap();
+        assert!(boxes_laid_out(&mut engine) > 100);
+    }
+
+    #[test]
+    fn a_float_that_changes_moves_the_text_beside_it() {
+        // Taffy's cache keys a box by its inputs, not by the floats around
+        // it; the oracle checks that the boxes beside a changed float are
+        // laid out again.
+        let mut engine = verifying(
+            "<div style='width: 200px'><div id=f style='float: left; width: 60px; height: 20px'></div>             <p>yanındaki metin uzun bir satır olarak akıyor</p><p id=q>ikinci paragraf</p></div>",
+        );
+        let f = engine.query(None, "#f").unwrap().unwrap();
+        for height in ["60px", "5px", "100px"] {
+            engine.set_style_property(f, "height", height).unwrap();
+            boxes_laid_out(&mut engine);
+        }
+        engine.set_style_property(f, "float", "right").unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn another_image_known_already_lays_out_again() {
+        let mut engine = Engine::new();
+        engine.load_html("<img id=a src=a.png><img id=b src=b.png>");
+        engine.resize(300, 200);
+        engine.set_verifying(true);
+        let (_, requests) = engine.prepare();
+        for request in requests {
+            // The same ratio: the style is the same, the natural size not.
+            let size = if request.url == "a.png" {
+                (2, 1)
+            } else {
+                (40, 20)
+            };
+            engine.complete_resource(&ResourceResponse {
+                id: request.id,
+                mime: "image/png".to_owned(),
+                data: crate::resources::tests::png_of(size.0, size.1),
+            });
+        }
+        boxes_laid_out(&mut engine);
+        // Both have arrived: nothing arrives now, the box changes.
+        let a = engine.query(None, "#a").unwrap().unwrap();
+        engine.set_attr(a, "src", "b.png").unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
     #[test]
     fn what_arrives_shapes_every_paragraph_again() {
         let mut engine = Engine::new();

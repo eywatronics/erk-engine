@@ -475,6 +475,21 @@ pub(crate) mod tests {
     use super::*;
 
     /// A 2 × 1 PNG: one opaque red pixel, one half-transparent blue one.
+    /// An opaque grey PNG of `width` × `height`.
+    pub(crate) fn png_of(width: u32, height: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut out, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&vec![128; (width * height * 4) as usize])
+                .unwrap();
+        }
+        out
+    }
+
     pub(crate) fn tiny_png() -> Vec<u8> {
         let mut out = Vec::new();
         {

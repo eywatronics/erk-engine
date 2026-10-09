@@ -81,6 +81,8 @@ pub(crate) struct Page {
 struct Last<'a> {
     kept: Option<layout::Layouts>,
     shapes: &'a mut ShapeCache,
+    /// The last layout's tree, and where this one's goes.
+    tree: &'a mut Option<layout::LayoutState>,
 }
 
 /// A frame's layout, and the resources' revision it was made at. Another
@@ -147,6 +149,10 @@ struct Kept {
     /// The viewport (CSS pixels) and scale it styles for.
     viewport: (f32, f32, f32),
     restyler: Restyler,
+    /// The last layout's tree and the resources' revision it was made at
+    /// (M5.4). It stays here for the same reason: Taffy's styles name
+    /// `calc()` values by address, which is not `Send`.
+    tree: Option<(layout::LayoutState, u64)>,
 }
 
 /// What [`Page::build`] makes of the document: the display list and what
@@ -281,6 +287,11 @@ impl Page {
         };
         // Fonts or images that arrived may shape the text otherwise.
         let (mut shapes, shaped_at) = std::mem::take(&mut self.shapes);
+        // The last layout's tree, made at the same revision.
+        let mut tree = self
+            .take_tree()
+            .filter(|(_, at)| *at == revision)
+            .map(|(tree, _)| tree);
         if shaped_at != revision {
             shapes = ShapeCache::default();
         }
@@ -290,12 +301,16 @@ impl Page {
             Last {
                 kept,
                 shapes: &mut shapes,
+                tree: &mut tree,
             },
             resources,
             true,
             mark,
         );
         self.shapes = (shapes, revision);
+        if let Some(tree) = tree {
+            self.put_tree((tree, revision));
+        }
         drop(stale);
         let Built {
             list,
@@ -345,12 +360,35 @@ impl Page {
                     frame: 0,
                     viewport,
                     restyler: Restyler::new(style_engine(viewport)),
+                    tree: None,
                 },
             };
             entry.frame = self.frames;
             let styles = entry.restyler.restyle(&self.doc, &interaction, changes);
             kept.push(entry);
             styles
+        })
+    }
+
+    /// The last layout's tree, from this thread's entry for the page.
+    fn take_tree(&self) -> Option<(layout::LayoutState, u64)> {
+        RESTYLERS.with_borrow_mut(|kept| {
+            kept.iter_mut()
+                .find(|entry| std::ptr::eq(entry.page.as_ptr(), Arc::as_ptr(&self.style_key)))
+                .and_then(|entry| entry.tree.take())
+        })
+    }
+
+    /// Keep `tree` in this thread's entry for the page, which the frame's
+    /// restyle made.
+    fn put_tree(&self, tree: (layout::LayoutState, u64)) {
+        RESTYLERS.with_borrow_mut(|kept| {
+            if let Some(entry) = kept
+                .iter_mut()
+                .find(|entry| std::ptr::eq(entry.page.as_ptr(), Arc::as_ptr(&self.style_key)))
+            {
+                entry.tree = Some(tree);
+            }
         })
     }
 
@@ -392,6 +430,7 @@ impl Page {
             Last {
                 kept: None,
                 shapes: &mut ShapeCache::default(),
+                tree: &mut None,
             },
             resources,
             false,
@@ -422,13 +461,15 @@ impl Page {
             Vec::new()
         };
         mark(Stage::Style);
-        let Last { kept, shapes } = last;
+        let Last { kept, shapes, tree } = last;
         let reused = kept.is_some();
         let layouts = kept.unwrap_or_else(|| {
             shapes.start_frame();
             let mut text =
                 TextEngine::with_fonts(resources.fonts()).with_cache(std::mem::take(shapes));
-            let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
+            let (layouts, state) =
+                layout::layout(doc, &styles, resources, &mut text, (w, h), tree.take());
+            *tree = Some(state);
             *shapes = text.into_cache();
             shapes.end_frame();
             layouts

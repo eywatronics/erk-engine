@@ -996,6 +996,7 @@ fn decoration_of(style: &ComputedValues) -> Option<InlineLook> {
 
 /// A shaped, line-broken paragraph, with the line boxes adjusted for
 /// atomic inlines and raised text.
+#[derive(Clone)]
 pub(crate) struct InlineLayout {
     pub(crate) layout: Layout<TextBrush>,
     /// How far each line moved down from where Parley put it: atomic
