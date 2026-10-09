@@ -380,7 +380,7 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.1 | Mutation journal, birleştirme, transaction | Bitti: değişiklikler hemen uygulanıyor, günlük ilk dokunuştaki durumu tutup karede birleştiriyor (aynı metin 100 kez: 1 değişiklik); işlemler, C-ABI 0.6 |
 | M5.2 | `erk-invalidation`: bitler, nedenler, cebir; bağımlılık muhafızı | Bitti: bitler, yayılma ve cebiri (10 bin durumlu özellik testleri), neden tamponu, yan tablo; günlük bu crate'e taşındı; yalnızca `erk-dom`'a bağımlılık CI'da |
 | M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Bitti: snapshot'lar, ipuçları, stil farkından bitler; satır içi tek özellik (CSSOM, C-ABI 0.7); değişen bir `<style>` yalnızca kurallarının eşleşebildiklerini stilliyor. `:has()` Stylo 0.20'de ayrıştırılmıyor |
-| M5.4 | Kalıcı layout: Taffy önbelleği, sınırlar, erken kesme | Yeni |
+| M5.4 | Kalıcı layout: Taffy önbelleği, sınırlar, erken kesme | Sürüyor: yalnızca boyayan kare yerleşimi tutuyor (B13 326 → 65 ms, yerleşen 0) |
 | M5.5 | Kalıcı metin şekillendirmesi | Yeni |
 | M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Yeni |
 | M5.7 | Odak, Tab sırası, varsayılan eylemin iptali, girdi/değişiklik/gönderim olayları | Yeni |

@@ -55,6 +55,12 @@ const FAMILY: &str = "Noto Sans";
 /// above the line's baseline, and which relatively positioned inline
 /// element moves it (an index into [`Paragraph::relative`] plus one; 0 for
 /// none). Text whose raise or offset differs gets glyph runs of its own.
+///
+/// The colour splits glyph runs, and Parley picks fonts again where a run
+/// starts, so it belongs to the layout; but the display list paints a run
+/// in the frame's colour of its text's element (M5.4). A frame whose
+/// colours split the text the same way keeps the layout
+/// ([`crate::layout::Layouts::colours_split_alike`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct TextBrush {
     pub(crate) color: [u8; 4],
@@ -135,7 +141,7 @@ struct TextStyle {
     families: Arc<[Family]>,
     /// The text's language, for language-specific fallback fonts.
     language: Option<Language>,
-    color: TextBrush,
+    brush: TextBrush,
     /// Whether lines may break between words (`text-wrap-mode`).
     wrap: bool,
 }
@@ -156,7 +162,7 @@ impl TextStyle {
             italic: fonts::is_italic(style),
             families: fonts::families(style),
             language: None,
-            color: TextBrush {
+            brush: TextBrush {
                 color: srgb_bytes(style.clone_color()),
                 raise: 0.0,
                 relative: 0,
@@ -308,7 +314,7 @@ pub(crate) enum InlineToken<S> {
     Text(String, S, LanguageIdentifier, NodeId),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
-    Open(S),
+    Open(S, NodeId),
     /// The innermost open inline element ends.
     Close,
     /// An atomic inline (`inline-block`, `inline-flex`): laid out as a box
@@ -376,22 +382,21 @@ struct Decoration {
     relative: u16,
     /// How far `vertical-align` raises the element.
     raise: f32,
-    color: Rgba,
-    /// Border widths (top, right, bottom, left) and colours; the left and
-    /// right sides belong to the element's first and last line only.
+    /// The element's `NodeId` bits, for its colours.
+    element: u64,
+    /// Border widths (top, right, bottom, left); the left and right sides
+    /// belong to the element's first and last line only.
     border: [f32; 4],
-    border_colors: [Rgba; 4],
 }
 
 /// How an inline element is decorated: what `Decoration` holds besides
-/// where it is.
+/// where it is. Its colours are read from the frame's styles when it is
+/// painted.
 #[derive(Clone, Copy, Debug)]
 struct InlineLook {
     above: f32,
     below: f32,
-    color: Rgba,
     border: [f32; 4],
-    border_colors: [Rgba; 4],
 }
 
 /// Text raised or lowered by `vertical-align`: its inline box takes
@@ -414,11 +419,11 @@ pub(crate) struct DecorationRect {
     pub(crate) y: f32,
     pub(crate) width: f32,
     pub(crate) height: f32,
-    /// The background; transparent when the element has only a border.
-    pub(crate) color: Rgba,
-    /// The border on this line (top, right, bottom, left) and its colours.
+    /// The element (its `NodeId` bits), whose style gives the background
+    /// and border colours.
+    pub(crate) element: u64,
+    /// The border on this line (top, right, bottom, left).
     pub(crate) border: [f32; 4],
-    pub(crate) border_colors: [Rgba; 4],
 }
 
 /// Everything needed to shape one paragraph.
@@ -466,6 +471,8 @@ struct OpenElement {
     end_spacer: f32,
     end_margin: f32,
     decoration: Option<InlineLook>,
+    /// Its `NodeId` bits, for the colours of its decoration.
+    element: u64,
     /// How many decorations there were when it opened: its own goes there,
     /// before those of the elements inside it, which are painted over it.
     decorations_before: usize,
@@ -539,8 +546,8 @@ impl Paragraph {
                     if *lang != LanguageIdentifier::UNKNOWN {
                         style.language = fonts::language(&lang.to_string());
                     }
-                    style.color.raise = open.last().map_or(0.0, |element| element.raise);
-                    style.color.relative = open.last().map_or(0, |element| element.relative);
+                    style.brush.raise = open.last().map_or(0.0, |element| element.raise);
+                    style.brush.relative = open.last().map_or(0, |element| element.relative);
                     // `white-space`: `pre-line` keeps newlines, `pre` and
                     // `pre-wrap` keep every space too (`break-spaces` is
                     // laid out as `pre-wrap`).
@@ -627,7 +634,7 @@ impl Paragraph {
                         }
                     }
                 }
-                InlineToken::Open(style) => {
+                InlineToken::Open(style, element) => {
                     paragraph.flush(
                         &mut closes,
                         &mut pending_space,
@@ -674,6 +681,7 @@ impl Paragraph {
                         end_spacer: sides.end,
                         end_margin: sides.margin_end,
                         decoration: decoration_of(style),
+                        element: element.to_bits(),
                         decorations_before: paragraph.decorations.len(),
                         style: text_style,
                         raise,
@@ -829,9 +837,8 @@ impl Paragraph {
                     above: look.above,
                     below: look.below,
                     raise: element.raise,
-                    color: look.color,
+                    element: element.element,
                     border: look.border,
-                    border_colors: look.border_colors,
                 },
             );
         }
@@ -924,17 +931,31 @@ fn fixed(length: &erk_style::style::values::computed::LengthPercentage) -> f32 {
     length.to_length().map_or(0.0, |length| length.px())
 }
 
-/// How an inline element is painted: its background and border, the
-/// extent of both around the baseline; `None` if it paints neither.
-fn decoration_of(style: &ComputedValues) -> Option<InlineLook> {
+/// An inline element's background colour and border colours (top, right,
+/// bottom, left), and whether it paints either: shown, and a background
+/// or a border side that is not transparent.
+pub(crate) fn decoration_colors(style: &ComputedValues) -> (Rgba, [Rgba; 4], bool) {
     use erk_style::style::computed_values::visibility::T as Visibility;
-    if style.clone_visibility() != Visibility::Visible {
-        return None;
-    }
     let color = srgb_bytes(style.resolve_color(&style.get_background().background_color));
-    let font = TextStyle::of(style);
-    let (ascent, descent) = font_extents(font.font_size, font.weight);
-    let padding = style.get_padding();
+    let border = style.get_border();
+    let border_colors = [
+        &border.border_top_color,
+        &border.border_right_color,
+        &border.border_bottom_color,
+        &border.border_left_color,
+    ]
+    .map(|color| srgb_bytes(style.resolve_color(color)));
+    let has_border = border_widths(style)
+        .iter()
+        .zip(&border_colors)
+        .any(|(width, color)| *width > 0.0 && color[3] != 0);
+    let paints = style.clone_visibility() == Visibility::Visible && (color[3] != 0 || has_border);
+    (color, border_colors, paints)
+}
+
+/// The used border widths (top, right, bottom, left): 0 where the style
+/// is `none` or `hidden`.
+fn border_widths(style: &ComputedValues) -> [f32; 4] {
     let border = style.get_border();
     let border_width =
         |width: &erk_style::style::values::computed::BorderSideWidth,
@@ -945,32 +966,30 @@ fn decoration_of(style: &ComputedValues) -> Option<InlineLook> {
                 width.0.to_f32_px()
             }
         };
-    let widths = [
+    [
         border_width(&border.border_top_width, border.border_top_style),
         border_width(&border.border_right_width, border.border_right_style),
         border_width(&border.border_bottom_width, border.border_bottom_style),
         border_width(&border.border_left_width, border.border_left_style),
-    ];
-    let border_colors = [
-        &border.border_top_color,
-        &border.border_right_color,
-        &border.border_bottom_color,
-        &border.border_left_color,
     ]
-    .map(|color| srgb_bytes(style.resolve_color(color)));
-    let has_border = widths
-        .iter()
-        .zip(&border_colors)
-        .any(|(width, color)| *width > 0.0 && color[3] != 0);
-    if color[3] == 0 && !has_border {
+}
+
+/// How an inline element is painted: the extent of its background and
+/// border around the baseline; `None` if it paints neither. Whether it
+/// paints is all this takes from colours: a frame that only changes
+/// colours keeps the paragraph unless that changes (M5.4).
+fn decoration_of(style: &ComputedValues) -> Option<InlineLook> {
+    if !decoration_colors(style).2 {
         return None;
     }
+    let font = TextStyle::of(style);
+    let (ascent, descent) = font_extents(font.font_size, font.weight);
+    let padding = style.get_padding();
+    let widths = border_widths(style);
     Some(InlineLook {
         above: ascent + fixed(&padding.padding_top.0) + widths[0],
         below: descent + fixed(&padding.padding_bottom.0) + widths[2],
-        color,
         border: widths,
-        border_colors,
     })
 }
 
@@ -1066,14 +1085,13 @@ impl InlineLayout {
                         y: baseline - decoration.raise - decoration.above,
                         width: x1 - x0,
                         height: decoration.above + decoration.below,
-                        color: decoration.color,
+                        element: decoration.element,
                         border: [
                             top,
                             if ends { right } else { 0.0 },
                             bottom,
                             if starts { left } else { 0.0 },
                         ],
-                        border_colors: decoration.border_colors,
                     });
                 }
             }
@@ -1809,7 +1827,7 @@ impl TextEngine {
         builder.push_default(StyleProperty::FontSize(base.font_size));
         builder.push_default(StyleProperty::LineHeight(base.line_height));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(base.weight)));
-        builder.push_default(StyleProperty::Brush(base.color));
+        builder.push_default(StyleProperty::Brush(base.brush));
         builder.push_default(StyleProperty::TextWrapMode(wrap_mode(base)));
         for ((range, style), locale) in paragraph.spans.iter().zip(locales) {
             builder.push(
@@ -1829,7 +1847,7 @@ impl TextEngine {
                 StyleProperty::FontWeight(FontWeight::new(style.weight)),
                 range.clone(),
             );
-            builder.push(StyleProperty::Brush(style.color), range.clone());
+            builder.push(StyleProperty::Brush(style.brush), range.clone());
             builder.push(StyleProperty::TextWrapMode(wrap_mode(style)), range.clone());
         }
         let mut atoms = atoms.iter();
@@ -1890,7 +1908,7 @@ mod tests {
                 italic: false,
                 families: Arc::new([]),
                 language: None,
-                color: TextBrush::default(),
+                brush: TextBrush::default(),
                 wrap: true,
             },
             spans: Vec::new(),

@@ -91,6 +91,9 @@ pub(crate) struct Resources {
     sent: Sent,
     /// Responses refused since the host last asked, and why.
     warnings: Vec<String>,
+    /// Counts what arrived (fonts, answers, a new document): a layout made
+    /// at one revision holds for the next frame only at the same one.
+    revision: u64,
 }
 
 /// The font faces a display list names, numbered the first time one does.
@@ -190,6 +193,13 @@ impl Resources {
     /// The host's fonts, from now on (p1-contract §6.2).
     pub(crate) fn set_fonts(&mut self, catalogue: FontCatalog) {
         self.fonts.set_catalogue(catalogue);
+        self.revision += 1;
+    }
+
+    /// How many times what lays the document out has changed: fonts,
+    /// images, a new document.
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// A request for every image URL and every font face the document uses
@@ -235,6 +245,7 @@ impl Resources {
     /// cannot be taken for one of this document's; fonts, and the requests
     /// for them, are kept.
     pub(crate) fn new_document(&mut self) {
+        self.revision += 1;
         self.by_url.clear();
         self.by_id
             .retain(|_, requested| matches!(requested, Requested::Font(_)));
@@ -245,6 +256,7 @@ impl Resources {
     /// request is answered once: a second answer, or one to a request never
     /// made, is ignored.
     pub(crate) fn complete(&mut self, response: &ResourceResponse) {
+        self.revision += 1;
         match self.by_id.remove(&response.id) {
             Some(Requested::Image(url)) => {
                 let state = match decode(&response.mime, &response.data) {
@@ -278,6 +290,7 @@ impl Resources {
 
     /// The host has no resource for request `id`.
     pub(crate) fn missing(&mut self, id: u64) {
+        self.revision += 1;
         match self.by_id.remove(&id) {
             Some(Requested::Image(url)) => {
                 self.by_url.insert(url, State::Missing);
