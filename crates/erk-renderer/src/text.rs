@@ -6,6 +6,7 @@
 //! measures and paints the same on every machine. CSS `font-family` is not
 //! consulted yet (M1.7).
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use erk_dom::NodeId;
@@ -330,14 +331,14 @@ pub(crate) enum InlineToken<S> {
 }
 
 /// An inline box in a paragraph's text, in text order.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct InlineItem {
     /// The byte offset in the text the box sits at.
     index: usize,
     pub(crate) kind: InlineItemKind,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum InlineItemKind {
     /// Horizontal space an inline element takes at its start or end: its
     /// margin, border and padding on that side. An opening one goes with
@@ -364,7 +365,7 @@ pub(crate) struct AtomBox {
 
 /// An inline element whose background is painted, one rectangle per line
 /// it spans.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Decoration {
     /// The element's text.
     text: Range<usize>,
@@ -401,7 +402,7 @@ struct InlineLook {
 
 /// Text raised or lowered by `vertical-align`: its inline box takes
 /// `above` and `below` around a baseline `raise` above the line's.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Raised {
     text: Range<usize>,
     raise: f32,
@@ -427,7 +428,7 @@ pub(crate) struct DecorationRect {
 }
 
 /// Everything needed to shape one paragraph.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Paragraph {
     pub(crate) text: String,
     /// The block's own style, for text outside any styled range.
@@ -1568,6 +1569,52 @@ pub(crate) struct TextEngine {
     fonts: FontContext,
     layouts: LayoutContext<TextBrush>,
     catalogue: Option<FontCatalog>,
+    cache: ShapeCache,
+}
+
+/// Where a paragraph's box is, from frame to frame: the element whose box
+/// it is (or, for an anonymous box, the block it is in) and the first text
+/// node it holds, as `NodeId` bits.
+pub(crate) type ShapeKey = (u64, u64);
+
+/// Paragraphs as Parley shaped them, from frame to frame (M5.4, M5.5): a
+/// paragraph whose content did not change is not shaped again, only broken
+/// into lines again, at whatever width it now has. Fonts that arrive make
+/// every entry stale; the page empties the cache then.
+#[derive(Default)]
+pub(crate) struct ShapeCache {
+    entries: HashMap<ShapeKey, ShapedEntry>,
+    /// How many paragraphs were shaped since the frame started.
+    shaped: usize,
+}
+
+struct ShapedEntry {
+    paragraph: Paragraph,
+    /// The width of each inline box, which Parley takes when it shapes.
+    boxes: Vec<f32>,
+    /// As built, before any line breaking.
+    layout: Layout<TextBrush>,
+    used: bool,
+}
+
+impl ShapeCache {
+    /// A new frame: nothing shaped or used yet.
+    pub(crate) fn start_frame(&mut self) {
+        self.shaped = 0;
+        for entry in self.entries.values_mut() {
+            entry.used = false;
+        }
+    }
+
+    /// The frame is laid out: paragraphs it did not use are gone.
+    pub(crate) fn end_frame(&mut self) {
+        self.entries.retain(|_, entry| entry.used);
+    }
+
+    /// How many paragraphs this frame shaped.
+    pub(crate) fn shaped(&self) -> usize {
+        self.shaped
+    }
 }
 
 impl TextEngine {
@@ -1630,6 +1677,7 @@ impl TextEngine {
             fonts,
             layouts: LayoutContext::new(),
             catalogue: host.catalogue().cloned(),
+            cache: ShapeCache::default(),
         }
     }
 
@@ -1672,10 +1720,11 @@ impl TextEngine {
     pub(crate) fn shape(
         &mut self,
         paragraph: &Paragraph,
+        key: Option<ShapeKey>,
         max_advance: Option<f32>,
         atoms: &[AtomBox],
     ) -> InlineLayout {
-        let mut layout = self.shape_text(paragraph, max_advance, atoms);
+        let mut layout = self.shape_text(paragraph, key, max_advance, atoms);
         layout.align(paragraph.align, AlignmentOptions::default());
         let mut shifts = vec![0.0; layout.len()];
         let mut height = layout.height();
@@ -1803,12 +1852,73 @@ impl TextEngine {
         }
     }
 
+    /// How many paragraphs this engine shaped this frame.
+    pub(crate) fn shaped(&self) -> usize {
+        self.cache.shaped()
+    }
+
+    /// The cache this engine shapes with, given back for the next frame.
+    pub(crate) fn into_cache(self) -> ShapeCache {
+        self.cache
+    }
+
+    /// This engine, shaping with `cache`.
+    pub(crate) fn with_cache(mut self, cache: ShapeCache) -> Self {
+        self.cache = cache;
+        self
+    }
+
+    /// `paragraph` shaped (its box at `key`, when it has one that lasts) and
+    /// broken into lines at `max_advance`.
     fn shape_text(
         &mut self,
         paragraph: &Paragraph,
+        key: Option<ShapeKey>,
         max_advance: Option<f32>,
         atoms: &[AtomBox],
     ) -> Layout<TextBrush> {
+        let mut atom_widths = atoms.iter();
+        let boxes: Vec<f32> = paragraph
+            .items
+            .iter()
+            .map(|item| match item.kind {
+                InlineItemKind::Spacer { width, .. } => width,
+                InlineItemKind::Anchor(_) => 0.0,
+                InlineItemKind::Atom(..) => atom_widths.next().map_or(0.0, |atom| atom.width),
+            })
+            .collect();
+        let kept = key
+            .and_then(|key| self.cache.entries.get_mut(&key))
+            .filter(|entry| entry.paragraph == *paragraph && entry.boxes == boxes);
+        let mut layout = match kept {
+            Some(entry) => {
+                entry.used = true;
+                entry.layout.clone()
+            }
+            None => {
+                self.cache.shaped += 1;
+                let built = self.build(paragraph, &boxes);
+                if let Some(key) = key {
+                    self.cache.entries.insert(
+                        key,
+                        ShapedEntry {
+                            paragraph: paragraph.clone(),
+                            boxes,
+                            layout: built.clone(),
+                            used: true,
+                        },
+                    );
+                }
+                built
+            }
+        };
+        break_lines(&mut layout, paragraph, max_advance);
+        layout
+    }
+
+    /// Shape `paragraph` with its inline boxes `boxes` wide: Parley's
+    /// layout before line breaking.
+    fn build(&mut self, paragraph: &Paragraph, boxes: &[f32]) -> Layout<TextBrush> {
         let base_locale = self.locale(&paragraph.base);
         let locales: Vec<Option<Language>> = paragraph
             .spans
@@ -1850,24 +1960,16 @@ impl TextEngine {
             builder.push(StyleProperty::Brush(style.brush), range.clone());
             builder.push(StyleProperty::TextWrapMode(wrap_mode(style)), range.clone());
         }
-        let mut atoms = atoms.iter();
-        for (id, item) in paragraph.items.iter().enumerate() {
-            let width = match item.kind {
-                InlineItemKind::Spacer { width, .. } => width,
-                InlineItemKind::Anchor(_) => 0.0,
-                InlineItemKind::Atom(..) => atoms.next().map_or(0.0, |atom| atom.width),
-            };
+        for (id, (item, width)) in paragraph.items.iter().zip(boxes).enumerate() {
             builder.push_inline_box(parley::InlineBox {
                 id: id as u64,
                 kind: parley::InlineBoxKind::InFlow,
                 index: item.index,
-                width,
+                width: *width,
                 height: 0.0,
             });
         }
-        let mut layout = builder.build(&paragraph.text);
-        break_lines(&mut layout, paragraph, max_advance);
-        layout
+        builder.build(&paragraph.text)
     }
 
     /// The size of an atom-free paragraph, as Taffy's measure function
@@ -1886,7 +1988,7 @@ impl TextEngine {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
-        let layout = self.shape(paragraph, max_advance, &[]);
+        let layout = self.shape(paragraph, None, max_advance, &[]);
         Size {
             width: known.width.unwrap_or_else(|| layout.width()),
             height: known.height.unwrap_or(layout.height),
@@ -1938,7 +2040,12 @@ mod tests {
     fn turkish_letters_all_have_glyphs() {
         let mut engine = TextEngine::new();
         let layout = engine
-            .shape(&paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0), None, &[])
+            .shape(
+                &paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0),
+                None,
+                None,
+                &[],
+            )
             .layout;
         let mut glyphs = 0;
         for line in layout.lines() {
@@ -1961,8 +2068,8 @@ mod tests {
             "Erk sayfayı önce çizer, sonra izole eder, en son betik çalıştırır.",
             400.0,
         );
-        let one_line = engine.shape(&text, None, &[]).layout;
-        let wrapped = engine.shape(&text, Some(120.0), &[]).layout;
+        let one_line = engine.shape(&text, None, None, &[]).layout;
+        let wrapped = engine.shape(&text, None, Some(120.0), &[]).layout;
 
         assert_eq!(one_line.len(), 1);
         assert!(
@@ -1978,8 +2085,8 @@ mod tests {
     #[test]
     fn bold_uses_the_bold_face() {
         let mut engine = TextEngine::new();
-        let regular = engine.shape(&paragraph("Merhaba dünya", 400.0), None, &[]);
-        let bold = engine.shape(&paragraph("Merhaba dünya", 700.0), None, &[]);
+        let regular = engine.shape(&paragraph("Merhaba dünya", 400.0), None, None, &[]);
+        let bold = engine.shape(&paragraph("Merhaba dünya", 700.0), None, None, &[]);
         // Noto Sans Bold's advances are wider than Regular's; a synthesized
         // bold of the Regular face would keep Regular's advances.
         assert!(bold.width() > regular.width() + 1.0);
@@ -1998,7 +2105,7 @@ mod tests {
             },
         );
         let word = engine
-            .shape(&paragraph("uzunkelime", 400.0), None, &[])
+            .shape(&paragraph("uzunkelime", 400.0), None, None, &[])
             .width();
         assert!((min.width - word).abs() < 0.5);
     }

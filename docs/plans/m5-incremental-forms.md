@@ -184,7 +184,7 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   taşındı: önceki karenin yerleşimini tutmak bu adımın işi, ve metnin
   rengi bugün Parley'nin şekillendirilmiş satırlarında duruyor; display
   list'e çözülmesi gerekiyor (M5.3 notları).
-- [ ] Bir genişlik değişikliği metni yeniden şekillendirmiyor, yalnızca
+- [x] Bir genişlik değişikliği metni yeniden şekillendirmiyor, yalnızca
   yeniden satırlara bölüyor (karar 10; `shaped` 0).
 - [ ] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı;
   hesaplanmış stilden sınırlar (`contain: size layout`, sabit boyut) ve
@@ -192,8 +192,8 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.5: Kalıcı metin
 
-- [ ] Şekillendirme önbelleği: bir harf yalnızca kendi paragrafını
-  şekillendiriyor (test).
+- [x] Şekillendirme önbelleği: bir harf yalnızca kendi paragrafını
+  şekillendiriyor (test). M5.4'ün ikinci PR'ıyla geldi (M5.4 notları).
 
 ### M5.6: Display list parçaları ve kısmi sunum
 
@@ -425,3 +425,28 @@ M5.3 (süreler ms, sayaçlar son kare):
 | Aşama süresi | İlk ölçümde B1'in stil aşaması 4'ten 11 ms'ye çıktı: tutulamayan eski yerleşim stil işaretinden önce bırakılıyordu (on bin kutuyu serbest bırakmak ~7 ms). Artık kare kurulduktan sonra bırakılıyor; toplam aynı, aşamalar doğru |
 | Mutasyonlar | Her karenin yalnızca boyaması, süslemelerin karşılaştırılmaması, yerleşim özniteliklerinin, metin ve çocuk değişikliklerinin, yerleşim bitlerinin, kaynak revizyonunun, renk bölünmesinin yok sayılması, yanıtın revizyonu artırmaması, yeniden kullanılan karenin her şeyi sayması, `display`'in yok sayılması, glif renginin sabit olması: birim testleriyle yakalandı. Koşunun fırça rengine bakmadan en yakın düğümü almak birim testlerinden sağ çıktı, WPT `shaping-023` yakalıyor (Moğolca web yazı tipi yalnızca WPT job'ında var). Görüntü alanı denetimi sağ çıktı, ölüydü, silindi |
 | Ölçüm | B13 (satır içi stilde renk, 10 bin eleman): medyan 326'dan 65 ms'ye, `laid_out` ve `shaped` 0; kalan display list (27 ms) ve raster (32 ms), M5.6'nın işi. B4 (sınıf metni kalın yapıyor), B6, B7 yerleşimi değiştiriyor, yerleşiyor |
+
+İkinci PR: şekillendirme önbelleği (M5.5'in hedefi de bu PR'da).
+
+| Konu | Not |
+|---|---|
+| Önbellek | `ShapeCache`: paragraf kutusunun yeri (elemanı, ya da anonim kutunun bloğu, ve ilk metin düğümü) → paragrafın kendisi, satır içi kutularının genişlikleri ve Parley'nin satırlara bölünmeden önceki düzeni. Paragraf ve kutu genişlikleri eşitse düzen kopyalanıp yalnızca satırlara bölünüyor; değilse şekillendirilip yerine konuyor. Kare kullanmadığı girdileri bırakıyor. Kaynak revizyonu değişince (yazı tipi, görüntü yanıtı) önbellek boşalıyor: yazı tipleri değişince şekillendirme değişebilir. Kâhin her kare boş bir önbellekle çalışıyor |
+| `shaped` sayacı | Artık gerçekten şekillendirilen paragraflar (önbellek ıskaları); eskiden metni olan paragraflar sayılıyordu. İlk karede ikisi aynı. Bir genişlik değişikliği 0, bir paragrafın metni 1 |
+| Neden yeniden bölmek doğru | Parley şekillendirmeyi düzen kurulurken yapıyor; satır kırma (`break_lines`) önceki satırları temizleyip baştan kırıyor. Önbellekteki düzen hiç kırılmamış hâliyle saklanıyor, her kullanımda kopyası kırılıyor. WPT tabanla tam eşit (3498), Chrome referans skorları ve altın görüntüler değişmedi |
+| Mutasyonlar | Anahtardaki her paragrafın kabulü, kutu genişliklerinin yok sayılması, isabetin kullanılmış sayılmaması, sayacın sıfırlanmaması, gelenlerin önbelleği boşaltmaması: motor testleriyle yakalandı. Kullanılmayan girdilerin bırakılmaması C-ABI'nin bellek testiyle yakalandı (10 bin döngüde yığın 15,9 MB büyüdü) |
+| Ölçüm | Aşağıda; M5.3'le aynı makinede. B1 345'ten 199 ms'ye, yerleşim 259'dan 112 ms'ye, şekillenen 8000'den 1'e. B12 (10 bin kelimelik paragrafa bir harf) yerleşimi 50'den 14 ms'ye. B3'te yaprağa sınıf yalnızca boyuyor: yerleşim 0. Kalan yerleşim süresi Taffy'nin her kare bütün ağacı yeniden kurup yerleştirmesi: M5.4'ün üçüncü maddesi |
+
+M5.4 ikinci PR (süreler ms, sayaçlar son kare):
+
+| | Senaryo | medyan | p95 | stil | yerleşim | display list | raster | stillenen | yerleşen | şekillenen |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 199,07 | 221,68 | 4,51 | 112,04 | 31,85 | 37,74 | 0 | 10003 | 1 |
+| B2 | bir karede 100 metin | 196,57 | 216,57 | 3,98 | 113,50 | 31,17 | 37,25 | 0 | 10003 | 100 |
+| B3 | 1000 düzey, yaprağa sınıf | 5,98 | 7,72 | 0,98 | 0,00 | 1,50 | 3,36 | 1 | 0 | 0 |
+| B4 | 1000 karttan birine sınıf | 37,12 | 63,38 | 0,99 | 15,85 | 5,08 | 13,17 | 2 | 1003 | 1 |
+| B5 | `contain: size layout` içinde, 10 bin | 201,86 | 219,97 | 4,00 | 110,82 | 31,85 | 36,93 | 0 | 10004 | 1 |
+| B6 | 5000 elemanda imleç | 99,86 | 117,91 | 2,23 | 58,82 | 14,90 | 19,22 | 1 | 5005 | 0 |
+| B7 | 5000 elemanda sürükleme | 120,92 | 176,86 | 2,52 | 70,05 | 18,39 | 21,43 | 1 | 5004 | 0 |
+| B10 | bir karede 100 toplu işlem | 179,14 | 196,20 | 3,97 | 103,73 | 30,30 | 34,17 | 0 | 10003 | 100 |
+| B12 | 10 bin kelimelik paragrafa bir harf | 93,87 | 216,81 | 0,31 | 14,03 | 18,65 | 60,91 | 0 | 503 | 1 |
+| B13 | satır içi stilde renk, 10 bin | 72,96 | 84,65 | 5,76 | 0,00 | 29,86 | 34,98 | 1 | 0 | 0 |
