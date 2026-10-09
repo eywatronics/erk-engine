@@ -834,8 +834,68 @@ mod tests {
         assert!(engine.prepare().0.is_some());
         assert_eq!(engine.verify(), Ok(()));
         let stats = engine.stats();
-        assert_eq!(stats.laid_out == 0, stats.shaped == 0, "{stats:?}");
+        // Nothing laid out, nothing shaped.
+        assert!(stats.laid_out > 0 || stats.shaped == 0, "{stats:?}");
         stats.laid_out > 0
+    }
+
+    #[test]
+    fn a_paragraph_is_shaped_again_only_when_its_content_changes() {
+        let items: String = (0..50)
+            .map(|i| format!("<p id=p{i}>satır {i} <b>kalın</b></p>"))
+            .collect();
+        let mut engine = verifying(&format!("<div id=d>{items}</div>"));
+        // Every paragraph, the first time.
+        assert_eq!(engine.stats().shaped, 50);
+        let (d, p) = (
+            engine.query(None, "#d").unwrap().unwrap(),
+            engine.query(None, "#p7").unwrap().unwrap(),
+        );
+        // Another width: the lines are broken again, the text is not
+        // shaped again.
+        engine.set_style_property(d, "width", "60px").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 0);
+        // One paragraph's text: that paragraph.
+        engine.set_text(p, "yeni").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 1);
+        // A font size: the paragraph that has it.
+        engine.set_style_property(p, "font-size", "30px").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 1);
+        // An atomic inline's width goes into the shaping too.
+        let atom = engine.create_element("span").unwrap();
+        engine
+            .set_attr(atom, "style", "display: inline-block; width: 10px")
+            .unwrap();
+        engine.insert(p, atom, None).unwrap();
+        assert!(laid_out(&mut engine));
+        engine.set_style_property(atom, "width", "40px").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 1);
+    }
+
+    #[test]
+    fn what_arrives_shapes_every_paragraph_again() {
+        let mut engine = Engine::new();
+        engine.load_html("<p>bir</p><p>iki</p><img src=a.png>");
+        engine.resize(300, 200);
+        engine.set_verifying(true);
+        let (_, requests) = engine.prepare();
+        let request = requests
+            .iter()
+            .find(|r| r.url == "a.png")
+            .expect("a.png is asked for");
+        engine.complete_resource(&ResourceResponse {
+            id: request.id,
+            mime: "image/png".to_owned(),
+            data: crate::resources::tests::tiny_png(),
+        });
+        // Fonts may have arrived too: every paragraph, the image's
+        // anonymous one with them.
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 3);
     }
 
     #[test]

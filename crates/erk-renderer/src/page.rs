@@ -30,7 +30,7 @@ use crate::paint;
 use crate::resources::Resources;
 use crate::scroll::{Offsets, Scrolling};
 use crate::tables::Tables;
-use crate::text::{EmbeddedFontMetrics, TextEngine};
+use crate::text::{EmbeddedFontMetrics, ShapeCache, TextEngine};
 use crate::transform::Matrix;
 use erk_invalidation::journal::{Changes, Journal, Snapshot};
 
@@ -71,6 +71,16 @@ pub(crate) struct Page {
     frames: u64,
     /// The last frame's layout, for a frame whose changes only repaint.
     layout: Option<KeptLayout>,
+    /// Paragraphs as they were shaped, and the resources' revision they
+    /// were shaped at (M5.4, M5.5).
+    shapes: (ShapeCache, u64),
+}
+
+/// What earlier frames left for a frame to build on: the last frame's
+/// layout when it still holds, and the paragraphs as they were shaped.
+struct Last<'a> {
+    kept: Option<layout::Layouts>,
+    shapes: &'a mut ShapeCache,
 }
 
 /// A frame's layout, and the resources' revision it was made at. Another
@@ -212,6 +222,7 @@ impl Page {
             style_key: Arc::new(()),
             frames: 0,
             layout: None,
+            shapes: (ShapeCache::default(), 0),
         }
     }
 
@@ -268,7 +279,23 @@ impl Page {
         } else {
             (None, last)
         };
-        let (built, requests) = self.build((w, h), styles, kept, resources, true, mark);
+        // Fonts or images that arrived may shape the text otherwise.
+        let (mut shapes, shaped_at) = std::mem::take(&mut self.shapes);
+        if shaped_at != revision {
+            shapes = ShapeCache::default();
+        }
+        let (built, requests) = self.build(
+            (w, h),
+            styles,
+            Last {
+                kept,
+                shapes: &mut shapes,
+            },
+            resources,
+            true,
+            mark,
+        );
+        self.shapes = (shapes, revision);
         drop(stale);
         let Built {
             list,
@@ -362,7 +389,10 @@ impl Page {
         self.build(
             (viewport.0, viewport.1),
             styles,
-            None,
+            Last {
+                kept: None,
+                shapes: &mut ShapeCache::default(),
+            },
             resources,
             false,
             &mut |_| {},
@@ -380,7 +410,7 @@ impl Page {
         &self,
         (w, h): (f32, f32),
         styles: Styles,
-        kept: Option<layout::Layouts>,
+        last: Last<'_>,
         resources: &mut Resources,
         ask: bool,
         mark: &mut dyn FnMut(Stage),
@@ -392,10 +422,16 @@ impl Page {
             Vec::new()
         };
         mark(Stage::Style);
+        let Last { kept, shapes } = last;
         let reused = kept.is_some();
         let layouts = kept.unwrap_or_else(|| {
-            let mut text = TextEngine::with_fonts(resources.fonts());
-            layout::layout(doc, &styles, resources, &mut text, w, h)
+            shapes.start_frame();
+            let mut text =
+                TextEngine::with_fonts(resources.fonts()).with_cache(std::mem::take(shapes));
+            let layouts = layout::layout(doc, &styles, resources, &mut text, w, h);
+            *shapes = text.into_cache();
+            shapes.end_frame();
+            layouts
         });
         mark(Stage::Layout);
         let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);

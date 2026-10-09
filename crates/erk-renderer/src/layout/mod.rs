@@ -60,7 +60,9 @@ use std::sync::Arc;
 use self::calc::CalcTable;
 use crate::color::{Rgba, srgb_bytes};
 use crate::resources::{Image, Resources};
-use crate::text::{AtomBox, DecorationRect, InlineLayout, InlineToken, Paragraph, TextEngine};
+use crate::text::{
+    AtomBox, DecorationRect, InlineLayout, InlineToken, Paragraph, ShapeKey, TextEngine,
+};
 
 /// The result of laying out one document.
 pub(crate) struct Layouts {
@@ -70,6 +72,8 @@ pub(crate) struct Layouts {
     anonymous: Vec<Vec<AnonymousText>>,
     /// The decoded image of each `<img>` whose image has arrived.
     images: Vec<Option<Arc<Image>>>,
+    /// How many paragraphs were shaped: those the shape cache did not hold.
+    shaped: usize,
 }
 
 /// An anonymous paragraph box: a run of inline content between the block
@@ -109,7 +113,7 @@ impl Layouts {
         let anonymous: usize = self.anonymous.iter().map(Vec::len).sum();
         (
             self.nodes.iter().filter(|node| node.is_some()).count() + anonymous,
-            self.text.iter().filter(|text| text.is_some()).count() + anonymous,
+            self.shaped,
         )
     }
 
@@ -173,6 +177,17 @@ pub(crate) fn source_colours(
         .collect()
 }
 
+/// A paragraph box's key in the shape cache: `owner`, the element whose box
+/// it is or the block an anonymous box is in, and its first text node,
+/// which tells an anonymous box from the others in the same block.
+fn shape_key(owner: NodeId, paragraph: &Paragraph) -> ShapeKey {
+    let first = paragraph
+        .sources
+        .first()
+        .map_or(0, |(node, _)| node.to_bits());
+    (owner.to_bits(), first)
+}
+
 /// Lay out `doc` in a viewport of `width` × `height` CSS pixels.
 pub(crate) fn layout(
     doc: &Document,
@@ -205,6 +220,7 @@ pub(crate) fn layout(
     );
     round_layout(&mut tree, root);
 
+    let shaped_count = tree.text.shaped();
     let LayoutTree { mut nodes, .. } = tree;
     snap_locations(&mut nodes, usize::from(root));
     place_at_static_positions(doc, &mut nodes);
@@ -253,6 +269,7 @@ pub(crate) fn layout(
         })
         .collect();
     Layouts {
+        shaped: shaped_count,
         nodes: nodes
             .into_iter()
             .take(slots)
@@ -537,6 +554,8 @@ struct LayoutNode {
     paragraph: Option<Paragraph>,
     /// A paragraph's lines as its final layout broke them.
     shaped: Option<InlineLayout>,
+    /// Where a paragraph's box is from frame to frame, for the shape cache.
+    shape_key: Option<ShapeKey>,
     /// For a replaced element (`<img>`): its image, once it has arrived.
     replaced: Option<Replaced>,
     /// For an absolutely positioned element: where it would have been, and
@@ -796,6 +815,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                 if !paragraph.is_empty() {
                     let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms, container);
                     let node = &mut nodes[parent.index() as usize];
+                    node.shape_key = Some(shape_key(parent, &paragraph));
                     node.paragraph = Some(paragraph);
                     node.children = children;
                 }
@@ -1130,6 +1150,7 @@ impl Run {
                 display: Display::Block,
                 ..Style::DEFAULT
             },
+            shape_key: Some(shape_key(parent, &paragraph)),
             paragraph: Some(paragraph),
             anonymous_parent: Some(parent.index() as usize),
             ..LayoutNode::default()
@@ -1346,6 +1367,7 @@ impl<'t> LayoutTree<'t> {
             return LayoutOutput::HIDDEN;
         };
         let style = self.nodes[index].style.clone();
+        let key = self.nodes[index].shape_key;
         let calcs = self.calcs;
         let mut measured: Option<InlineLayout> = None;
         let mut output = compute_leaf_layout(
@@ -1364,7 +1386,7 @@ impl<'t> LayoutTree<'t> {
                     .width
                     .map_or(available.width, AvailableSpace::Definite);
                 let atoms = self.measure_atoms(&paragraph, space);
-                let shaped = self.text.shape(&paragraph, max_advance, &atoms);
+                let shaped = self.text.shape(&paragraph, key, max_advance, &atoms);
                 let size = Size {
                     width: known.width.unwrap_or_else(|| shaped.width()),
                     height: known.height.unwrap_or(shaped.height),
@@ -1390,7 +1412,9 @@ impl<'t> LayoutTree<'t> {
             // again at the final width.
             let shaped = match measured {
                 Some(shaped) if shaped.broken_at(Some(content_width)) => shaped,
-                _ => self.text.shape(&paragraph, Some(content_width), &atoms),
+                _ => self
+                    .text
+                    .shape(&paragraph, key, Some(content_width), &atoms),
             };
             let inset = Point {
                 x: padding.left + border.left,
