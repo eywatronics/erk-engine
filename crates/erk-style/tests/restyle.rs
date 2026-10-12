@@ -295,7 +295,9 @@ fn a_moved_element_is_styled_where_it_went() {
     );
     let (b, y, x) = (s.find("b"), s.find("y"), s.find("x"));
     s.insert(y, b, None);
-    s.frame();
+    // Layout learns which moved: its new place may not show in its style.
+    assert_eq!(s.frame().moved(), [b]);
+    assert!(s.frame().moved().is_empty());
     // Out of the document for a frame, then back.
     s.detach(b);
     s.frame();

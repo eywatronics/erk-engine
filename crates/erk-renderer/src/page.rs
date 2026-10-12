@@ -74,6 +74,10 @@ pub(crate) struct Page {
     /// Paragraphs as they were shaped, and the resources' revision they
     /// were shaped at (M5.4, M5.5).
     shapes: (ShapeCache, u64),
+    /// What changed since the last frame that was laid out, for building
+    /// only what it reaches (M5.4): a frame that only repaints does not
+    /// build, and passes its changes on.
+    touched: layout::Touched,
 }
 
 /// What earlier frames left for a frame to build on: the last frame's
@@ -229,6 +233,7 @@ impl Page {
             frames: 0,
             layout: None,
             shapes: (ShapeCache::default(), 0),
+            touched: layout::Touched::default(),
         }
     }
 
@@ -270,6 +275,7 @@ impl Page {
         let (changes, recorded) = self.journal.take(&self.doc);
         let viewport = viewport(width, height, scale);
         let styles = self.restyle(viewport, &changes);
+        self.touch(&changes, &styles);
         let (w, h, _) = viewport;
         let revision = resources.revision();
         let last = self.layout.take();
@@ -312,6 +318,10 @@ impl Page {
             self.put_tree((tree, revision));
         }
         drop(stale);
+        if !reusable {
+            // Laid out: the tree has what changed.
+            self.touched = layout::Touched::default();
+        }
         let Built {
             list,
             styles,
@@ -368,6 +378,28 @@ impl Page {
             kept.push(entry);
             styles
         })
+    }
+
+    /// Note what the frame's `changes` and restyle touched, as the layout
+    /// tree's build reads it: elements whose style or attributes changed
+    /// or that moved are built again with all they hold; nodes whose
+    /// children or text changed are built again themselves.
+    fn touch(&mut self, changes: &Changes, styles: &Styles) {
+        let touched = &mut self.touched;
+        touched
+            .deep
+            .extend(styles.damage().iter().map(|(node, _)| *node));
+        touched.deep.extend(styles.moved());
+        touched
+            .deep
+            .extend(changes.attrs.iter().map(|change| change.node));
+        touched.shallow.extend(&changes.children);
+        touched.shallow.extend(
+            changes
+                .text
+                .iter()
+                .filter_map(|text| self.doc.node(*text)?.parent()),
+        );
     }
 
     /// The last layout's tree, from this thread's entry for the page.
@@ -467,8 +499,14 @@ impl Page {
             shapes.start_frame();
             let mut text =
                 TextEngine::with_fonts(resources.fonts()).with_cache(std::mem::take(shapes));
-            let (layouts, state) =
-                layout::layout(doc, &styles, resources, &mut text, (w, h), tree.take());
+            let (layouts, state) = layout::layout(
+                doc,
+                &styles,
+                resources,
+                &mut text,
+                (w, h),
+                tree.take().map(|tree| (tree, &self.touched)),
+            );
             *tree = Some(state);
             *shapes = text.into_cache();
             shapes.end_frame();

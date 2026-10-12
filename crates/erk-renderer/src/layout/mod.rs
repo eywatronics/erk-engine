@@ -198,18 +198,18 @@ pub(crate) fn layout(
     resources: &Resources,
     text: &mut TextEngine,
     (width, height): (f32, f32),
-    previous: Option<LayoutState>,
+    previous: Option<(LayoutState, &Touched)>,
 ) -> (Layouts, LayoutState) {
     let slots = doc.capacity_hint();
-    let (mut nodes, calcs) = build(doc, styles, resources);
-    // The initial containing block is the viewport (CSS 2 §10.1).
-    nodes[doc.root().index() as usize].style.size = Size {
-        width: Dimension::length(width),
-        height: Dimension::length(height),
+    let builder = match previous {
+        // The same arena, and not too many boxes left behind by the
+        // anonymous boxes made again: build what changed.
+        Some((state, touched)) if state.nodes.len() <= 2 * state.slots + 1024 => {
+            Builder::incremental(doc, styles, (width, height), state, touched)
+        }
+        _ => Builder::full(doc, styles, (width, height)),
     };
-    if let Some(previous) = previous {
-        keep_unchanged(&mut nodes, previous.nodes);
-    }
+    let (nodes, calcs, reserved) = builder.run(resources);
     let computed = vec![false; nodes.len()];
     let mut tree = LayoutTree {
         nodes,
@@ -269,7 +269,7 @@ pub(crate) fn layout(
         })
         .collect();
     let mut anonymous: Vec<Vec<AnonymousText>> = (0..slots).map(|_| Vec::new()).collect();
-    for (index, node) in nodes.iter().enumerate().skip(slots) {
+    for (index, node) in nodes.iter().enumerate().skip(reserved) {
         if let (Some(parent), Some(shaped)) = (node.anonymous_parent, text[index].take()) {
             anonymous[parent].push(AnonymousText {
                 layout: node.layout,
@@ -299,7 +299,14 @@ pub(crate) fn layout(
         anonymous,
         images,
     };
-    (layouts, LayoutState { nodes })
+    (
+        layouts,
+        LayoutState {
+            nodes,
+            calcs,
+            slots: reserved,
+        },
+    )
 }
 
 /// Taffy rounds each box's position relative to its parent's, so a
@@ -587,6 +594,16 @@ struct LayoutNode {
     order: i32,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
+    /// The element whose box this slot holds, when it was built.
+    element: Option<NodeId>,
+    /// The box that holds it in the layout tree.
+    parent: Option<usize>,
+    /// When its box was built: the blocks its build went on to, each with
+    /// its containing block, and the absolutely positioned elements it gave
+    /// a containing block (box, block). A box taken as it is does the same
+    /// from these.
+    pushed: Vec<(NodeId, NodeId)>,
+    found: Vec<(usize, usize)>,
     /// Which box this is from frame to frame (M5.4).
     key: Option<BoxKey>,
     /// A paragraph's text as the result gives it, and the final layout it
@@ -653,216 +670,302 @@ enum BoxKey {
 }
 
 /// The layout tree of the last frame that was laid out, kept for the next
-/// (M5.4): a box whose inputs are what they were, and all of whose
-/// descendants' are, keeps Taffy's cache and its results, so Taffy lays
-/// out only what changed and the ancestors that hold it.
+/// (M5.4): the next frame builds again only the boxes its changes reach and
+/// takes the others as they are, and a box whose inputs are what they
+/// were, and all of whose descendants' are, keeps Taffy's cache and its
+/// results, so Taffy lays out only what changed and the ancestors that hold
+/// it.
 pub(crate) struct LayoutState {
     nodes: Vec<LayoutNode>,
+    calcs: CalcTable,
+    /// The slots kept for element boxes, at their element's slot: the
+    /// arena's size and room to grow. The anonymous boxes come after.
+    slots: usize,
 }
 
-/// Give the boxes of `nodes` that are unchanged since `old` what they had:
-/// Taffy's cache, the unrounded layout and a paragraph's lines. A box is
-/// unchanged when what Taffy lays it out from (its style, paragraph, image
-/// and children) equals the old box's and no descendant changed.
-fn keep_unchanged(nodes: &mut [LayoutNode], old: Vec<LayoutNode>) {
-    let mut old = old;
-    // An element's box is at its element's slot in both trees, whichever
-    // element it was: a slot given to another element with the same inputs
-    // lays out the same. The others (anonymous paragraphs, placeholders) are
-    // found by key.
-    let by_key: HashMap<BoxKey, usize> = old
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| node.key != Some(BoxKey::Element))
-        .filter_map(|(index, node)| Some((node.key?, index)))
-        .collect();
-    let matching: Vec<Option<usize>> = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| match node.key {
-            Some(BoxKey::Element) => (index < old.len()).then_some(index),
-            Some(key) => by_key.get(&key).copied(),
-            None => None,
-        })
-        .collect();
-    let mut parents = vec![None; nodes.len()];
-    for (index, node) in nodes.iter().enumerate() {
-        for child in &node.children {
-            parents[usize::from(*child)] = Some(index);
+/// The slots kept for the element boxes of an arena of `capacity`: room
+/// for it to grow before the anonymous boxes have to move.
+fn reserved(capacity: usize) -> usize {
+    capacity + capacity / 4 + 64
+}
+
+impl LayoutState {
+    /// Make room for element boxes up to `slots`: the anonymous boxes move
+    /// up, and every index that names one with them. A box's parent is
+    /// written again for every box built and read only from those, so it
+    /// is left as it is.
+    fn grow(&mut self, slots: usize) {
+        let (old, delta) = (self.slots, slots - self.slots);
+        let shift = |index: usize| if index >= old { index + delta } else { index };
+        for node in &mut self.nodes {
+            for child in &mut node.children {
+                *child = taffy::NodeId::from(shift(usize::from(*child)));
+            }
+            node.static_position = node.static_position.map(|position| match position {
+                StaticPosition::Placeholder(at) => StaticPosition::Placeholder(shift(at)),
+                StaticPosition::Line(at) => StaticPosition::Line(shift(at)),
+                other => other,
+            });
+        }
+        self.nodes
+            .splice(old..old, (0..delta).map(|_| LayoutNode::default()));
+        self.slots = slots;
+    }
+}
+
+/// What changed in the document since the tree was built, as the build
+/// reads it (M5.4).
+#[derive(Default)]
+pub(crate) struct Touched {
+    /// Elements built again with everything in them: their style, an
+    /// attribute or their parent changed, any of which can change how what
+    /// they hold is built (a containing block, a language, a parent's
+    /// display).
+    pub(crate) deep: Vec<NodeId>,
+    /// Nodes whose children or text changed: built again; what they hold
+    /// is taken from the last tree where nothing reached it.
+    pub(crate) shallow: Vec<NodeId>,
+}
+
+/// Which elements a frame's build reaches.
+struct Reach {
+    /// A touched node, or an ancestor of one: built again.
+    on_path: Vec<bool>,
+    /// Inside a deep node: built again.
+    under_deep: Vec<bool>,
+}
+
+/// Builds the layout tree: which slots generate boxes, their Taffy styles
+/// and the paragraphs. With the last tree, only the boxes the changes
+/// reach are built; the others keep what they had, and what building them
+/// did elsewhere (an absolutely positioned element given to a containing
+/// block that is built again) is done again from what they recorded.
+struct Builder<'a> {
+    doc: &'a Document,
+    styles: &'a Styles,
+    viewport: (f32, f32),
+    nodes: Vec<LayoutNode>,
+    calcs: CalcTable,
+    /// Blocks to build or to take as they are, each with the containing
+    /// block of the absolutely positioned elements below it.
+    stack: Vec<(NodeId, NodeId)>,
+    /// `None`: every box is built.
+    reach: Option<Reach>,
+    slots: usize,
+    /// The boxes built this frame, and each one's box before (when there
+    /// was a last tree).
+    built: Vec<bool>,
+    before: HashMap<usize, LayoutNode>,
+    /// The boxes a built box took as a child, or one taken as it was gave
+    /// a built containing block, this frame.
+    attached: Vec<bool>,
+    /// Where the boxes made this frame start (anonymous paragraphs and
+    /// placeholders).
+    first_new: usize,
+}
+
+impl<'a> Builder<'a> {
+    fn full(doc: &'a Document, styles: &'a Styles, viewport: (f32, f32)) -> Self {
+        let slots = reserved(doc.capacity_hint());
+        Self {
+            doc,
+            styles,
+            viewport,
+            nodes: (0..slots).map(|_| LayoutNode::default()).collect(),
+            calcs: CalcTable::default(),
+            stack: Vec::new(),
+            reach: None,
+            slots,
+            built: vec![false; slots],
+            before: HashMap::new(),
+            attached: vec![false; slots],
+            first_new: slots,
         }
     }
-    let mapped = |index: usize| matching.get(index).copied().flatten();
-    let same = |index: usize, node: &LayoutNode| {
-        let Some(then) = mapped(index).map(|at| &old[at]) else {
-            return false;
+
+    fn incremental(
+        doc: &'a Document,
+        styles: &'a Styles,
+        viewport: (f32, f32),
+        mut state: LayoutState,
+        touched: &Touched,
+    ) -> Self {
+        let capacity = doc.capacity_hint();
+        if capacity > state.slots {
+            state.grow(reserved(capacity));
+        }
+        let slots = state.slots;
+        let mut on_path = vec![false; slots];
+        let mut under_deep = vec![false; slots];
+        let in_document = |id: NodeId| erk_invalidation::journal::connected(doc, id);
+        for &id in touched.deep.iter().chain(&touched.shallow) {
+            if !in_document(id) {
+                continue;
+            }
+            let mut at = Some(id);
+            while let Some(node) = at {
+                let index = node.index() as usize;
+                if on_path[index] {
+                    break;
+                }
+                on_path[index] = true;
+                at = doc.node(node).and_then(|node| node.parent());
+            }
+        }
+        for &id in &touched.deep {
+            if !in_document(id) || under_deep[id.index() as usize] {
+                continue;
+            }
+            let mut walk = vec![id];
+            while let Some(node) = walk.pop() {
+                under_deep[node.index() as usize] = true;
+                walk.extend(doc.children(node));
+            }
+        }
+        let first_new = state.nodes.len();
+        Self {
+            doc,
+            styles,
+            viewport,
+            built: vec![false; first_new],
+            attached: vec![false; first_new],
+            nodes: state.nodes,
+            calcs: state.calcs,
+            stack: Vec::new(),
+            reach: Some(Reach {
+                on_path,
+                under_deep,
+            }),
+            slots,
+            before: HashMap::new(),
+            first_new,
+        }
+    }
+
+    /// Whether `id`'s box is built this frame, rather than taken from the
+    /// last tree as it is. A new element, or one that comes out of
+    /// `display: none`, gets a style this frame: its style is touched, and
+    /// a slot another element left is never taken for it.
+    fn builds(&self, id: NodeId) -> bool {
+        let Some(reach) = &self.reach else {
+            return true;
         };
-        // A box's place among its siblings, its display and its static
-        // position are in its parent's children and its style, or come
-        // after Taffy; what Taffy reads besides is here.
-        node.style == then.style
-            && node.paragraph == then.paragraph
-            && match (&node.replaced, &then.replaced) {
-                (Some(now), Some(then)) => match (&now.image, &then.image) {
-                    (Some(now), Some(then)) => Arc::ptr_eq(now, then),
-                    (None, None) => true,
-                    _ => false,
-                },
-                (None, None) => true,
-                _ => false,
+        let at = id.index() as usize;
+        self.built[at] || reach.on_path[at] || reach.under_deep[at]
+    }
+
+    /// `id`'s box, built this frame from nothing: what it was is kept to
+    /// compare the new one with.
+    fn claim(&mut self, id: NodeId) -> &mut LayoutNode {
+        let at = id.index() as usize;
+        if !self.built[at] {
+            self.built[at] = true;
+            let old = std::mem::take(&mut self.nodes[at]);
+            if self.reach.is_some() {
+                self.before.insert(at, old);
             }
-            && node.children.len() == then.children.len()
-            && node
-                .children
-                .iter()
-                .zip(&then.children)
-                .all(|(now, then)| mapped(usize::from(*now)) == Some(usize::from(*then)))
-    };
-    let mut dirty: Vec<bool> = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| node.in_tree && !same(index, node))
-        .collect();
-    // What holds a changed box changes with it.
-    for index in 0..nodes.len() {
-        if !dirty[index] {
-            continue;
+            self.nodes[at].element = Some(id);
         }
-        // A parent already marked has its own chain marked, or will.
-        let mut up = parents[index];
-        while let Some(parent) = up {
-            if dirty[parent] {
-                break;
+        &mut self.nodes[at]
+    }
+
+    /// `id`'s box, to write what its parent gives it: built this frame if
+    /// it is to be, otherwise the box as it was.
+    fn write(&mut self, id: NodeId) -> &mut LayoutNode {
+        if self.builds(id) {
+            self.claim(id)
+        } else {
+            &mut self.nodes[id.index() as usize]
+        }
+    }
+
+    /// A box made this frame (an anonymous paragraph or a placeholder).
+    fn push(&mut self, node: LayoutNode) -> usize {
+        self.nodes.push(node);
+        self.built.push(true);
+        self.attached.push(false);
+        self.nodes.len() - 1
+    }
+
+    fn set_children(&mut self, parent: usize, children: Vec<taffy::NodeId>) {
+        for child in &children {
+            let child = usize::from(*child);
+            self.attached[child] = true;
+            self.nodes[child].parent = Some(parent);
+        }
+        self.nodes[parent].children = children;
+    }
+
+    /// Give absolutely positioned element `element` to `container`, last.
+    /// The containing block is always built again here: it is an ancestor
+    /// of the block that found the element, which is built only when the
+    /// changes reach it, and then reach the ancestor too.
+    fn give(&mut self, element: usize, container: usize) {
+        self.nodes[container]
+            .children
+            .push(taffy::NodeId::from(element));
+        self.nodes[element].parent = Some(container);
+        self.attached[element] = true;
+    }
+
+    /// Build, and return the tree, its calc() values and the slots kept for
+    /// element boxes.
+    fn run(mut self, resources: &Resources) -> (Vec<LayoutNode>, CalcTable, usize) {
+        let root = self.doc.root();
+        self.stack.push((root, root));
+        while let Some((parent, outer_container)) = self.stack.pop() {
+            if self.builds(parent) {
+                let before = self.stack.len();
+                let found = self.build(parent, outer_container);
+                let pushed = self.stack[before..].to_vec();
+                let node = &mut self.nodes[parent.index() as usize];
+                node.pushed = pushed;
+                node.found = found;
+            } else {
+                // Taken as it was: what building it did elsewhere is done
+                // again, and what it holds is visited the same way.
+                let at = parent.index() as usize;
+                for (element, container) in self.nodes[at].found.clone() {
+                    if self.built[container] {
+                        self.give(element, container);
+                    }
+                }
+                let pushed = self.nodes[at].pushed.clone();
+                self.stack.extend(pushed);
             }
-            dirty[parent] = true;
-            up = parents[parent];
         }
-    }
-    for (index, node) in nodes.iter_mut().enumerate() {
-        if dirty[index] || !node.in_tree {
-            continue;
+        self.finish_built(resources);
+        if self.reach.is_some() {
+            self.keep_unchanged();
+            self.forget_orphans();
         }
-        if let Some(at) = mapped(index) {
-            let then = &mut old[at];
-            node.cache = std::mem::take(&mut then.cache);
-            node.unrounded = then.unrounded;
-            node.shaped = then.shaped.take();
-            node.result = then.result.take();
+        (self.nodes, self.calcs, self.slots)
+    }
+
+    /// Build `parent`'s box: its children's boxes, or its paragraph. Returns
+    /// the absolutely positioned elements it gave a containing block, each
+    /// with that block.
+    fn build(&mut self, parent: NodeId, outer_container: NodeId) -> Vec<(usize, usize)> {
+        let doc = self.doc;
+        let styles = self.styles;
+        let parent_index = parent.index() as usize;
+        let viewport = self.viewport;
+        {
+            let node = self.claim(parent);
+            if parent == doc.root() {
+                // The document node is the initial containing block's box,
+                // the viewport (CSS 2 §10.1).
+                node.in_tree = true;
+                node.style = Style {
+                    display: Display::Block,
+                    size: Size {
+                        width: Dimension::length(viewport.0),
+                        height: Dimension::length(viewport.1),
+                    },
+                    ..Style::DEFAULT
+                };
+            }
         }
-    }
-}
-
-/// Build the layout tree: which slots generate boxes, their Taffy styles,
-/// and the paragraphs.
-/// A replaced element: its content is an image, sized by the image's
-/// natural size and ratio rather than by children (CSS 2 §10.3.2). Until
-/// the image arrives, or if it never does, it has no natural size.
-#[derive(Clone, Default)]
-struct Replaced {
-    image: Option<Arc<Image>>,
-}
-
-/// The border-box size of a replaced element with a natural size and ratio,
-/// by CSS 2 §10.3.2, §10.6.2 and the constraint table of §10.4: an auto
-/// dimension follows the other through the ratio, and when `min-*` or
-/// `max-*` changes one, an auto other follows the changed one. Taffy
-/// applies the ratio before the limits, so a `max-width` image kept its
-/// unlimited height (found by WPT, inline-replaced-height-010). A size the
-/// parent imposes (`known_dimensions`) wins.
-fn replaced_size(
-    style: &Style<Atom>,
-    natural: Size<f32>,
-    inputs: LayoutInput,
-    calcs: &CalcTable,
-) -> Size<Option<f32>> {
-    use taffy::MaybeResolve;
-    let resolve = |ptr, basis| calcs.resolve(ptr, basis);
-    let parent = inputs.parent_size;
-    let padding = style.padding.resolve_or_zero(parent.width, resolve);
-    let border = style.border.resolve_or_zero(parent.width, resolve);
-    let inset = Size {
-        width: padding.left + padding.right + border.left + border.right,
-        height: padding.top + padding.bottom + border.top + border.bottom,
-    };
-    // Content-box sizes from the style.
-    let content = |value: Option<f32>, axis_inset: f32| {
-        value.map(|v| match style.box_sizing {
-            taffy::BoxSizing::BorderBox => (v - axis_inset).max(0.0),
-            taffy::BoxSizing::ContentBox => v,
-        })
-    };
-    let size = style.size.maybe_resolve(parent, resolve);
-    let min = style.min_size.maybe_resolve(parent, resolve);
-    let max = style.max_size.maybe_resolve(parent, resolve);
-    let (width, height) = (
-        content(size.width, inset.width),
-        content(size.height, inset.height),
-    );
-    let (min_w, min_h) = (
-        content(min.width, inset.width).unwrap_or(0.0),
-        content(min.height, inset.height).unwrap_or(0.0),
-    );
-    let (max_w, max_h) = (
-        content(max.width, inset.width).unwrap_or(f32::INFINITY),
-        content(max.height, inset.height).unwrap_or(f32::INFINITY),
-    );
-    let ratio = style
-        .aspect_ratio
-        .unwrap_or(natural.width / natural.height.max(f32::EPSILON));
-    let (mut w, mut h) = match (width, height) {
-        (Some(w), Some(h)) => (w, h),
-        (Some(w), None) => (w, w / ratio),
-        (None, Some(h)) => (h * ratio, h),
-        (None, None) => (natural.width, natural.height),
-    };
-    let width_auto = width.is_none();
-    let height_auto = height.is_none();
-    // The limits; an auto dimension follows a limited one through the ratio.
-    let clamped_w = w.clamp(min_w, max_w.max(min_w));
-    if clamped_w != w {
-        w = clamped_w;
-        if height_auto {
-            h = w / ratio;
-        }
-    }
-    let clamped_h = h.clamp(min_h, max_h.max(min_h));
-    if clamped_h != h {
-        h = clamped_h;
-        if width_auto {
-            w = (h * ratio).clamp(min_w, max_w.max(min_w));
-        }
-    }
-    let known = inputs.known_dimensions;
-    Size {
-        width: known.width.or(Some(w + inset.width)),
-        height: known.height.or(Some(h + inset.height)),
-    }
-}
-
-/// Whether element `id` is a replaced element Erk lays out: `<img>`.
-fn is_replaced(doc: &Document, id: NodeId) -> bool {
-    doc.node(id)
-        .and_then(|node| node.as_element())
-        .is_some_and(|element| element.name.local == erk_dom::local_name!("img"))
-}
-
-fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutNode>, CalcTable) {
-    let mut nodes: Vec<LayoutNode> = (0..doc.capacity_hint())
-        .map(|_| LayoutNode::default())
-        .collect();
-    let mut calcs = CalcTable::default();
-
-    // The document node is the initial containing block's box.
-    let root = &mut nodes[doc.root().index() as usize];
-    root.in_tree = true;
-    root.style = Style {
-        display: Display::Block,
-        ..Style::DEFAULT
-    };
-
-    // Each block to build, with the containing block of the absolutely
-    // positioned elements below it.
-    let mut stack = vec![(doc.root(), doc.root())];
-    while let Some((parent, outer_container)) = stack.pop() {
         let parent_style = styles.computed(parent);
         let contains = parent_style
             .as_ref()
@@ -955,15 +1058,14 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
             if let Some(computed) = parent_style {
                 let paragraph = Paragraph::new(&tokens, &computed);
                 if !paragraph.is_empty() {
-                    let children = add_atoms(&mut nodes, &mut calcs, &mut stack, atoms, container);
-                    let node = &mut nodes[parent.index() as usize];
+                    let children = self.add_atoms(atoms, container);
+                    let node = &mut self.nodes[parent_index];
                     node.shape_key = Some(shape_key(parent, &paragraph));
                     node.paragraph = Some(paragraph);
-                    node.children = children;
+                    self.set_children(parent_index, children);
                 }
             }
-            add_out_of_flow(doc, styles, &mut nodes, &mut calcs, &mut stack, out_of_flow);
-            continue;
+            return self.add_out_of_flow(out_of_flow);
         }
 
         let mut children = Vec::new();
@@ -975,43 +1077,26 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                     run.atoms.extend(atoms);
                 }
                 Entry::OutOfFlow(child) => {
-                    let index = child.index() as usize;
                     if !block_container {
                         // It ends the text run before it: the text on each
                         // side is an anonymous item of its own (CSS Flexbox
                         // §4: "contiguous" runs).
-                        run.close(
-                            &mut nodes,
-                            &mut calcs,
-                            &mut stack,
-                            &mut children,
-                            parent,
-                            &parent_style,
-                            container,
-                        );
+                        self.close(&mut run, &mut children, parent, &parent_style, container);
                         // A placeholder would be a flex or grid item of its
                         // own. When the container is also the containing
                         // block, Taffy places the element as if it were the
                         // sole item (CSS Flexbox §4.1); otherwise it starts at
                         // the container's content edge.
                         if container != parent {
-                            nodes[index].static_position =
-                                Some(StaticPosition::ContentStart(parent.index() as usize));
+                            self.write(child).static_position =
+                                Some(StaticPosition::ContentStart(parent_index));
                         }
                     } else if run.has_content() {
                         // Inside a line: an anchor in the anonymous paragraph.
-                        run.tokens.push(InlineToken::Anchor(index));
+                        run.tokens.push(InlineToken::Anchor(child.index() as usize));
                     } else {
-                        run.close(
-                            &mut nodes,
-                            &mut calcs,
-                            &mut stack,
-                            &mut children,
-                            parent,
-                            &parent_style,
-                            container,
-                        );
-                        nodes.push(LayoutNode {
+                        self.close(&mut run, &mut children, parent, &parent_style, container);
+                        let placeholder = self.push(LayoutNode {
                             in_tree: true,
                             style: Style {
                                 display: Display::Block,
@@ -1020,8 +1105,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                             key: Some(BoxKey::Placeholder(child.to_bits())),
                             ..LayoutNode::default()
                         });
-                        let placeholder = nodes.len() - 1;
-                        nodes[index].static_position =
+                        self.write(child).static_position =
                             Some(StaticPosition::Placeholder(placeholder));
                         children.push(taffy::NodeId::from(placeholder));
                     }
@@ -1031,158 +1115,435 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
                     if style.display == Display::None {
                         continue;
                     }
-                    run.close(
-                        &mut nodes,
-                        &mut calcs,
-                        &mut stack,
-                        &mut children,
-                        parent,
-                        &parent_style,
-                        container,
-                    );
-                    calcs.record(&computed);
-                    let node = &mut nodes[child.index() as usize];
-                    node.in_tree = true;
-                    node.style = style;
-                    node.order = computed.clone_order();
+                    self.close(&mut run, &mut children, parent, &parent_style, container);
+                    if self.builds(child) {
+                        self.calcs.record(&computed);
+                        let node = self.claim(child);
+                        node.in_tree = true;
+                        node.style = style;
+                        node.order = computed.clone_order();
+                    }
                     children.push(taffy_id(child));
-                    stack.push((child, container));
+                    self.stack.push((child, container));
                 }
             }
         }
-        run.close(
-            &mut nodes,
-            &mut calcs,
-            &mut stack,
-            &mut children,
-            parent,
-            &parent_style,
-            container,
-        );
+        self.close(&mut run, &mut children, parent, &parent_style, container);
         // Taffy lays out flex and grid items in child order and has no
         // `order` property: sort the items by it, keeping tree order between
         // equal values (CSS Flexbox §5.4). Anonymous items have order 0.
         if !block_container {
-            children.sort_by_key(|child| nodes[usize::from(*child)].order);
+            children.sort_by_key(|child| self.nodes[usize::from(*child)].order);
         }
-        nodes[parent.index() as usize].children = children;
-        add_out_of_flow(doc, styles, &mut nodes, &mut calcs, &mut stack, out_of_flow);
+        self.set_children(parent_index, children);
+        self.add_out_of_flow(out_of_flow)
     }
 
-    // Replaced elements: an `<img>` with a box shows its image, if it has
-    // arrived; its natural ratio, unless the style sets one, keeps a
-    // single given dimension in proportion.
-    let mut stack = vec![doc.root()];
-    while let Some(id) = stack.pop() {
-        let index = id.index() as usize;
-        if nodes[index].in_tree && is_replaced(doc, id) {
-            let image = doc
-                .node(id)
-                .and_then(|node| node.as_element())
-                .and_then(|element| element.attr(&erk_dom::local_name!("src")))
-                .and_then(|src| resources.image(src.trim()))
-                .cloned();
-            // Laid out by Taffy's block layout: a block-level image whose
-            // parent is a block container (a flex or grid item sizes itself
-            // from its content, and an inline one is measured in its line).
-            let in_block_flow = styles
-                .computed(id)
-                .is_some_and(|style| !is_inline_level(&style))
-                && doc
-                    .node(id)
-                    .and_then(|node| node.parent())
-                    .and_then(|parent| styles.computed(parent))
-                    .is_some_and(|parent| {
-                        matches!(
-                            parent.get_box().clone_display().inside(),
-                            DisplayInside::Flow | DisplayInside::FlowRoot
-                        )
-                    });
-            if let Some(image) = &image {
-                let style = &mut nodes[index].style;
-                if style.aspect_ratio.is_none() {
-                    style.aspect_ratio = Some(image.width() / image.height());
-                }
-                // An auto width is the natural width, or what the ratio makes
-                // of a fixed height (CSS 2 §10.3.2, §10.3.4); Taffy's block
-                // layout would stretch it to the container like a block.
-                if in_block_flow && style.size.width.is_auto() {
-                    let ratio = style.aspect_ratio.unwrap_or(1.0);
-                    let height = style.size.height.into_raw();
-                    let width = if height.tag() == taffy::CompactLength::length(0.0).tag() {
-                        height.value() * ratio
-                    } else if style.size.height.is_auto() {
-                        image.width()
-                    } else {
-                        // A percentage height: left to Taffy.
-                        f32::NAN
-                    };
-                    if width.is_finite() {
-                        style.size.width = Dimension::length(width);
-                    }
-                }
-            }
-            nodes[index].replaced = Some(Replaced { image });
+    /// Close `run`: unless it is only whitespace, it becomes an anonymous
+    /// paragraph box after `children`, styled like its block.
+    fn close(
+        &mut self,
+        run: &mut Run,
+        children: &mut Vec<taffy::NodeId>,
+        parent: NodeId,
+        parent_style: &Option<StyleArc>,
+        container: NodeId,
+    ) {
+        let Run { tokens, atoms } = std::mem::take(run);
+        let Some(style) = parent_style else {
+            return;
+        };
+        let paragraph = Paragraph::new(&tokens, style);
+        if paragraph.is_empty() {
+            return;
         }
-        stack.extend(doc.children(id));
-    }
-
-    // Anchors in lines: their paragraph is the static position.
-    for index in 0..nodes.len() {
-        let anchors: Vec<usize> = nodes[index]
-            .paragraph
-            .as_ref()
-            .map(Paragraph::anchors)
-            .unwrap_or_default();
-        for element in anchors {
-            nodes[element].static_position = Some(StaticPosition::Line(index));
-        }
-    }
-
-    // Each element's box, by the element, holding its style.
-    let mut walk = vec![doc.root()];
-    while let Some(id) = walk.pop() {
-        walk.extend(doc.children(id));
-        let node = &mut nodes[id.index() as usize];
-        if node.in_tree {
-            node.key = Some(BoxKey::Element);
-            node.style_source = styles.computed(id);
-        }
-    }
-    (nodes, calcs)
-}
-
-/// Give each absolutely positioned element a box as the last child of its
-/// containing block. The containing block was built before it (it is an
-/// ancestor), and is never a paragraph: positioned and transformed blocks
-/// keep a block box. A fixed element goes to its nearest transformed
-/// ancestor, or else to the viewport, the document node's box.
-fn add_out_of_flow(
-    doc: &Document,
-    styles: &Styles,
-    nodes: &mut [LayoutNode],
-    calcs: &mut CalcTable,
-    stack: &mut Vec<(NodeId, NodeId)>,
-    out_of_flow: OutOfFlow,
-) {
-    use erk_style::style::computed_values::position::T as CssPosition;
-    for (id, computed, container) in out_of_flow {
-        let container = if computed.clone_position() == CssPosition::Fixed {
-            fixed_container(doc, styles, id)
+        let container = if contains_out_of_flow(style) {
+            parent
         } else {
             container
         };
-        calcs.record(&computed);
-        let node = &mut nodes[id.index() as usize];
-        node.in_tree = true;
-        node.style = taffy_style(&computed);
-        node.block_level = computed.get_box().original_display.outside() == DisplayOutside::Block;
-        nodes[container.index() as usize]
-            .children
-            .push(taffy_id(id));
-        // A positioned element is the containing block of what it holds.
-        stack.push((id, id));
+        let atoms = self.add_atoms(atoms, container);
+        let anonymous = self.push(LayoutNode {
+            in_tree: true,
+            style: Style {
+                display: Display::Block,
+                ..Style::DEFAULT
+            },
+            shape_key: Some(shape_key(parent, &paragraph)),
+            key: Some(BoxKey::Anonymous(
+                parent.to_bits(),
+                shape_key(parent, &paragraph),
+            )),
+            paragraph: Some(paragraph),
+            anonymous_parent: Some(parent.index() as usize),
+            ..LayoutNode::default()
+        });
+        self.set_children(anonymous, atoms);
+        children.push(taffy::NodeId::from(anonymous));
     }
+
+    /// Give each atomic inline a box of its own, laid out like a block of its
+    /// display, and return them as the paragraph's children.
+    fn add_atoms(&mut self, atoms: Atoms, container: NodeId) -> Vec<taffy::NodeId> {
+        atoms
+            .into_iter()
+            .map(|(id, computed)| {
+                if self.builds(id) {
+                    self.calcs.record(&computed);
+                    let node = self.claim(id);
+                    node.in_tree = true;
+                    node.style = taffy_style(&computed);
+                }
+                self.stack.push((id, container));
+                taffy_id(id)
+            })
+            .collect()
+    }
+
+    /// Give each absolutely positioned element a box as the last child of
+    /// its containing block. The containing block was built before it (it
+    /// is an ancestor), and is never a paragraph: positioned and transformed
+    /// blocks keep a block box. A fixed element goes to its nearest
+    /// transformed ancestor, or else to the viewport, the document node's
+    /// box.
+    fn add_out_of_flow(&mut self, out_of_flow: OutOfFlow) -> Vec<(usize, usize)> {
+        use erk_style::style::computed_values::position::T as CssPosition;
+        let mut given = Vec::new();
+        for (id, computed, container) in out_of_flow {
+            let container = if computed.clone_position() == CssPosition::Fixed {
+                fixed_container(self.doc, self.styles, id)
+            } else {
+                container
+            };
+            if self.builds(id) {
+                self.calcs.record(&computed);
+                let node = self.claim(id);
+                node.in_tree = true;
+                node.style = taffy_style(&computed);
+                node.block_level =
+                    computed.get_box().original_display.outside() == DisplayOutside::Block;
+            }
+            let (element, container) = (id.index() as usize, container.index() as usize);
+            self.give(element, container);
+            given.push((element, container));
+            // A positioned element is the containing block of what it holds.
+            self.stack.push((id, id));
+        }
+        given
+    }
+
+    /// What the boxes built this frame take from more than their parent:
+    /// an image, the static position of an anchor in their lines, their
+    /// key and style.
+    fn finish_built(&mut self, resources: &Resources) {
+        let doc = self.doc;
+        let styles = self.styles;
+        for index in 0..self.nodes.len() {
+            if !self.built[index] || !self.nodes[index].in_tree {
+                continue;
+            }
+            if let Some(id) = self.nodes[index].element.filter(|_| index < self.slots) {
+                self.nodes[index].key = Some(BoxKey::Element);
+                self.nodes[index].style_source = styles.computed(id);
+                if is_replaced(doc, id) {
+                    self.replace(id, resources);
+                }
+            }
+            // Anchors in lines: their paragraph is the static position.
+            let anchors: Vec<usize> = self.nodes[index]
+                .paragraph
+                .as_ref()
+                .map(Paragraph::anchors)
+                .unwrap_or_default();
+            for element in anchors {
+                self.nodes[element].static_position = Some(StaticPosition::Line(index));
+            }
+        }
+    }
+
+    /// An `<img>` with a box shows its image, if it has arrived; its
+    /// natural ratio, unless the style sets one, keeps a single given
+    /// dimension in proportion.
+    fn replace(&mut self, id: NodeId, resources: &Resources) {
+        let (doc, styles) = (self.doc, self.styles);
+        let index = id.index() as usize;
+        let image = doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .and_then(|element| element.attr(&erk_dom::local_name!("src")))
+            .and_then(|src| resources.image(src.trim()))
+            .cloned();
+        // Laid out by Taffy's block layout: a block-level image whose
+        // parent is a block container (a flex or grid item sizes itself
+        // from its content, and an inline one is measured in its line).
+        let in_block_flow = styles
+            .computed(id)
+            .is_some_and(|style| !is_inline_level(&style))
+            && doc
+                .node(id)
+                .and_then(|node| node.parent())
+                .and_then(|parent| styles.computed(parent))
+                .is_some_and(|parent| {
+                    matches!(
+                        parent.get_box().clone_display().inside(),
+                        DisplayInside::Flow | DisplayInside::FlowRoot
+                    )
+                });
+        if let Some(image) = &image {
+            let style = &mut self.nodes[index].style;
+            if style.aspect_ratio.is_none() {
+                style.aspect_ratio = Some(image.width() / image.height());
+            }
+            // An auto width is the natural width, or what the ratio makes
+            // of a fixed height (CSS 2 §10.3.2, §10.3.4); Taffy's block
+            // layout would stretch it to the container like a block.
+            if in_block_flow && style.size.width.is_auto() {
+                let ratio = style.aspect_ratio.unwrap_or(1.0);
+                let height = style.size.height.into_raw();
+                let width = if height.tag() == taffy::CompactLength::length(0.0).tag() {
+                    height.value() * ratio
+                } else if style.size.height.is_auto() {
+                    image.width()
+                } else {
+                    // A percentage height: left to Taffy.
+                    f32::NAN
+                };
+                if width.is_finite() {
+                    style.size.width = Dimension::length(width);
+                }
+            }
+        }
+        self.nodes[index].replaced = Some(Replaced { image });
+    }
+
+    /// Give the boxes built this frame that are unchanged since the last
+    /// tree what they had: Taffy's cache, the unrounded layout, a
+    /// paragraph's lines and result. A box is unchanged when what Taffy
+    /// lays it out from (its style, paragraph, image and children) equals
+    /// the old box's and no descendant changed. Boxes taken as they were
+    /// keep all of it: nothing below them changed.
+    fn keep_unchanged(&mut self) {
+        // The anonymous boxes and placeholders the built boxes had, by key;
+        // they are still in the tree, no longer anyone's child.
+        let mut by_key: HashMap<BoxKey, usize> = HashMap::new();
+        for old in self.before.values() {
+            for child in &old.children {
+                let child = usize::from(*child);
+                if child >= self.slots
+                    && let Some(key) = self.nodes[child].key
+                {
+                    by_key.insert(key, child);
+                }
+            }
+        }
+        // The box a box of this frame was in the last tree: an element's
+        // at its slot, one made this frame by key, any other itself.
+        let first_new = self.first_new;
+        let old_index = |index: usize, nodes: &[LayoutNode]| -> Option<usize> {
+            if index < first_new {
+                Some(index)
+            } else {
+                nodes[index].key.and_then(|key| by_key.get(&key).copied())
+            }
+        };
+        let rebuilt: Vec<usize> = (0..self.nodes.len())
+            .filter(|index| self.built[*index] && self.nodes[*index].in_tree)
+            .collect();
+        let mut dirty = vec![false; self.nodes.len()];
+        for &index in &rebuilt {
+            let node = &self.nodes[index];
+            let then = if index < self.slots {
+                self.before.get(&index)
+            } else {
+                old_index(index, &self.nodes).map(|at| &self.nodes[at])
+            };
+            let same = then.is_some_and(|then| {
+                // A box's place among its siblings, its display and its
+                // static position are in its parent's children and its
+                // style, or come after Taffy; what Taffy reads besides is
+                // here.
+                then.in_tree
+                    && node.style == then.style
+                    && node.paragraph == then.paragraph
+                    && match (&node.replaced, &then.replaced) {
+                        (Some(now), Some(then)) => match (&now.image, &then.image) {
+                            (Some(now), Some(then)) => Arc::ptr_eq(now, then),
+                            (None, None) => true,
+                            _ => false,
+                        },
+                        (None, None) => true,
+                        _ => false,
+                    }
+                    && node.children.len() == then.children.len()
+                    && node.children.iter().zip(&then.children).all(|(now, then)| {
+                        old_index(usize::from(*now), &self.nodes) == Some(usize::from(*then))
+                    })
+            });
+            dirty[index] = !same;
+        }
+        // What holds a changed box changes with it.
+        for &index in &rebuilt {
+            if !dirty[index] {
+                continue;
+            }
+            let mut up = self.nodes[index].parent;
+            // Its ancestors are built too (the changes reach them), and
+            // their links up were written this frame.
+            while let Some(parent) = up {
+                if dirty[parent] {
+                    break;
+                }
+                dirty[parent] = true;
+                up = self.nodes[parent].parent;
+            }
+        }
+        for &index in &rebuilt {
+            if dirty[index] {
+                continue;
+            }
+            let then = if index < self.slots {
+                self.before.get_mut(&index)
+            } else {
+                match old_index(index, &self.nodes) {
+                    Some(at) if at != index => {
+                        let (low, high) = self.nodes.split_at_mut(index);
+                        // Made this frame, after the old one.
+                        let node = &mut high[0];
+                        let then = &mut low[at];
+                        node.cache = std::mem::take(&mut then.cache);
+                        node.unrounded = then.unrounded;
+                        node.shaped = then.shaped.take();
+                        node.result = then.result.take();
+                        continue;
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(then) = then {
+                let node = &mut self.nodes[index];
+                node.cache = std::mem::take(&mut then.cache);
+                node.unrounded = then.unrounded;
+                node.shaped = then.shaped.take();
+                node.result = then.result.take();
+            }
+        }
+    }
+
+    /// Empty the boxes a built box no longer holds, with what is in them,
+    /// unless another took them this frame: a removed element, one gone to
+    /// `display: none`, an anonymous paragraph made again.
+    fn forget_orphans(&mut self) {
+        let mut stack: Vec<usize> = self
+            .before
+            .values()
+            .flat_map(|old| old.children.iter().map(|child| usize::from(*child)))
+            .filter(|child| !self.attached[*child])
+            .collect();
+        while let Some(index) = stack.pop() {
+            if self.attached[index] {
+                continue;
+            }
+            let node = std::mem::take(&mut self.nodes[index]);
+            stack.extend(
+                node.children
+                    .iter()
+                    .map(|child| usize::from(*child))
+                    .filter(|child| !self.attached[*child]),
+            );
+        }
+    }
+}
+
+/// A replaced element: its content is an image, sized by the image's
+/// natural size and ratio rather than by children (CSS 2 §10.3.2). Until
+/// the image arrives, or if it never does, it has no natural size.
+#[derive(Clone, Default)]
+struct Replaced {
+    image: Option<Arc<Image>>,
+}
+
+/// The border-box size of a replaced element with a natural size and ratio,
+/// by CSS 2 §10.3.2, §10.6.2 and the constraint table of §10.4: an auto
+/// dimension follows the other through the ratio, and when `min-*` or
+/// `max-*` changes one, an auto other follows the changed one. Taffy
+/// applies the ratio before the limits, so a `max-width` image kept its
+/// unlimited height (found by WPT, inline-replaced-height-010). A size the
+/// parent imposes (`known_dimensions`) wins.
+fn replaced_size(
+    style: &Style<Atom>,
+    natural: Size<f32>,
+    inputs: LayoutInput,
+    calcs: &CalcTable,
+) -> Size<Option<f32>> {
+    use taffy::MaybeResolve;
+    let resolve = |ptr, basis| calcs.resolve(ptr, basis);
+    let parent = inputs.parent_size;
+    let padding = style.padding.resolve_or_zero(parent.width, resolve);
+    let border = style.border.resolve_or_zero(parent.width, resolve);
+    let inset = Size {
+        width: padding.left + padding.right + border.left + border.right,
+        height: padding.top + padding.bottom + border.top + border.bottom,
+    };
+    // Content-box sizes from the style.
+    let content = |value: Option<f32>, axis_inset: f32| {
+        value.map(|v| match style.box_sizing {
+            taffy::BoxSizing::BorderBox => (v - axis_inset).max(0.0),
+            taffy::BoxSizing::ContentBox => v,
+        })
+    };
+    let size = style.size.maybe_resolve(parent, resolve);
+    let min = style.min_size.maybe_resolve(parent, resolve);
+    let max = style.max_size.maybe_resolve(parent, resolve);
+    let (width, height) = (
+        content(size.width, inset.width),
+        content(size.height, inset.height),
+    );
+    let (min_w, min_h) = (
+        content(min.width, inset.width).unwrap_or(0.0),
+        content(min.height, inset.height).unwrap_or(0.0),
+    );
+    let (max_w, max_h) = (
+        content(max.width, inset.width).unwrap_or(f32::INFINITY),
+        content(max.height, inset.height).unwrap_or(f32::INFINITY),
+    );
+    let ratio = style
+        .aspect_ratio
+        .unwrap_or(natural.width / natural.height.max(f32::EPSILON));
+    let (mut w, mut h) = match (width, height) {
+        (Some(w), Some(h)) => (w, h),
+        (Some(w), None) => (w, w / ratio),
+        (None, Some(h)) => (h * ratio, h),
+        (None, None) => (natural.width, natural.height),
+    };
+    let width_auto = width.is_none();
+    let height_auto = height.is_none();
+    // The limits; an auto dimension follows a limited one through the ratio.
+    let clamped_w = w.clamp(min_w, max_w.max(min_w));
+    if clamped_w != w {
+        w = clamped_w;
+        if height_auto {
+            h = w / ratio;
+        }
+    }
+    let clamped_h = h.clamp(min_h, max_h.max(min_h));
+    if clamped_h != h {
+        h = clamped_h;
+        if width_auto {
+            w = (h * ratio).clamp(min_w, max_w.max(min_w));
+        }
+    }
+    let known = inputs.known_dimensions;
+    Size {
+        width: known.width.or(Some(w + inset.width)),
+        height: known.height.or(Some(h + inset.height)),
+    }
+}
+
+/// Whether element `id` is a replaced element Erk lays out: `<img>`.
+fn is_replaced(doc: &Document, id: NodeId) -> bool {
+    doc.node(id)
+        .and_then(|node| node.as_element())
+        .is_some_and(|element| element.name.local == erk_dom::local_name!("img"))
 }
 
 /// Stylo's style as Taffy's, with what Erk lays out differently: floats as
@@ -1268,74 +1629,6 @@ impl Run {
             InlineToken::Open(..) | InlineToken::Close => false,
         })
     }
-
-    /// Close the run: unless it is only whitespace, it becomes an anonymous
-    /// paragraph box after the children so far, styled like its block.
-    #[allow(clippy::too_many_arguments)]
-    fn close(
-        &mut self,
-        nodes: &mut Vec<LayoutNode>,
-        calcs: &mut CalcTable,
-        stack: &mut Vec<(NodeId, NodeId)>,
-        children: &mut Vec<taffy::NodeId>,
-        parent: NodeId,
-        parent_style: &Option<StyleArc>,
-        container: NodeId,
-    ) {
-        let Self { tokens, atoms } = std::mem::take(self);
-        let Some(style) = parent_style else {
-            return;
-        };
-        let paragraph = Paragraph::new(&tokens, style);
-        if paragraph.is_empty() {
-            return;
-        }
-        let container = if contains_out_of_flow(style) {
-            parent
-        } else {
-            container
-        };
-        let atoms = add_atoms(nodes, calcs, stack, atoms, container);
-        nodes.push(LayoutNode {
-            in_tree: true,
-            children: atoms,
-            style: Style {
-                display: Display::Block,
-                ..Style::DEFAULT
-            },
-            shape_key: Some(shape_key(parent, &paragraph)),
-            key: Some(BoxKey::Anonymous(
-                parent.to_bits(),
-                shape_key(parent, &paragraph),
-            )),
-            paragraph: Some(paragraph),
-            anonymous_parent: Some(parent.index() as usize),
-            ..LayoutNode::default()
-        });
-        children.push(taffy::NodeId::from(nodes.len() - 1));
-    }
-}
-
-/// Give each atomic inline a box of its own, laid out like a block of its
-/// display, and return them as the paragraph's children.
-fn add_atoms(
-    nodes: &mut [LayoutNode],
-    calcs: &mut CalcTable,
-    stack: &mut Vec<(NodeId, NodeId)>,
-    atoms: Atoms,
-    container: NodeId,
-) -> Vec<taffy::NodeId> {
-    atoms
-        .into_iter()
-        .map(|(id, computed)| {
-            calcs.record(&computed);
-            let node = &mut nodes[id.index() as usize];
-            node.in_tree = true;
-            node.style = taffy_style(&computed);
-            stack.push((id, container));
-            taffy_id(id)
-        })
-        .collect()
 }
 
 fn is_inline_level(style: &ComputedValues) -> bool {

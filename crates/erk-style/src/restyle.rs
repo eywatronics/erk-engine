@@ -211,6 +211,7 @@ impl Restyler {
             reacts: reacts(stylist),
             styled,
             damage,
+            moved: frame.moved,
         }
     }
 
@@ -263,6 +264,7 @@ impl Restyler {
                 // Its new ancestors and siblings may style it otherwise.
                 slot.parent = parent;
                 frame.hints.push((id, RestyleHint::restyle_subtree()));
+                frame.moved.push(id);
             }
             if slot.state != states[at] {
                 frame.snapshot(id).state = Some(slot.state);
@@ -359,6 +361,8 @@ struct Frame {
     /// The elements styling must reach: new ones, and those with a
     /// snapshot or a hint.
     reach: Vec<NodeId>,
+    /// The elements that moved to another parent.
+    moved: Vec<NodeId>,
 }
 
 impl Default for Frame {
@@ -368,6 +372,7 @@ impl Default for Frame {
             snapshots: SnapshotMap::new(),
             hints: Vec::new(),
             reach: Vec::new(),
+            moved: Vec::new(),
         }
     }
 }
