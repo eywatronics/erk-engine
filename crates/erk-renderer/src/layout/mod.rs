@@ -68,7 +68,7 @@ use crate::text::{
 /// The result of laying out one document.
 pub(crate) struct Layouts {
     nodes: Vec<Option<Layout>>,
-    text: Vec<Option<ShapedText>>,
+    text: Vec<Option<Arc<ShapedText>>>,
     /// Anonymous paragraph boxes, by the index of the block they belong to.
     anonymous: Vec<Vec<AnonymousText>>,
     /// The decoded image of each `<img>` whose image has arrived.
@@ -85,7 +85,7 @@ pub(crate) struct Layouts {
 pub(crate) struct AnonymousText {
     /// Relative to the block's box, like a child's layout.
     pub(crate) layout: Layout,
-    pub(crate) text: ShapedText,
+    pub(crate) text: Arc<ShapedText>,
 }
 
 /// A paragraph's text, its shaped and line-broken layout, and the
@@ -127,7 +127,7 @@ impl Layouts {
     /// The shaped, line-broken text of a paragraph, positioned relative to
     /// its content box.
     pub(crate) fn text(&self, id: NodeId) -> Option<&ShapedText> {
-        self.text.get(id.index() as usize)?.as_ref()
+        self.text.get(id.index() as usize)?.as_deref()
     }
 
     /// The anonymous paragraph boxes among `id`'s children, in tree order.
@@ -235,12 +235,20 @@ pub(crate) fn layout(
     place_at_static_positions(doc, &mut nodes);
     move_relative_atoms(&mut nodes);
     relative_to_dom(doc, &mut nodes);
-    let mut text: Vec<Option<ShapedText>> = nodes
+    let mut text: Vec<Option<Arc<ShapedText>>> = nodes
         .iter_mut()
         .map(|node| {
             let paragraph = node.paragraph.as_ref().filter(|_| node.in_tree)?;
+            // A box whose paragraph and inputs are unchanged breaks its lines
+            // as before; only where it lands can round its size otherwise,
+            // and a relative offset in percent follows the size.
+            if let Some((at, kept)) = &node.result
+                && *at == node.layout
+            {
+                return Some(kept.clone());
+            }
             let layout = node.shaped.clone()?;
-            Some(ShapedText {
+            let shaped = Arc::new(ShapedText {
                 relative: relative_offsets(paragraph, &node.layout),
                 text: paragraph.text.clone(),
                 sources: paragraph.sources.clone(),
@@ -255,7 +263,9 @@ pub(crate) fn layout(
                     .collect(),
                 decorations: layout.decorations(paragraph),
                 layout,
-            })
+            });
+            node.result = Some((node.layout, shaped.clone()));
+            Some(shaped)
         })
         .collect();
     let mut anonymous: Vec<Vec<AnonymousText>> = (0..slots).map(|_| Vec::new()).collect();
@@ -579,6 +589,10 @@ struct LayoutNode {
     anonymous_parent: Option<usize>,
     /// Which box this is from frame to frame (M5.4).
     key: Option<BoxKey>,
+    /// A paragraph's text as the result gives it, and the final layout it
+    /// was made for: a box not laid out again with the same final layout
+    /// gives the same (M5.4).
+    result: Option<(Layout, Arc<ShapedText>)>,
     /// An element's computed style, held while the box is: Taffy's style
     /// names its `calc()` values by their address in it, and an address
     /// compared with the next frame's must not have been reused.
@@ -628,12 +642,12 @@ enum StaticPosition {
     ContentStart(usize),
 }
 
-/// Which box a layout box is, from frame to frame: an element's, an
-/// anonymous paragraph box (its block and its shape key), or the
-/// placeholder of an absolutely positioned element.
+/// Which box a layout box is, from frame to frame: an element's (found at
+/// its slot), an anonymous paragraph box (its block and its shape key), or
+/// the placeholder of an absolutely positioned element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum BoxKey {
-    Element(u64),
+    Element,
     Anonymous(u64, ShapeKey),
     Placeholder(u64),
 }
@@ -652,14 +666,24 @@ pub(crate) struct LayoutState {
 /// and children) equals the old box's and no descendant changed.
 fn keep_unchanged(nodes: &mut [LayoutNode], old: Vec<LayoutNode>) {
     let mut old = old;
+    // An element's box is at its element's slot in both trees, whichever
+    // element it was: a slot given to another element with the same inputs
+    // lays out the same. The others (anonymous paragraphs, placeholders) are
+    // found by key.
     let by_key: HashMap<BoxKey, usize> = old
         .iter()
         .enumerate()
+        .filter(|(_, node)| node.key != Some(BoxKey::Element))
         .filter_map(|(index, node)| Some((node.key?, index)))
         .collect();
     let matching: Vec<Option<usize>> = nodes
         .iter()
-        .map(|node| node.key.and_then(|key| by_key.get(&key).copied()))
+        .enumerate()
+        .map(|(index, node)| match node.key {
+            Some(BoxKey::Element) => (index < old.len()).then_some(index),
+            Some(key) => by_key.get(&key).copied(),
+            None => None,
+        })
         .collect();
     let mut parents = vec![None; nodes.len()];
     for (index, node) in nodes.iter().enumerate() {
@@ -722,6 +746,7 @@ fn keep_unchanged(nodes: &mut [LayoutNode], old: Vec<LayoutNode>) {
             node.cache = std::mem::take(&mut then.cache);
             node.unrounded = then.unrounded;
             node.shaped = then.shaped.take();
+            node.result = then.result.take();
         }
     }
 }
@@ -1120,7 +1145,7 @@ fn build(doc: &Document, styles: &Styles, resources: &Resources) -> (Vec<LayoutN
         walk.extend(doc.children(id));
         let node = &mut nodes[id.index() as usize];
         if node.in_tree {
-            node.key = Some(BoxKey::Element(id.to_bits()));
+            node.key = Some(BoxKey::Element);
             node.style_source = styles.computed(id);
         }
     }

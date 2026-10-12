@@ -914,6 +914,23 @@ mod tests {
     }
 
     #[test]
+    fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
+        // Nothing in the paragraph's box changes, and Taffy does not lay it
+        // out again; but its rounded width follows where it lands, and a
+        // relative offset in percent follows the width.
+        let mut engine = verifying(
+            "<div id=g style='margin-left: 0.3px'><div style='width: 100px'>\
+             <p style='width: 50.5px'>a <span style='position: relative; left: 50%'>b</span></p>\
+             </div></div>",
+        );
+        let g = engine.query(None, "#g").unwrap().unwrap();
+        for margin in ["0.6px", "0.2px", "0.9px", "0.4px"] {
+            engine.set_style_property(g, "margin-left", margin).unwrap();
+            boxes_laid_out(&mut engine);
+        }
+    }
+
+    #[test]
     fn a_float_that_changes_moves_the_text_beside_it() {
         // Taffy's cache keys a box by its inputs, not by the floats around
         // it; the oracle checks that the boxes beside a changed float are
