@@ -12,7 +12,6 @@
 //! and styled into the next frame.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
 use erk_dom::{Document, ElementData, NodeData, NodeId, local_name};
@@ -20,7 +19,7 @@ use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
 use erk_style::{ComputedValues, Interaction, Invalidation, Restyler, StyleEngine, Styles};
 
-use crate::display::{DisplayItem, DisplayList, Frame as Rect};
+use crate::display::{Content, DisplayItem, DisplayList, Frame as Rect};
 use crate::layout;
 use crate::messages::{
     BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
@@ -58,7 +57,9 @@ pub(crate) struct Page {
     /// last, with how far each can go.
     scrollers: Vec<Scroller>,
     /// The last frame's element boxes, for the inspection queries.
-    boxes: HashMap<NodeId, BoxModel>,
+    /// The last frame's list before the document's scroll, and where its
+    /// boxes were.
+    list: Option<KeptList>,
     /// What the last frame did, counted.
     stats: FrameStats,
     /// What changed in the document since the last frame (M5.1).
@@ -87,6 +88,9 @@ struct Last<'a> {
     shapes: &'a mut ShapeCache,
     /// The last layout's tree, and where this one's goes.
     tree: &'a mut Option<layout::LayoutState>,
+    /// The last frame's list, when the layout, the styles and the
+    /// resources still hold.
+    list: Option<KeptList>,
 }
 
 /// A frame's layout, and the resources' revision it was made at. Another
@@ -144,6 +148,22 @@ thread_local! {
     static RESTYLERS: RefCell<Vec<Kept>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The last frame's list before the document's scroll, where its boxes
+/// were, and what they were made with besides the document, its styles and
+/// layout: a frame that changes none of it and scrolls the document inside
+/// the band the list was made for only moves the list (p2-incremental
+/// §3.7.1).
+struct KeptList {
+    scrolling: Scrolling,
+    content: Content,
+    /// The scroll offsets but the document's.
+    inner: Offsets,
+    /// The scroll containers whose scroll bars showed. Another viewport
+    /// needs no check here: it styles everything from nothing, and the
+    /// frame is not quiet.
+    bars: Vec<NodeId>,
+}
+
 /// A page's restyler, kept on a thread.
 struct Kept {
     page: Weak<()>,
@@ -168,7 +188,7 @@ struct Built {
     styles: Styles,
     layouts: layout::Layouts,
     viewport: (f32, f32),
-    boxes: HashMap<NodeId, BoxModel>,
+    kept_list: KeptList,
     offsets: Offsets,
     scrollers: Vec<Scroller>,
     hits: Vec<HitRegion>,
@@ -227,7 +247,7 @@ impl Page {
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
-            boxes: HashMap::new(),
+            list: None,
             stats: FrameStats::default(),
             journal: Journal::new_document(),
             changes: Changes::default(),
@@ -309,6 +329,11 @@ impl Page {
         if shaped_at != revision {
             shapes = ShapeCache::default();
         }
+        // A list holds while the layout, the styles and the resources do.
+        let list = self
+            .list
+            .take()
+            .filter(|_| reusable && quiet && same_resources);
         let (built, requests) = self.build(
             (w, h),
             styles,
@@ -316,6 +341,7 @@ impl Page {
                 kept,
                 shapes: &mut shapes,
                 tree: &mut tree,
+                list,
             },
             resources,
             !(quiet && same_resources),
@@ -335,7 +361,7 @@ impl Page {
             styles,
             layouts,
             viewport,
-            boxes,
+            kept_list,
             offsets,
             scrollers,
             hits,
@@ -343,7 +369,7 @@ impl Page {
         } = built;
         self.layout = Some(KeptLayout { layouts, revision });
         self.viewport = viewport;
-        self.boxes = boxes;
+        self.list = Some(kept_list);
         self.offsets = offsets;
         self.scrollers = scrollers;
         self.hits = hits;
@@ -484,6 +510,7 @@ impl Page {
                 kept: None,
                 shapes: &mut ShapeCache::default(),
                 tree: &mut None,
+                list: None,
             },
             resources,
             false,
@@ -514,7 +541,12 @@ impl Page {
             Vec::new()
         };
         mark(Stage::Style);
-        let Last { kept, shapes, tree } = last;
+        let Last {
+            kept,
+            shapes,
+            tree,
+            list: last_list,
+        } = last;
         let reused = kept.is_some();
         let layouts = kept.unwrap_or_else(|| {
             shapes.start_frame();
@@ -534,7 +566,6 @@ impl Page {
             layouts
         });
         mark(Stage::Layout);
-        let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
         let bars = self.bars(self.hover);
         // Only what may show in the viewport.
         let view = Rect {
@@ -543,15 +574,38 @@ impl Page {
             width: w,
             height: h,
         };
-        let (mut list, _) = DisplayList::build(
-            doc,
-            &styles,
-            &layouts,
-            resources,
-            &scrolling,
-            &bars,
-            Some(view),
-        );
+        let inner: Offsets = self
+            .offsets
+            .iter()
+            .filter(|(node, _)| **node != doc.root())
+            .map(|(node, offset)| (*node, *offset))
+            .collect();
+        let document = self.offsets.get(&doc.root()).copied().unwrap_or_default();
+        // The last list, if only the document scrolled, inside its band.
+        let kept_list = last_list
+            .filter(|kept| kept.inner == inner && kept.bars == bars)
+            .and_then(|mut kept| {
+                kept.scrolling.scroll_document(document);
+                let offset = kept.scrolling.document_offset();
+                (kept.content.band == Some(crate::display::band(view, offset))).then_some(kept)
+            });
+        let (scrolling, content, listed) = match kept_list {
+            Some(kept) => (kept.scrolling, kept.content, false),
+            None => {
+                let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+                let (content, _) = Content::build(
+                    doc,
+                    &styles,
+                    &layouts,
+                    resources,
+                    &scrolling,
+                    &bars,
+                    Some(view),
+                );
+                (scrolling, content, true)
+            }
+        };
+        let mut list = content.scrolled(&scrolling, &bars);
         let hits = hits(&list.items);
         if let Some(node) = self.highlight {
             list.items.extend(
@@ -567,11 +621,11 @@ impl Page {
             laid_out,
             shaped,
             items: list.items.len(),
+            listed: if listed { content.len() } else { 0 },
             // The journal's counts are the frame's, set by `prepare`.
             ..FrameStats::default()
         };
         let built = Built {
-            boxes: boxes(doc, &layouts, &scrolling),
             // What the user scrolled, as far as it still goes.
             offsets: scrolling
                 .scopes
@@ -588,6 +642,12 @@ impl Page {
                     max: scope.max,
                 })
                 .collect(),
+            kept_list: KeptList {
+                scrolling,
+                content,
+                inner,
+                bars,
+            },
             list,
             styles,
             layouts,
@@ -1104,7 +1164,12 @@ impl Page {
     /// text node, an inline element, one not displayed, one not yet laid
     /// out).
     pub(crate) fn node_box(&self, node: u64) -> Result<Option<BoxModel>, Status> {
-        Ok(self.boxes.get(&self.node(node)?).cloned())
+        let id = self.node(node)?;
+        Ok(self
+            .layout
+            .as_ref()
+            .zip(self.list.as_ref())
+            .and_then(|(kept, list)| box_model(&kept.layouts, &list.scrolling, id)))
     }
 
     /// `node`'s computed style in the last frame, as `name: value;` lines in
@@ -1313,38 +1378,28 @@ fn status(error: erk_dom::MutationError) -> Status {
     }
 }
 
-/// The box of every element laid out, where the last frame placed it: in
-/// CSS pixels relative to the viewport, scrolled as painted. Walked without
-/// recursion: the document may be as deep as the parser allows.
-fn boxes(
-    doc: &Document,
-    layouts: &layout::Layouts,
-    scrolling: &Scrolling,
-) -> HashMap<NodeId, BoxModel> {
+/// The box of `id`, where the last frame placed it: in CSS pixels
+/// relative to the viewport, scrolled as painted. Made when asked: making
+/// every element's each frame took milliseconds on a large page.
+fn box_model(layouts: &layout::Layouts, scrolling: &Scrolling, id: NodeId) -> Option<BoxModel> {
     let sides = |rect: &taffy::Rect<f32>| [rect.top, rect.right, rect.bottom, rect.left];
-    let mut boxes = HashMap::new();
-    let mut stack = vec![doc.root()];
-    while let Some(id) = stack.pop() {
-        // Only elements are laid out under their own id: a text node's
-        // anonymous box (a line, a flex item) is not the node's.
-        if let Some(layout) = layouts.get(id) {
-            let (x, y) = scrolling.position(id).unwrap_or_default();
-            boxes.insert(
-                id,
-                BoxModel {
-                    x,
-                    y,
-                    width: layout.size.width,
-                    height: layout.size.height,
-                    margin: sides(&layout.margin),
-                    border: sides(&layout.border),
-                    padding: sides(&layout.padding),
-                },
-            );
-        }
-        stack.extend(doc.children(id));
+    // Only elements are laid out under their own id: a text node's
+    // anonymous box (a line, a flex item) is not the node's.
+    let layout = layouts.get(id)?;
+    let (mut x, mut y) = scrolling.position(id).unwrap_or_default();
+    if scrolling.moves(scrolling.scope(id)) {
+        let (dx, dy) = scrolling.document_offset();
+        (x, y) = (x - dx, y - dy);
     }
-    boxes
+    Some(BoxModel {
+        x,
+        y,
+        width: layout.size.width,
+        height: layout.size.height,
+        margin: sides(&layout.margin),
+        border: sides(&layout.border),
+        padding: sides(&layout.padding),
+    })
 }
 
 /// The properties the inspection query reports, in the order of their
@@ -1618,8 +1673,8 @@ mod tests {
 
     /// Check the frame `page` makes now against the one with nothing left
     /// out: the same pixels, the same node under every point, and outside
-    /// the transforms nothing in it that misses the viewport. Whether it
-    /// left something out.
+    /// the transforms nothing in it that misses the band around the
+    /// viewport. Whether it left something out.
     fn leaves_out_only_what_would_not_show(
         page: &mut Page,
         resources: &mut Resources,
@@ -1654,15 +1709,29 @@ mod tests {
             width: 200.0,
             height: 150.0,
         };
-        // Only the lines that may meet the viewport are measured: a span
-        // moves text 250 px at most, so a line kept that far off holds a
-        // fragment as far again. In a transform nothing is left out.
+        // What moves with the document is left out by the band, in the
+        // document's coordinates; here it is where it is painted.
+        let offset = page
+            .offsets
+            .get(&page.doc.root())
+            .copied()
+            .unwrap_or_default();
+        let band = crate::display::band(view, offset);
+        let painted = Rect {
+            x: band.x - offset.0,
+            y: band.y - offset.1,
+            ..band
+        };
+        // Only the lines that may meet the band are measured (fragments
+        // are in the document's coordinates): a span moves text 250 px at
+        // most, so a line kept that far off holds a fragment as far again.
+        // In a transform nothing is left out.
         let turned = page.query(None, "#turned").unwrap().unwrap();
         let (_, fragments) = list_in(page, resources, Some(view));
         let far: Vec<_> = fragments
             .iter()
             .filter(|f| page.doc.node(f.node).and_then(|node| node.parent()) != Some(turned))
-            .filter(|f| f.y + f.height < -510.0 || f.y > 150.0 + 510.0)
+            .filter(|f| f.y + f.height < band.y - 510.0 || f.y > band.y + band.height + 510.0)
             .collect();
         assert!(far.is_empty(), "scrolled to {at}: {far:?}");
         let mut transforms = 0;
@@ -1672,12 +1741,13 @@ mod tests {
                 DisplayItem::PopTransform => transforms -= 1,
                 DisplayItem::Glyphs(run) if transforms == 0 => assert!(
                     run.glyphs.iter().any(|glyph| {
-                        glyph.y + 2.0 * run.size >= 0.0 && glyph.y - 3.0 * run.size <= 150.0
+                        glyph.y + 2.0 * run.size >= painted.y
+                            && glyph.y - 3.0 * run.size <= painted.y + painted.height
                     }),
                     "scrolled to {at}: {run:?}"
                 ),
                 item if transforms == 0 => assert!(
-                    crate::display::ink(item).is_none_or(|ink| crate::display::meets(view, ink)),
+                    crate::display::ink(item).is_none_or(|ink| crate::display::meets(painted, ink)),
                     "scrolled to {at}: {item:?}"
                 ),
                 _ => {}
@@ -1727,7 +1797,7 @@ mod tests {
         // Where each of them is in the document, top and bottom.
         let place = |page: &Page, selector: &str| {
             let id = page.query(None, selector).unwrap().unwrap();
-            let model = &page.boxes[&id];
+            let model = page.node_box(id.to_bits()).unwrap().unwrap();
             (model.y, model.y + model.height)
         };
         // Just past each edge, and as far past as the thing reaches.
@@ -1771,6 +1841,51 @@ mod tests {
                 leaves_out_only_what_would_not_show(&mut page, &mut resources, &mut tables, y);
         }
         assert!(left_out, "nothing was left out");
+    }
+
+    #[test]
+    fn a_scrolled_document_paints_as_the_document_moved_up() {
+        // Every kind of item that moves with the document, and a fixed box
+        // and a scroll container in one that do not: scrolled by 300 px,
+        // the page paints as it does unscrolled with its body 300 px higher.
+        let page = |margin: i32| {
+            let lines: String = (0..20).map(|i| format!("<p>satır {i}</p>")).collect();
+            format!(
+                "<body style='margin: {margin}px 0 0; font: 14px Noto Sans'>\
+                 <div style='height: 320px; background: linear-gradient(#fff, #36c)'></div>\
+                 <p style='background: #fd8; border-radius: 6px; border: 2px solid #333; box-shadow: 3px 3px 6px #000; margin: 8px'>gölge ve kenarlık</p>\
+                 <div style='height: 40px; background: radial-gradient(#f00, #00f)'></div>\
+                 <div style='transform: rotate(5deg); background: #6a6; height: 20px; margin: 10px'>dönen</div>\
+                 <div style='height: 50px; overflow: hidden; background: #eee'><div style='height: 200px; background: linear-gradient(#000, #fff)'>kırpılan</div></div>\
+                 <div style='position: fixed; left: 150px; top: 20px; width: 30px; height: 30px; background: #e33'></div>\
+                 <div style='position: fixed; left: 150px; top: 60px; width: 40px; height: 40px; overflow: auto'>\
+                 <div style='height: 80px; background: linear-gradient(#0a0, #fff)'></div></div>\
+                 {lines}"
+            )
+        };
+        let paint = |html: &str, scroll: f32| {
+            let mut page = Page::parse(html);
+            let (mut resources, mut tables) = (Resources::default(), Tables::default());
+            page.prepare(200, 150, 1.0, &mut resources, &mut |_| {});
+            if scroll > 0.0 {
+                assert!(page.wheel((0.0, scroll), (1.0, 1.0)));
+            }
+            page.render(200, 150, 1.0, &mut resources, &mut tables).0
+        };
+        let (scrolled, moved) = (paint(&page(0), 300.0), paint(&page(-300), 0.0));
+        let far = scrolled
+            .rgba()
+            .iter()
+            .zip(moved.rgba())
+            .filter(|(a, b)| a.abs_diff(**b) > 2)
+            .count();
+        assert_eq!(
+            far,
+            0,
+            "{}\n{}",
+            scrolled.display_list(),
+            moved.display_list()
+        );
     }
 
     #[test]
