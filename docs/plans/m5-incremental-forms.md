@@ -202,10 +202,10 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.6: Display list parçaları ve kısmi sunum
 
-- [ ] Görüntü alanının dışındaki öğeler ne display list'e giriyor ne
+- [x] Görüntü alanının dışındaki öğeler ne display list'e giriyor ne
   çiziliyor. B15 (`erk-10000.html` tekerlekle kayıyor): kare 673 ms,
   yerleşim 0, display list 191, raster 465; 90 006 öğenin ekranda olanı
-  yüz kadar (M5.4 notları).
+  yüz kadar (M5.4 notları). B15 709'dan 88 ms'ye indi (M5.6 notları).
 - [ ] Kutu başına parçalar, düğüm → parça yan tablosu, hasar bölgesi,
   `RenderBackend`; vello_cpu ve vello_hybrid'de kısmi sunum.
 - [ ] Muhafız: kısmi kare ile tam kare piksel piksel aynı (altın test).
@@ -518,4 +518,24 @@ Son ölçüm (bu PR'ın son hâli; süreler ms, sayaçlar son kare):
 |---|---|
 | B14 ve B15 | `examples/erk-10000.html`'in sayfası (10 bin kart, 30 bin eleman) ölçüm aracında üretiliyor; dosyanın kendisi depoda değil. Açılış yayın derlemesinde 1,5 sn: yerleşim 700 ms (20 bin paragrafın ilk şekillendirmesi), raster 477, display list 200. Hata ayıklama derlemesinde (`cargo run` `--release`'siz) kabuk aynı sayfayı 40 sn'de açıyor |
 | Kaydırma | Bir tekerlek çentiği 673 ms: yerleşim çalışmıyor, ama display list 90 006 öğenin hepsini yeniden kuruyor ve raster hepsini çiziyor; görüntü alanında olan yüz kadar. Görünmeyeni çizmemek M5.6'nın ilk maddesi oldu; kaydırmanın kalanı (kaydırılan parçayı yeniden kurmadan taşımak) M5.6'nın parçaları ve kısmi sunumu |
+
+### M5.6
+
+İnceleme raporu `m5_4_layout_incremental_review.md` (#63–#68): bu işe
+giren madde yok. Bir düzeltme: rapor 3498 WPT testinin "tamamı geçiyor"
+diyor; doğrusu sonuçların tabanla tam eşit kalması (geçme oranları
+%20–69, `expectations.txt`).
+
+İlk PR: görüntü alanının dışı listede yok.
+
+| Konu | Not |
+|---|---|
+| Model | Display list görüntü alanıyla kuruluyor (`DisplayList::build`'in `view`'u). Bir kutunun süslemesi, gölgesinin uzanabileceği pay (kayma, yayılma, bulanıklığın 3σ'sı) da hesaba katılarak görüntü alanına değmiyorsa hiç kurulmuyor; kurulan her öğe kendi mürekkebiyle (`ink`) yeniden eleniyor. Kısmen görünen öğe olduğu gibi kalıyor: pikseller aynı |
+| Metin | Satır satır, yalnızca dikeyde: satırın kümeleri (`placed_clusters`) ve isabet bölgeleri, satırın koşularının yazı tipi kutularından tam hesaplanan bant (yükseltme, satır kayması ve göreli span'in en büyük kayması dahil) görüntü alanına değmiyorsa hiç hesaplanmıyor. Glif koşusu taban çizgisinin 3 em üstü ile 2 em altı arasında eleniyor (uzun yazılar ve yığılmış işaretler için pay). Koşuların metin aralıkları (kümeleri gezen `glyph_run_ranges`) ancak satırda görünen bir koşu varsa hesaplanıyor. Yatay eleme yok: sayfalar dikey kayıyor, sol taşmayı (italik, negatif yan boşluk) sınamak gereksiz bir pay doğururdu |
+| Dönüşümler | `transform` altındaki öğeler dönüşümden önceki koordinatlarda; orada hiçbir şey elenmiyor (`Walk::transformed`) |
+| İsabet testi | Yalnızca görüntü alanındaki noktalar sorulduğu için görüntü alanına değmeyen isabet bölgeleri de listede yok; her noktada aynı düğüm bulunuyor (test). Tarayıcıda da `elementFromPoint` görüntü alanı dışında `null` |
+| Muhafız testi | `what_is_left_out_of_the_viewport_would_not_have_shown`: kutusunun dışına boyayan her şeyi (bulanık, uzağa kaymış ve yalnızca yayılan gölge, satırından yüksek glifler, göreli span, `vertical-align` ile yükselen metin, uzun bir satır içi kutunun aşağı ittiği satırlar, dönüşen kutu ve ondan sonra boyanan, kaydırma kabı, sabit kutu) taşıyan sayfa, her birinin kenarının hemen ötesine ve uzanabileceği kadar ötesine, sonra da baştan sona kaydırılıyor. Her konumda elemeli ve elemesiz liste piksel piksel aynı çiziliyor, her noktada isabet testi aynı düğümü buluyor; dönüşümler dışında listedeki her öğe görüntü alanına değiyor ve `build`'in döndürdüğü satır parçaları görüntü alanının yakınında |
+| Kırılan test | `a_long_page_scrolls_with_the_wheel` bütün sayfanın glif koşularının listede olduğunu varsayıyordu (1500 px kaydırıp her koşunun 1500 px kaydığını denetliyordu). Artık 300 px kaydırıp örtüşen kısımda denetliyor: aşağıda kalan her koşu tam 300 px yukarıda |
+| Mutasyonlar | Gölge bulanıklığının, yarısının, kaymasının (yatay ve dikey), yayılmasının yok sayılması; glif payının üstte ya da altta kalkması; yükseltmenin, göreli kaymanın, satır kaymasının (glif ve satır bandında) yok sayılması; satır bandında yazı tipi yükselişinin ya da inişinin unutulması; dönüşüm sayacının artmaması ya da geri alınmaması; süslemenin, satır içi arka planların, metin isabetlerinin, satırların, koşuların hiç elenmemesi: yakalandı. Sağ çıkanlar: dikdörtgenlere kenar yumuşatma için bir piksel pay (şekil geometrisinin dışına boyanmıyor, kenar dahil sayılıyor: ölüydü, silindi); satırın ön kontrolü (yalnızca süre; yerine aralıklar ilk görünen koşuda tembel hesaplanıyor) |
+| Ölçüm | Aynı oturumda `main`'e (b71410a) karşı, medyan ms: B1 78 → 27, B6 60 → 16, B12 79 → 14, B13 68 → 20, B14 1559 → 997, B15 709 → 88. B15'te raster 491'den 7 ms'ye, display list 197'den 65 ms'ye indi; öğe 90 006'dan 100'e. Kalan display list süresi, öğe üretmese de her karede 30 000 elemanın stilini ve konumunu okuyan gezinti (~45 ms) ve kutu modelleri (~8 ms); kaydırmada listeyi hiç yeniden kurmamak M5.6'nın parçaları ve kısmi sunumunun işi. B14'ün kalanı ilk yerleşim (20 bin paragrafın ilk şekillendirmesi, ~790 ms) |
 

@@ -83,12 +83,109 @@ struct Walk<'a> {
     canvas_source: Option<NodeId>,
     /// The text fragments met so far.
     text: std::cell::RefCell<Vec<TextFragment>>,
+    /// The viewport the list is for, in CSS pixels: what lies wholly
+    /// outside it is left out. `None`: everything is in the list.
+    view: Option<Frame>,
+    /// How many transforms the walk is inside: their items are in the
+    /// coordinates before the transform, and none is left out.
+    transformed: std::cell::Cell<usize>,
+}
+
+impl Walk<'_> {
+    /// Where items show, in the coordinates of the items being made now;
+    /// `None` if anything may.
+    fn view(&self) -> Option<Frame> {
+        if self.transformed.get() == 0 {
+            self.view
+        } else {
+            None
+        }
+    }
+
+    /// Whether an item with `ink` may show.
+    fn shows(&self, ink: Frame) -> bool {
+        self.view().is_none_or(|view| meets(view, ink))
+    }
+}
+
+/// Whether `a` and `b` overlap, edges included.
+pub(crate) fn meets(a: Frame, b: Frame) -> bool {
+    a.x <= b.x + b.width && b.x <= a.x + a.width && a.y <= b.y + b.height && b.y <= a.y + a.height
+}
+
+/// Where a box's or an inline background's item may paint, or take
+/// pointer input: its shape, which antialiasing does not paint past, and
+/// a shadow's blur. `None` for an item that is always kept.
+pub(crate) fn ink(item: &DisplayItem) -> Option<Frame> {
+    match item {
+        DisplayItem::Rect {
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => Some(Frame {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+        }),
+        DisplayItem::RoundedRect { frame, .. }
+        | DisplayItem::Border { frame, .. }
+        | DisplayItem::Hit { frame, .. } => Some(*frame),
+        // A blur of radius r spreads a Gaussian of deviation r / 2 (CSS
+        // Backgrounds 3 §7.1), which fades out by 3 deviations.
+        DisplayItem::Shadow { frame, blur, .. } => Some(around(*frame, 1.5 * blur)),
+        DisplayItem::Image { area, .. } | DisplayItem::Gradient { area, .. } => Some(*area),
+        _ => None,
+    }
+}
+
+/// How far past its border box a box's outer shadows may paint: moved,
+/// spread and blurred as `box_decoration` and `ink` make them.
+fn shadow_reach(style: &ComputedValues) -> f32 {
+    style
+        .get_effects()
+        .box_shadow
+        .0
+        .iter()
+        .filter(|shadow| !shadow.inset)
+        .map(|shadow| {
+            shadow
+                .base
+                .horizontal
+                .px()
+                .abs()
+                .max(shadow.base.vertical.px().abs())
+                + shadow.spread.px().max(0.0)
+                + 1.5 * shadow.base.blur.0.px()
+        })
+        .fold(0.0, f32::max)
+}
+
+/// `frame` grown by `by` on every side.
+fn around(frame: Frame, by: f32) -> Frame {
+    Frame {
+        x: frame.x - by,
+        y: frame.y - by,
+        width: frame.width + 2.0 * by,
+        height: frame.height + 2.0 * by,
+    }
+}
+
+/// Whether the band from `top` to `bottom` meets `view` across: text is
+/// left out by lines, which run across the page.
+fn crosses(view: Frame, top: f32, bottom: f32) -> bool {
+    top <= view.y + view.height && view.y <= bottom
 }
 
 impl DisplayList {
     /// The list of a laid-out document, and where each text node's text
     /// lies, line by line: not painted, kept for the renderer's tests and
     /// the inspection queries.
+    ///
+    /// With a `view`, the viewport's own rectangle, what lies wholly
+    /// outside it is left out: its text fragments too.
     pub(crate) fn build(
         doc: &Document,
         styles: &Styles,
@@ -96,6 +193,7 @@ impl DisplayList {
         resources: &Resources,
         scrolling: &Scrolling,
         bars: &[NodeId],
+        view: Option<Frame>,
     ) -> (Self, Vec<TextFragment>) {
         let mut list = Self {
             canvas: WHITE,
@@ -110,6 +208,8 @@ impl DisplayList {
             bars,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
             text: std::cell::RefCell::new(Vec::new()),
+            view,
+            transformed: std::cell::Cell::new(0),
         };
         let mut items = stacking_context(&walk, doc.root());
         // The document's scroll bars are over everything.
@@ -325,12 +425,6 @@ struct Layer {
 
 /// The items of the stacking context rooted at `id`, in paint order.
 fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
-    let mut context = Context::default();
-    add_box(walk, id, &mut context, true);
-    // Stable: equal `z-index` keeps tree order.
-    context.layers.sort_by_key(|layer| layer.z);
-    let (below, above): (Vec<Layer>, Vec<Layer>) =
-        context.layers.into_iter().partition(|layer| layer.z < 0);
     // An element below 1 opacity is composited as one group.
     let style = walk.styles.computed(id);
     let opacity = style
@@ -355,6 +449,16 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
     if matrix.is_some_and(|matrix| !crate::transform::invertible(&matrix)) {
         return Vec::new();
     }
+    let transformed = walk.transformed.get();
+    if matrix.is_some() {
+        walk.transformed.set(transformed + 1);
+    }
+    let mut context = Context::default();
+    add_box(walk, id, &mut context, true);
+    // Stable: equal `z-index` keeps tree order.
+    context.layers.sort_by_key(|layer| layer.z);
+    let (below, above): (Vec<Layer>, Vec<Layer>) =
+        context.layers.into_iter().partition(|layer| layer.z < 0);
     let scope = walk.scrolling.scope(id);
     let mut items = Vec::new();
     if opacity < 1.0 {
@@ -374,6 +478,7 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
     if matrix.is_some() {
         items.push((scope, DisplayItem::PopTransform));
     }
+    walk.transformed.set(transformed);
     if opacity < 1.0 {
         items.push((scope, DisplayItem::PopOpacity));
     }
@@ -535,15 +640,16 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         .as_ref()
         .is_none_or(|style| style.clone_visibility() == Visibility::Visible);
 
+    let frame = Frame {
+        x,
+        y,
+        width: layout.size.width,
+        height: layout.size.height,
+    };
     if let Some(style) = &style
         && visible
+        && walk.shows(around(frame, shadow_reach(style)))
     {
-        let frame = Frame {
-            x,
-            y,
-            width: layout.size.width,
-            height: layout.size.height,
-        };
         let widths = [
             layout.border.top,
             layout.border.right,
@@ -596,6 +702,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
                 });
             }
         }
+        decoration.retain(|item| ink(item).is_none_or(|ink| walk.shows(ink)));
         context.backgrounds.extend(tag(decoration, scope));
     }
 
@@ -604,7 +711,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
     if let Some(shaped) = walk.layouts.text(id) {
         let content_x = cx + layout.border.left + layout.padding.left;
         let content_y = cy + layout.border.top + layout.padding.top;
-        let fragments = text_fragments(shaped, (content_x, content_y));
+        let fragments = text_fragments(shaped, (content_x, content_y), walk.view());
         let mut items = Vec::new();
         if visible {
             items.extend(inline_content(shaped, (content_x, content_y), walk, id));
@@ -621,7 +728,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
             cx + anonymous.layout.location.x,
             cy + anonymous.layout.location.y,
         );
-        let fragments = text_fragments(&anonymous.text, origin);
+        let fragments = text_fragments(&anonymous.text, origin, walk.view());
         let mut items = Vec::new();
         if visible {
             items.extend(inline_content(&anonymous.text, origin, walk, id));
@@ -749,8 +856,9 @@ fn inline_content(
             }
             items
         })
+        .filter(|item| ink(item).is_none_or(|ink| walk.shows(ink)))
         .collect();
-    items.extend(glyph_runs(shaped, origin, resources, &colors));
+    items.extend(glyph_runs(shaped, origin, resources, &colors, walk.view()));
     items
 }
 
@@ -787,29 +895,45 @@ fn text_hits(walk: &Walk<'_>, fragments: &[TextFragment], out: &mut Vec<DisplayI
         let Some(element) = walk.doc.node(fragment.node).and_then(|node| node.parent()) else {
             continue;
         };
-        if walk
-            .styles
-            .computed(element)
-            .is_some_and(|style| takes_pointer(&style))
+        let frame = Frame {
+            x: fragment.x,
+            y: fragment.y,
+            width: fragment.width,
+            height: fragment.height,
+        };
+        if walk.shows(frame)
+            && walk
+                .styles
+                .computed(element)
+                .is_some_and(|style| takes_pointer(&style))
         {
             out.push(DisplayItem::Hit {
                 node: element.to_bits(),
-                frame: Frame {
-                    x: fragment.x,
-                    y: fragment.y,
-                    width: fragment.width,
-                    height: fragment.height,
-                },
+                frame,
                 text: true,
             });
         }
     }
 }
 
+/// How far a relatively positioned inline element moves text in the
+/// paragraph, at most, along either axis.
+fn reach(shaped: &ShapedText) -> f32 {
+    shaped.relative.iter().fold(0.0, |reach: f32, (dx, dy)| {
+        reach.max(dx.abs()).max(dy.abs())
+    })
+}
+
 /// Where each text node of a shaped paragraph whose content box starts at
-/// `origin` lies, line by line.
-fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> {
+/// `origin` lies, line by line; with a `view`, only on the lines that may
+/// meet it.
+fn text_fragments(
+    shaped: &ShapedText,
+    origin: (f32, f32),
+    view: Option<Frame>,
+) -> Vec<TextFragment> {
     let mut fragments = Vec::new();
+    let reach = reach(shaped);
     let lines: Vec<_> = shaped.layout.layout.lines().collect();
     // Whether a line starts with an atomic inline: Chrome measures the
     // space before one at the end of the line above, as if no break came
@@ -825,6 +949,27 @@ fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> 
     };
     for (index, line) in shaped.layout.layout.lines().enumerate() {
         let shift = shaped.layout.shifts.get(index).copied().unwrap_or(0.0);
+        if let Some(view) = view {
+            // Its fragments span its runs' font boxes, as `placed_clusters`
+            // makes them, moved as far as a relative span moves text.
+            let (top, bottom) = line
+                .items()
+                .filter_map(|item| match item {
+                    PositionedLayoutItem::GlyphRun(run) => {
+                        let baseline = run.baseline() - run.style().brush.raise;
+                        let metrics = run.run().metrics();
+                        Some((baseline - metrics.ascent, baseline + metrics.descent))
+                    }
+                    PositionedLayoutItem::InlineBox(_) => None,
+                })
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(top, bottom), run| {
+                    (top.min(run.0), bottom.max(run.1))
+                });
+            let at = origin.1 + shift;
+            if !crosses(view, at + top - reach, at + bottom + reach) {
+                continue;
+            }
+        }
         let (mut clusters, then_a_box) = crate::text::placed_clusters(&line);
         let then_a_box = then_a_box || starts_with_atom(index + 1);
         // Zero-width spaces Erk adds (see `Paragraph::flush`, `<br>`) are
@@ -884,23 +1029,43 @@ fn text_fragments(shaped: &ShapedText, origin: (f32, f32)) -> Vec<TextFragment> 
 /// The glyph runs of a shaped paragraph whose content box starts at
 /// `origin`. Parley's positioned glyphs already include each line's offset
 /// and baseline; the line's shift moves them down past taller inline boxes
-/// above.
+/// above. With a `view`, a run that cannot meet it is left out.
 fn glyph_runs(
     paragraph: &ShapedText,
     origin: (f32, f32),
     resources: &Resources,
     colors: &dyn Fn(&std::ops::Range<usize>, Rgba) -> Rgba,
+    view: Option<Frame>,
 ) -> Vec<DisplayItem> {
     let (text, shaped) = (&paragraph.text, &paragraph.layout);
     let mut runs = Vec::new();
     for (index, line) in shaped.layout.lines().enumerate() {
         let shift = shaped.shifts.get(index).copied().unwrap_or(0.0);
-        let mut ranges = crate::text::glyph_run_ranges(&line).into_iter();
-        for item in line.items() {
-            let PositionedLayoutItem::GlyphRun(run) = item else {
+        // Glyphs reach about an em above the baseline and less below it;
+        // three and two times that leave room for tall scripts and stacked
+        // marks.
+        let shows = |run: &parley::GlyphRun<'_, crate::text::TextBrush>| {
+            let size = run.run().font_size();
+            let (_, dy) = moved(paragraph, run.style().brush.relative);
+            let baseline = origin.1 + dy + shift + run.baseline() - run.style().brush.raise;
+            view.is_none_or(|view| crosses(view, baseline - 3.0 * size, baseline + 2.0 * size))
+        };
+        // The runs' text, found by walking the line's clusters: only once
+        // a run shows.
+        let mut ranges = None;
+        let runs_of_line = line.items().filter_map(|item| match item {
+            PositionedLayoutItem::GlyphRun(run) => Some(run),
+            PositionedLayoutItem::InlineBox(_) => None,
+        });
+        for (at, run) in runs_of_line.enumerate() {
+            if !shows(&run) {
                 continue;
-            };
-            let range = ranges.next().unwrap_or_default();
+            }
+            let range = ranges
+                .get_or_insert_with(|| crate::text::glyph_run_ranges(&line))
+                .get(at)
+                .cloned()
+                .unwrap_or_default();
             // `vertical-align` moves the run off the line's baseline, and a
             // relatively positioned element around it moves it further.
             let raise = run.style().brush.raise;

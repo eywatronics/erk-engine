@@ -515,8 +515,22 @@ impl Page {
         mark(Stage::Layout);
         let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
         let bars = self.bars(self.hover);
-        let (mut list, _) =
-            DisplayList::build(doc, &styles, &layouts, resources, &scrolling, &bars);
+        // Only what may show in the viewport.
+        let view = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: w,
+            height: h,
+        };
+        let (mut list, _) = DisplayList::build(
+            doc,
+            &styles,
+            &layouts,
+            resources,
+            &scrolling,
+            &bars,
+            Some(view),
+        );
         let hits = hits(&list.items);
         if let Some(node) = self.highlight {
             list.items.extend(
@@ -1552,6 +1566,187 @@ mod tests {
         let scroller = page.query(None, "#s").unwrap().unwrap();
         page.remove(scroller.to_bits()).unwrap();
         assert!(page.offsets.is_empty());
+    }
+
+    /// The list of the page's last frame, and its text fragments, with
+    /// what lies outside `view` left out.
+    fn list_in(
+        page: &Page,
+        resources: &Resources,
+        view: Option<Rect>,
+    ) -> (DisplayList, Vec<crate::display::TextFragment>) {
+        let layouts = &page.layout.as_ref().expect("laid out").layouts;
+        let scrolling = Scrolling::new(
+            &page.doc,
+            &page.styles,
+            layouts,
+            page.viewport,
+            &page.offsets,
+        );
+        let bars = page.bars(page.hover);
+        DisplayList::build(
+            &page.doc,
+            &page.styles,
+            layouts,
+            resources,
+            &scrolling,
+            &bars,
+            view,
+        )
+    }
+
+    /// Check the frame `page` makes now against the one with nothing left
+    /// out: the same pixels, the same node under every point, and outside
+    /// the transforms nothing in it that misses the viewport. Whether it
+    /// left something out.
+    fn leaves_out_only_what_would_not_show(
+        page: &mut Page,
+        resources: &mut Resources,
+        tables: &mut Tables,
+        at: f32,
+    ) -> bool {
+        let (list, _) = page.prepare(200, 150, 1.0, resources, &mut |_| {});
+        let (all, _) = list_in(page, resources, None);
+        tables.apply(resources.table_updates(&all));
+        assert!(
+            paint::paint(&list, tables, 200, 150, 1.0).data_as_u8_slice()
+                == paint::paint(&all, tables, 200, 150, 1.0).data_as_u8_slice(),
+            "scrolled to {at}"
+        );
+        // A point no region covers is the root element's.
+        let all_hits = hits(&all.items);
+        let html = page.query(None, "html").unwrap();
+        for y in (0..150).step_by(4) {
+            for x in (0..200).step_by(8) {
+                let point = (x as f32 + 0.5, y as f32 + 0.5);
+                let topmost = all_hits.iter().rev().find(|hit| hit.contains(point));
+                assert_eq!(
+                    page.hit_test(point.0, point.1),
+                    topmost.map(|hit| hit.node).or(html),
+                    "scrolled to {at}, at {point:?}"
+                );
+            }
+        }
+        let view = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 150.0,
+        };
+        // Only the lines that may meet the viewport are measured: a span
+        // moves text 250 px at most, so a line kept that far off holds a
+        // fragment as far again. In a transform nothing is left out.
+        let turned = page.query(None, "#turned").unwrap().unwrap();
+        let (_, fragments) = list_in(page, resources, Some(view));
+        let far: Vec<_> = fragments
+            .iter()
+            .filter(|f| page.doc.node(f.node).and_then(|node| node.parent()) != Some(turned))
+            .filter(|f| f.y + f.height < -510.0 || f.y > 150.0 + 510.0)
+            .collect();
+        assert!(far.is_empty(), "scrolled to {at}: {far:?}");
+        let mut transforms = 0;
+        for item in &list.items {
+            match item {
+                DisplayItem::PushTransform(_) => transforms += 1,
+                DisplayItem::PopTransform => transforms -= 1,
+                DisplayItem::Glyphs(run) if transforms == 0 => assert!(
+                    run.glyphs.iter().any(|glyph| {
+                        glyph.y + 2.0 * run.size >= 0.0 && glyph.y - 3.0 * run.size <= 150.0
+                    }),
+                    "scrolled to {at}: {run:?}"
+                ),
+                item if transforms == 0 => assert!(
+                    crate::display::ink(item).is_none_or(|ink| crate::display::meets(view, ink)),
+                    "scrolled to {at}: {item:?}"
+                ),
+                _ => {}
+            }
+        }
+        list.items.len() < all.items.len()
+    }
+
+    #[test]
+    fn what_is_left_out_of_the_viewport_would_not_have_shown() {
+        // Things that paint, or take the pointer, past their box: a
+        // blurred shadow, a shadow moved far, glyphs taller than their
+        // line, text moved by a relatively positioned span or raised by
+        // `vertical-align`, lines pushed down by a tall inline box, a
+        // transformed box and what is painted after it, a scroll container,
+        // a fixed box.
+        let lines: String = (0..12)
+            .map(|i| format!("<p>satır {i} <span style='background: #fd8'>vurgu</span> devam</p>"))
+            .collect();
+        let html = format!(
+            "<body style='margin: 0; font: 14px Noto Sans'>{lines}\
+             <div id=blur style='height: 30px; margin: 0 20px; background: #fff; box-shadow: 0 0 40px 10px #345'></div>\
+             {lines}\
+             <p id=big style='font-size: 60px; line-height: 10px'>Büyük</p>\
+             {lines}\
+             <div id=far style='height: 20px; width: 50px; box-shadow: 0 300px 0 #c33'></div>\
+             {lines}\
+             <div id=spread style='height: 10px; width: 50px; margin-left: 60px; box-shadow: 0 0 0 40px #a5c'></div>\
+             <p id=moved><span style='position: relative; top: 250px; background: #9cf'>aşağı kayan</span></p>\
+             {lines}\
+             <p id=raised>x <span style='vertical-align: 80px'>yukarı</span></p>\
+             {lines}\
+             <p id=tall>önce <span style='display: inline-block; width: 10px; height: 300px; background: #888'></span> sonra<br>alt satır</p>\
+             {lines}\
+             <div id=turned style='transform: translateY(400px); background: #6a6; height: 20px'>dönüşen</div>\
+             <div style='position: relative; background: #39c; height: 10px'>sonra</div>\
+             <div style='height: 120px; overflow: auto'><div style='height: 600px; background: linear-gradient(#fff, #000)'>kap</div></div>\
+             <div style='position: fixed; bottom: 0; left: 0; width: 30px; height: 10px; background: #e33'></div>\
+             {lines}{lines}"
+        );
+        let mut page = Page::parse(&html);
+        let mut resources = Resources::default();
+        let mut tables = Tables::default();
+        page.prepare(200, 150, 1.0, &mut resources, &mut |_| {});
+        // Where each of them is in the document, top and bottom.
+        let place = |page: &Page, selector: &str| {
+            let id = page.query(None, selector).unwrap().unwrap();
+            let model = &page.boxes[&id];
+            (model.y, model.y + model.height)
+        };
+        // Just past each edge, and as far past as the thing reaches.
+        let mut at: Vec<f32> = Vec::new();
+        for (selector, reach) in [
+            ("#blur", 10.0 + 60.0),
+            ("#big", 60.0),
+            ("#far", 320.0),
+            ("#spread", 40.0),
+            ("#moved", 270.0),
+            ("#raised", 100.0),
+            ("#tall", 40.0),
+            ("#turned", 420.0),
+        ] {
+            let (top, bottom) = place(&page, selector);
+            for d in [0.5, 3.0, 0.2 * reach, 0.5 * reach, 0.8 * reach, reach] {
+                // The viewport just below it, then just above it.
+                at.push(top - 150.0 - d);
+                at.push(bottom + d);
+            }
+        }
+        // And down the whole page, starting between pixels.
+        let root = page.doc.root();
+        let end = page
+            .scrollers
+            .iter()
+            .find(|s| s.node == root)
+            .unwrap()
+            .max
+            .1;
+        at.extend(
+            (0..)
+                .map(|step| 12.5 + 90.0 * step as f32)
+                .take_while(|y| *y < end + 90.0),
+        );
+        let mut left_out = false;
+        for y in at {
+            page.offsets.insert(page.doc.root(), (0.0, y.max(0.0)));
+            left_out |=
+                leaves_out_only_what_would_not_show(&mut page, &mut resources, &mut tables, y);
+        }
+        assert!(left_out, "nothing was left out");
     }
 
     #[test]

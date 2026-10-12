@@ -276,7 +276,7 @@ pub fn text_boxes(
     let scrolling =
         scroll::Scrolling::new(&doc, &styles, &layouts, (w, h), &scroll::Offsets::new());
     let (_, text) =
-        display::DisplayList::build(&doc, &styles, &layouts, &resources, &scrolling, &[]);
+        display::DisplayList::build(&doc, &styles, &layouts, &resources, &scrolling, &[], None);
     // Each counted text node's position in document order, by arena index.
     let mut order = std::collections::HashMap::new();
     let mut stack = vec![(doc.root(), false)];

@@ -1035,17 +1035,24 @@ fn a_long_page_scrolls_with_the_wheel() {
             })
             .collect()
     };
-    page.send(wheel(1500.0, 400.0, 300.0));
+    page.send(wheel(300.0, 400.0, 300.0));
     let down = page.frame();
     assert!(down.rgba() != top.rgba(), "other content shows");
     let (before, after) = (runs(&top), runs(&down));
-    assert!(before.len() > 50, "{}", before.len());
-    assert_eq!(before.len(), after.len());
-    for ((x, y, text), (x2, y2, text2)) in before.iter().zip(&after) {
-        assert_eq!((x, text), (x2, text2));
-        assert!((y - 1500.0 - y2).abs() < 0.01, "{text}: {y} -> {y2}");
+    assert!(before.len() > 20, "{}", before.len());
+    // The list holds what shows (M5.6): what was below the first 300 px is
+    // there again, exactly 300 px higher.
+    let stayed: Vec<_> = before.iter().filter(|(_, y, _)| *y >= 300.0).collect();
+    assert!(stayed.len() > 10, "{}", stayed.len());
+    for (x, y, text) in stayed {
+        assert!(
+            after
+                .iter()
+                .any(|(x2, y2, text2)| (x, text) == (x2, text2) && (y - 300.0 - y2).abs() < 0.01),
+            "{text} at {y}"
+        );
     }
-    page.send(wheel(-1500.0, 400.0, 300.0));
+    page.send(wheel(-300.0, 400.0, 300.0));
     let back = page.frame();
     assert!(back.rgba() == top.rgba(), "back at the top, as it was");
 }
