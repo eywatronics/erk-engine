@@ -780,6 +780,8 @@ mod tests {
                 laid_out: 7,
                 shaped: 3,
                 items,
+                // The first list: every item made from the document.
+                listed: items,
                 // A new document: all of it is new, nothing to coalesce.
                 recorded: 0,
                 changes: 0,
@@ -1125,6 +1127,30 @@ mod tests {
                 .any(|request| request.url.ends_with("hover.png")),
             "{requests:?}"
         );
+    }
+
+    #[test]
+    fn a_scroll_inside_the_band_moves_the_last_list() {
+        // The viewport is 200 px high: a band is two cells of 200 px.
+        let lines: String = (0..60).map(|i| format!("<p>satır {i}</p>")).collect();
+        let mut engine = verifying(&format!("<body style='margin: 0'>{lines}"));
+        let scroll = |engine: &mut Engine, dy: f32| {
+            engine.wheel((0.0, dy), (10.0, 10.0));
+            assert!(engine.prepare().0.is_some());
+            assert_eq!(engine.verify(), Ok(()));
+            engine.stats().listed
+        };
+        // Inside the first cell, then into the next, then back. A box is
+        // where it is painted.
+        let p = engine.query(None, "p").unwrap().unwrap();
+        let top = |engine: &Engine| engine.node_box(p).unwrap().unwrap().y;
+        let before = top(&engine);
+        assert_eq!(scroll(&mut engine, 50.0), 0);
+        assert_eq!(top(&engine), before - 50.0);
+        assert_eq!(scroll(&mut engine, 120.5), 0);
+        assert!(scroll(&mut engine, 100.0) > 0);
+        assert_eq!(scroll(&mut engine, 30.0), 0);
+        assert!(scroll(&mut engine, -200.0) > 0);
     }
 
     #[test]

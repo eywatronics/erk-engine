@@ -84,9 +84,13 @@ struct Walk<'a> {
     canvas_source: Option<NodeId>,
     /// The text fragments met so far.
     text: std::cell::RefCell<Vec<TextFragment>>,
-    /// The viewport the list is for, in CSS pixels: what lies wholly
-    /// outside it is left out. `None`: everything is in the list.
-    view: Option<Frame>,
+    /// What is left out of the list: what lies wholly outside the band
+    /// (in the document's coordinates) for what moves with the document,
+    /// outside the viewport for what does not. `None`: nothing is.
+    band: Option<Frame>,
+    viewport: Option<Frame>,
+    /// Whether the items being made now move with the document.
+    moving: std::cell::Cell<bool>,
     /// How many transforms the walk is inside: their items are in the
     /// coordinates before the transform, and none is left out.
     transformed: std::cell::Cell<usize>,
@@ -96,11 +100,18 @@ impl Walk<'_> {
     /// Where items show, in the coordinates of the items being made now;
     /// `None` if anything may.
     fn view(&self) -> Option<Frame> {
-        if self.transformed.get() == 0 {
-            self.view
-        } else {
+        if self.transformed.get() > 0 {
             None
+        } else if self.moving.get() {
+            self.band
+        } else {
+            self.viewport
         }
+    }
+
+    /// The items made from now on are painted in `scope`.
+    fn painting_in(&self, scope: Option<usize>) {
+        self.moving.set(self.scrolling.moves(scope));
     }
 
     /// Whether an item with `ink` may show.
@@ -213,19 +224,56 @@ pub(crate) fn text_band(
     band
 }
 
+/// The part of the document a list is made for, in the document's
+/// coordinates, when the viewport is `viewport` and the document is
+/// scrolled by `offset`: the cell of a grid of viewports the offset is in,
+/// and the next one. The viewport, a viewport's size from an offset in the
+/// first cell, always lies in it, and it is the same for every offset in
+/// the cell: a scroll inside it changes nothing in the list but where it
+/// is painted (p2-incremental §3.7.1).
+pub(crate) fn band(viewport: Frame, offset: (f32, f32)) -> Frame {
+    let cell = |offset: f32, size: f32| {
+        if size > 0.0 {
+            (offset / size).floor() * size
+        } else {
+            offset
+        }
+    };
+    Frame {
+        x: viewport.x + cell(offset.0, viewport.width),
+        y: viewport.y + cell(offset.1, viewport.height),
+        width: 2.0 * viewport.width,
+        height: 2.0 * viewport.height,
+    }
+}
+
 /// Whether the band from `top` to `bottom` meets `view` across: text is
 /// left out by lines, which run across the page.
 fn crosses(view: Frame, top: f32, bottom: f32) -> bool {
     top <= view.y + view.height && view.y <= bottom
 }
 
-impl DisplayList {
-    /// The list of a laid-out document, and where each text node's text
-    /// lies, line by line: not painted, kept for the renderer's tests and
-    /// the inspection queries.
-    ///
-    /// With a `view`, the viewport's own rectangle, what lies wholly
-    /// outside it is left out: its text fragments too.
+/// A display list before the document's scroll: what moves with the
+/// document in the document's coordinates (`moves`), the rest in the
+/// viewport's, and without the document's scroll bars. Nothing in it
+/// depends on the document's offset but the band it was made for, so a
+/// scroll inside the band needs only [`Content::scrolled`] (p2-incremental
+/// §3.7.1).
+pub(crate) struct Content {
+    canvas: Rgba,
+    items: Vec<DisplayItem>,
+    moves: Vec<bool>,
+    /// The band it was made for; `None`: the whole document.
+    pub(crate) band: Option<Frame>,
+}
+
+impl Content {
+    /// How many items it has.
+    pub(crate) fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// What [`DisplayList::build`] lists, before the document's scroll.
     pub(crate) fn build(
         doc: &Document,
         styles: &Styles,
@@ -235,10 +283,11 @@ impl DisplayList {
         bars: &[NodeId],
         view: Option<Frame>,
     ) -> (Self, Vec<TextFragment>) {
-        let mut list = Self {
+        let mut list = DisplayList {
             canvas: WHITE,
             items: Vec::new(),
         };
+        let band = view.map(|view| band(view, scrolling.document_offset()));
         let walk = Walk {
             doc,
             styles,
@@ -248,16 +297,138 @@ impl DisplayList {
             bars,
             canvas_source: list.propagate_canvas_background(doc, styles, layouts),
             text: std::cell::RefCell::new(Vec::new()),
-            view,
+            band,
+            viewport: view,
+            moving: std::cell::Cell::new(true),
             transformed: std::cell::Cell::new(0),
         };
-        let mut items = stacking_context(&walk, doc.root());
-        // The document's scroll bars are over everything.
-        if bars.contains(&doc.root()) {
-            items.extend(scroll_bars(scrolling, VIEWPORT).map(|item| (None, item)));
+        let items = stacking_context(&walk, doc.root());
+        let (items, moves) = clipped(items, scrolling);
+        let content = Self {
+            canvas: list.canvas,
+            items,
+            moves,
+            band,
+        };
+        (content, walk.text.into_inner())
+    }
+
+    /// The list, with what moves with the document moved by its offset
+    /// and the document's scroll bars over everything.
+    pub(crate) fn scrolled(&self, scrolling: &Scrolling, bars: &[NodeId]) -> DisplayList {
+        let (x, y) = scrolling.document_offset();
+        let mut items: Vec<DisplayItem> = self
+            .items
+            .iter()
+            .zip(&self.moves)
+            .map(|(item, moves)| {
+                let mut item = item.clone();
+                if *moves {
+                    shift(&mut item, (-x, -y));
+                }
+                item
+            })
+            .collect();
+        if bars.contains(&scrolling.scopes[VIEWPORT].node) {
+            items.extend(scroll_bars(scrolling, VIEWPORT));
         }
-        list.items = clipped(items, scrolling);
-        (list, walk.text.into_inner())
+        DisplayList {
+            canvas: self.canvas,
+            items,
+        }
+    }
+}
+
+/// `item` moved by `by`, all of it: the boxes, glyphs and gradients in
+/// it, and a transform so that what it holds, moved alike, lands where it
+/// did.
+fn shift(item: &mut DisplayItem, (dx, dy): (f32, f32)) {
+    let frame = |frame: &mut Frame| {
+        frame.x += dx;
+        frame.y += dy;
+    };
+    match item {
+        DisplayItem::Rect { x, y, .. } => {
+            *x += dx;
+            *y += dy;
+        }
+        DisplayItem::RoundedRect { frame: f, .. }
+        | DisplayItem::Border { frame: f, .. }
+        | DisplayItem::PushClip { frame: f, .. }
+        | DisplayItem::Hit { frame: f, .. }
+        | DisplayItem::Highlight(f) => frame(f),
+        DisplayItem::Shadow { frame: f, clip, .. } => {
+            frame(f);
+            frame(clip);
+        }
+        DisplayItem::Image {
+            tile, area, clip, ..
+        } => {
+            frame(tile);
+            frame(area);
+            frame(clip);
+        }
+        DisplayItem::Gradient {
+            gradient,
+            tile,
+            area,
+            clip,
+            ..
+        } => {
+            let point = |point: &mut (f32, f32)| {
+                point.0 += dx;
+                point.1 += dy;
+            };
+            match &mut gradient.shape {
+                GradientShape::Linear { start, end } => {
+                    point(start);
+                    point(end);
+                }
+                GradientShape::Radial { center, .. } => point(center),
+            }
+            frame(tile);
+            frame(area);
+            frame(clip);
+        }
+        DisplayItem::Glyphs(run) => {
+            for glyph in &mut run.glyphs {
+                glyph.x += dx;
+                glyph.y += dy;
+            }
+        }
+        // A point p of what it holds is now p + d: the matrix M becomes
+        // p -> M(p - d) + d.
+        DisplayItem::PushTransform([a, b, c, d, e, f]) => {
+            *e += dx - (*a * dx + *c * dy);
+            *f += dy - (*b * dx + *d * dy);
+        }
+        DisplayItem::PushOpacity(_)
+        | DisplayItem::PopOpacity
+        | DisplayItem::PopTransform
+        | DisplayItem::PopClip => {}
+    }
+}
+
+impl DisplayList {
+    /// The list of a laid-out document, and where each text node's text
+    /// lies, line by line: not painted, kept for the renderer's tests and
+    /// the inspection queries.
+    ///
+    /// With a `view`, the viewport's own rectangle, what lies wholly
+    /// outside it is left out: its text fragments too. What moves with
+    /// the document is left out by the band around the viewport instead.
+    pub(crate) fn build(
+        doc: &Document,
+        styles: &Styles,
+        layouts: &Layouts,
+        resources: &Resources,
+        scrolling: &Scrolling,
+        bars: &[NodeId],
+        view: Option<Frame>,
+    ) -> (Self, Vec<TextFragment>) {
+        let (content, text) =
+            Content::build(doc, styles, layouts, resources, scrolling, bars, view);
+        (content.scrolled(scrolling, bars), text)
     }
 
     /// The root element's background paints the whole canvas; if it has
@@ -531,7 +702,7 @@ fn stacking_context(walk: &Walk<'_>, id: NodeId) -> Vec<Tagged> {
 /// item inside it that escapes them (an absolutely positioned box whose
 /// containing block is outside a clip, inside a translucent box) stays
 /// clipped.
-fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
+fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> (Vec<DisplayItem>, Vec<bool>) {
     let chain = |scope: Option<usize>| {
         let mut chain = Vec::new();
         let mut current = scope;
@@ -545,11 +716,14 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
         chain
     };
     let mut out = Vec::with_capacity(items.len());
+    // Whether each item moves with the document.
+    let mut moves = Vec::with_capacity(items.len());
     let mut open: Vec<(usize, Frame, Radii)> = Vec::new();
     // How many clips each open opacity group started in.
     let mut floors: Vec<usize> = Vec::new();
     let enter = |open: &mut Vec<(usize, Frame, Radii)>,
                  out: &mut Vec<DisplayItem>,
+                 moves: &mut Vec<bool>,
                  wanted: &[(usize, Frame, Radii)]| {
         let common = open
             .iter()
@@ -559,6 +733,7 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
         while open.len() > common {
             open.pop();
             out.push(DisplayItem::PopClip);
+            moves.push(false);
         }
         for clip in &wanted[common..] {
             open.push(*clip);
@@ -566,6 +741,7 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
                 frame: clip.1,
                 radii: clip.2,
             });
+            moves.push(scrolling.moves(Some(clip.0)));
         }
     };
     for (scope, item) in items {
@@ -574,7 +750,8 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
         if matches!(item, DisplayItem::PopOpacity) || !wanted.starts_with(&open[..floor]) {
             wanted = open[..floor].to_vec();
         }
-        enter(&mut open, &mut out, &wanted);
+        enter(&mut open, &mut out, &mut moves, &wanted);
+        moves.push(scrolling.moves(scope));
         match item {
             DisplayItem::PushOpacity(_) => {
                 out.push(item);
@@ -587,8 +764,8 @@ fn clipped(items: Vec<Tagged>, scrolling: &Scrolling) -> Vec<DisplayItem> {
             _ => out.push(item),
         }
     }
-    enter(&mut open, &mut out, &[]);
-    out
+    enter(&mut open, &mut out, &mut moves, &[]);
+    (out, moves)
 }
 
 /// The thumbs of scope `index`'s overlay scroll bars, along its padding
@@ -686,6 +863,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         width: layout.size.width,
         height: layout.size.height,
     };
+    walk.painting_in(scope);
     if let Some(style) = &style
         && visible
         && walk.shows(around(frame, shadow_reach(style)))
@@ -748,6 +926,8 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 
     // Hidden text is laid out all the same: its fragments are kept, only
     // its painting is skipped.
+    // Its content is painted in its own scope.
+    walk.painting_in(inner);
     // A paragraph out of view is not walked at all.
     let shown = |shaped: &ShapedText, top: f32| {
         walk.view()

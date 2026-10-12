@@ -13,7 +13,12 @@
 //! `visible`, is the viewport's (CSS Overflow 3 §3.3): that element does not
 //! clip, and `hidden` there keeps the user from scrolling the document.
 //!
-//! Positions here are the layout's, made absolute and then scrolled. How
+//! Positions here are the layout's, made absolute and then scrolled by
+//! every scroll container but the document: what moves with the document
+//! is placed in the document's coordinates, and the finished display list
+//! is moved by the document's offset (`display::Content::scrolled`), so
+//! that scrolling the document changes nothing else (p2-incremental
+//! §3.7.1). How
 //! far a scope can scroll comes from what it contains, measured from its
 //! padding box: border boxes, and lines of text, which may reach past the
 //! box they are in.
@@ -140,10 +145,15 @@ impl Scrolling {
                 wanted.0.clamp(0.0, scope.max.0),
                 wanted.1.clamp(0.0, scope.max.1),
             );
-            scope.shift = (
-                parent_shift.0 + scope.offset.0,
-                parent_shift.1 + scope.offset.1,
-            );
+            // The document's own offset moves the finished list instead.
+            scope.shift = if index == VIEWPORT {
+                (0.0, 0.0)
+            } else {
+                (
+                    parent_shift.0 + scope.offset.0,
+                    parent_shift.1 + scope.offset.1,
+                )
+            };
             if let Some(clip) = &mut scope.clip {
                 clip.x -= parent_shift.0;
                 clip.y -= parent_shift.1;
@@ -152,7 +162,36 @@ impl Scrolling {
         scrolling
     }
 
-    /// The scrolled position of `id`'s border box.
+    /// How far the document is scrolled: not in the positions here.
+    pub(crate) fn document_offset(&self) -> (f32, f32) {
+        self.scopes[VIEWPORT].offset
+    }
+
+    /// The document scrolled to `offset`, as far as it can go; nothing
+    /// else here changes.
+    pub(crate) fn scroll_document(&mut self, offset: (f32, f32)) {
+        let scope = &mut self.scopes[VIEWPORT];
+        scope.offset = (
+            offset.0.clamp(0.0, scope.max.0),
+            offset.1.clamp(0.0, scope.max.1),
+        );
+    }
+
+    /// Whether what is painted in `scope` moves with the document: the
+    /// viewport's scope and those inside it do, a fixed box's do not.
+    pub(crate) fn moves(&self, scope: Option<usize>) -> bool {
+        let mut current = scope;
+        while let Some(index) = current {
+            if index == VIEWPORT {
+                return true;
+            }
+            current = self.scopes[index].parent;
+        }
+        false
+    }
+
+    /// The position of `id`'s border box, scrolled by every scroll
+    /// container but the document.
     pub(crate) fn position(&self, id: NodeId) -> Option<(f32, f32)> {
         let placed = self.placed(id)?;
         let shift = self.shift(placed.scope);

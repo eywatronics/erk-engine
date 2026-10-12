@@ -11,7 +11,8 @@
 //! times `tick` after each change: the frame prepared and painted on the
 //! CPU. It prints the median, the 95th percentile and the slowest frame,
 //! and what the last frame did (elements styled, boxes laid out,
-//! paragraphs shaped, display list items).
+//! paragraphs shaped, display list items and how many of them were made
+//! that frame rather than moved).
 //!
 //! An example, not engine code: it reads the clock, which the core never
 //! does.
@@ -431,9 +432,9 @@ fn main() {
     ];
     println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");
     println!(
-        "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items | recorded | changes |"
+        "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items | listed | recorded | changes |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for (name, run) in all {
         if !wanted.is_empty() && !wanted.iter().any(|w| w == name) {
             continue;
@@ -449,7 +450,7 @@ fn main() {
             ns.get(ns.len() / 2).map_or(0.0, |ns| *ns as f64 / 1e6)
         };
         println!(
-            "| {} | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} | {:.2} | {:.2} | {:.2} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} ms | {:.2} | {:.2} | {:.2} | {:.2} | {} | {} | {} | {} | {} | {} | {} |",
             result.name,
             result.what,
             ms(percentile(t, 0.5)),
@@ -464,6 +465,7 @@ fn main() {
             s.laid_out,
             s.shaped,
             s.items,
+            s.listed,
             s.recorded,
             s.changes
         );

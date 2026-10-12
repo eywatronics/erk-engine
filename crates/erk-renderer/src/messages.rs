@@ -158,6 +158,10 @@ pub struct FrameStats {
     pub laid_out: usize,
     pub shaped: usize,
     pub items: usize,
+    /// How many of the items were made from the document this frame:
+    /// none when the last frame's list was moved, the document scrolled
+    /// inside the band it was made for (p2-incremental §3.7.1).
+    pub listed: usize,
     /// The document changes recorded since the frame before (M5.1).
     pub recorded: usize,
     /// What is left of them coalesced: the changes invalidation starts
