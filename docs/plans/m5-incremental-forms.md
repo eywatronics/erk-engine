@@ -188,11 +188,12 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   yeniden satırlara bölüyor (karar 10; `shaped` 0).
 - [x] Kare arasında korunan yan tablo ve Taffy önbelleği; kirlenme yukarı.
   B1'de yerleşen kutu 10003'ten 5'e indi.
-- [ ] Ağaç yalnızca değişen bloklar için yeniden kuruluyor; şekillendirilmiş
+- [x] Ağaç yalnızca değişen bloklar için yeniden kuruluyor; şekillendirilmiş
   metin sonuca kopyalanmıyor. Hesaplanmış stilden sınırlar (`contain: size
   layout`, sabit boyut) ve erken kesme, ölçüm gerektirirse. B1, B3 ve B5
   tabana karşı (M5.4 notları: Taffy'nin hesabı artık 1,5 ms; kalan süre
-  ağacın her kare kurulması).
+  ağacın her kare kurulması). Sınırlar ve erken kesme gerekmedi: B1'de
+  yerleşim 62'den 8 ms'ye indi, karenin en küçük aşaması (M5.4 notları).
 
 ### M5.5: Kalıcı metin
 
@@ -201,6 +202,10 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.6: Display list parçaları ve kısmi sunum
 
+- [ ] Görüntü alanının dışındaki öğeler ne display list'e giriyor ne
+  çiziliyor. B15 (`erk-10000.html` tekerlekle kayıyor): kare 673 ms,
+  yerleşim 0, display list 191, raster 465; 90 006 öğenin ekranda olanı
+  yüz kadar (M5.4 notları).
 - [ ] Kutu başına parçalar, düğüm → parça yan tablosu, hasar bölgesi,
   `RenderBackend`; vello_cpu ve vello_hybrid'de kısmi sunum.
 - [ ] Muhafız: kısmi kare ile tam kare piksel piksel aynı (altın test).
@@ -476,3 +481,41 @@ Dördüncü PR: paragrafın sonucu kareler arasında paylaşılıyor.
 | Paylaşılan sonuç | Paragrafın sonucu (`ShapedText`) bir `Arc`; kutu onu ve yapıldığı son yerleşimi tutuyor. Temiz bir kutunun son yerleşimi aynıysa sonuç yeniden yapılmıyor, paylaşılıyor. Son yerleşimin karşılaştırılması gerekli: Taffy'nin yeniden yerleştirmediği bir kutunun yuvarlanmış genişliği, ata kesirli bir piksel kayınca bir piksel değişebiliyor, yüzdeli göreli kayma da onunla (test). Kutunun yeniden yerleşip yerleşmediğini ayrıca sormak gereksizdi (mutasyonu sağ çıktı): paragrafı ve son yerleşimi aynı kutu satırlarını aynı bölüyor |
 | Eşleştirme | Eleman kutuları karma tablo yerine yuvalarıyla eşleşiyor; yalnızca anonim paragraflar ve yer tutucular anahtarla. Yuvadaki elemanın aynı eleman olduğunu denetlemek gereksizdi (mutasyonu sağ çıktı): başka bir elemana verilmiş yuva girdileri aynıysa aynı yerleşir, paragrafı varsa metin düğümleri farklı olduğundan zaten eşit değil. Anahtar artık yalnızca türünü söylüyor |
 | Ölçüm sonra | Eşleştirme ~14 ms, sonuç ~7,5 ms (B1, aynı geçici ölçüm). Kalan en büyük iş ağacın her kare kurulması (~35 ms): dokunulmayan alt ağaçların eski ağaçtan alınması sıradaki PR. Zorlukları ölçülerek çıktı: alt ağaçtaki mutlak konumlu elemanların dışarıdaki kaplayan bloğa eklenmesi, yer tutucu ve anonim kutu indekslerinin yeniden eşlenmesi, arena büyüyünce sentetik düğümlerin yeri |
+
+Beşinci PR: ağaç yalnızca değişikliklerin ulaştığı yerde kuruluyor.
+
+| Konu | Not |
+|---|---|
+| Model | Sayfa, son yerleşimden beri neye dokunulduğunu biriktiriyor (`Touched`): derin olanlar (stil hasarı, taşınan elemanlar, öznitelik değişiklikleri) bütün alt ağaçlarıyla, sığ olanlar (çocukları değişen düğümler, metni değişen düğümün ebeveyni) yalnızca kendileri yeniden kuruluyor; ikisinde de ataları. Gerisi ağaçta olduğu gibi kalıyor. Yalnızca boyayan kareler dokunulanı unutmuyor: sonraki yerleşim onları da kuruyor (test) |
+| Taşınan elemanlar | Bir elemanın kutusu kendi yuvasında; ebeveyni değişen eleman ancak yeni yerinde kurulursa doğru bağlanır. Stil yürüyüşü ebeveyni değişen elemanları artık söylüyor (`Styles::moved`) |
+| Yeniden oynatma | Kurulmayan bir blok, kurulduğu son karede ne yaptıysa onu yeniden yapıyor: hangi çocuk blokları hangi kaplayan blokla gezdi (`pushed`), hangi mutlak konumlu elemanı hangi kaplayan bloğa verdi (`found`). Kaplayan blok yeniden kuruluyorsa eleman ona yine veriliyor; kurulmuyorsa çocuk listesinde zaten duruyor. Kurulmayan bir kutunun alt ağacı da ağaçta kalıyor, bağları geçerli |
+| Arena | Eleman kutuları yuvalarında, anonim paragraflar ve yer tutucular onların ardında. Yuva sayısı belgenin kapasitesinden biraz fazla ayrılıyor (`reserved`); belge bunu aşınca ağaç büyüyor ve arkadaki kutular, onlara işaret eden çocuk listeleri ve statik konumlar (yer tutucu, satır) kaydırılıyor (test). İlk sürümde her büyüme baştan kurmaydı: bir metin 105 kutu yerleştirdi |
+| Eşleştirme | Yalnızca kurulan kutular eski hâlleriyle karşılaştırılıyor; kurulmayan kutu zaten aynı. Yeniden yapılan anonim kutular eski karşılıklarını anahtarla buluyor. Artık kimsenin çocuğu olmayan eski kutular alt ağaçlarıyla boşaltılıyor |
+| Bulunan hata | Kök kutu görüntü alanının boyutunu kurulduktan sonra alıyordu; eşleştirme artık kurulumun içinde olduğu için kök her kare kirli sayıldı. B6'da (imleç) yerleşen kutu 0'dan 1'e çıktı, kâhin yakalamadı (yerleşim doğruydu, yalnızca gereksizdi). Ölçüm buldu; boyut artık kök kurulurken veriliyor, `visibility` değişiminin hiçbir kutu yerleştirmediğini test denetliyor |
+| Gereksiz denetimler | Yuvadaki elemanın aynı eleman olduğu (yeni eleman her zaman stil hasarında), mutlak konumlu elemanın kaplayan bloğa iki kez verilmesine karşı denetim, büyümede ebeveyn bağlarının kaydırılması (her kare yeniden yazılıyor), kurulmayan atalarda önbelleğin temizlenmesi, kökün her kare kurulması (görüntü alanı değişince her şey yeniden stilleniyor): mutasyonları sağ çıktı, silindi |
+| Mutasyonlar | Yolun ya da derin alt ağacın kurulmaması, kurulmayan kutunun mutlak konumlu elemanı vermemesi, sahipsiz kutuların kalması, büyümede yer tutucu ve satır konumlarının kaydırılmaması, kirliliğin yukarı taşınmaması, anonim kutuların sonuçlarının taşınmaması, taşınan ve özniteliği değişen elemanın derin sayılmaması, metnin ebeveyninin dokunulmuş sayılmaması, yalnızca boyayan karenin dokunulanı unutması: yakalandı. Kökün görüntü alanı boyutsuz kurulması motor testlerinden sağ çıktı, `without_a_positioned_ancestor_the_viewport_contains` yakalıyor |
+| Doğrulama | Kâhin her kareyi baştan kurulan bir ağaçla karşılaştırıyor; fuzz yorumlayıcısı ekleme, silme, taşıma ve stil değişiklikleriyle onu sürüyor. WPT tabanla tam eşit (3498) |
+| Ölçüm | Aynı oturumda `main`'e (0aeb1ad) karşı, medyan ms (yerleşim aşaması parantezde): B1 147 → 71 (61,7 → 8,0), B2 113 → 75 (49,2 → 10,7), B3 3,6 → 2,5 (0 → 0), B4 20,4 → 16,2 (6,8 → 1,8), B5 152 → 74 (63,9 → 8,4), B6 60 → 38 (26,8 → 3,8), B7 61 → 38 (27,1 → 3,7), B10 116 → 76 (49,7 → 11,0). B12 (tek paragraf) ve B13 (yalnızca boyama) değişmedi. Yerleşim artık karenin en küçük aşaması; kalan süre display list ve raster, M5.6'nın işi |
+
+Son ölçüm (bu PR'ın son hâli; süreler ms, sayaçlar son kare):
+
+| | Senaryo | medyan | p95 | stil | yerleşim | display list | raster | stillenen | yerleşen | şekillenen | öğe |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 10 bin eleman, bir metin | 75,66 | 78,64 | 3,78 | 9,38 | 27,93 | 32,16 | 0 | 5 | 1 | 26002 |
+| B2 | bir karede 100 metin | 81,03 | 92,76 | 4,04 | 12,29 | 28,83 | 33,80 | 0 | 203 | 100 | 26002 |
+| B3 | 1000 düzey, yaprağa sınıf | 2,42 | 4,11 | 0,40 | 0,00 | 0,54 | 1,43 | 1 | 0 | 0 | 1004 |
+| B4 | 1000 karttan birine sınıf | 15,78 | 20,76 | 1,07 | 1,70 | 3,75 | 8,69 | 2 | 4 | 1 | 4002 |
+| B5 | `contain: size layout` içinde, 10 bin | 76,74 | 78,14 | 3,58 | 9,41 | 27,91 | 33,07 | 0 | 4 | 1 | 26005 |
+| B6 | 5000 elemanda imleç | 36,88 | 40,25 | 2,09 | 3,44 | 12,74 | 17,46 | 1 | 0 | 0 | 13002 |
+| B7 | 5000 elemanda sürükleme | 38,77 | 43,26 | 2,16 | 3,74 | 14,21 | 17,60 | 1 | 2 | 0 | 13004 |
+| B10 | bir karede 100 toplu işlem | 80,37 | 125,33 | 4,29 | 12,91 | 28,69 | 33,94 | 0 | 203 | 100 | 26002 |
+| B12 | 10 bin kelimelik paragrafa bir harf | 74,33 | 77,02 | 0,30 | 0,91 | 16,95 | 55,93 | 0 | 4 | 1 | 2504 |
+| B13 | satır içi stilde renk, 10 bin | 67,17 | 74,66 | 5,57 | 0,00 | 26,91 | 32,56 | 1 | 0 | 0 | 26002 |
+| B14 | `erk-10000.html` açılıyor (10 bin kart) | 1493,07 | 1511,70 | 110,42 | 699,02 | 199,83 | 476,98 | 30005 | 30005 | 20001 | 90006 |
+| B15 | `erk-10000.html` tekerlekle kayıyor | 673,47 | 860,11 | 14,38 | 0,00 | 190,84 | 465,04 | 0 | 0 | 0 | 90006 |
+
+| Konu | Not |
+|---|---|
+| B14 ve B15 | `examples/erk-10000.html`'in sayfası (10 bin kart, 30 bin eleman) ölçüm aracında üretiliyor; dosyanın kendisi depoda değil. Açılış yayın derlemesinde 1,5 sn: yerleşim 700 ms (20 bin paragrafın ilk şekillendirmesi), raster 477, display list 200. Hata ayıklama derlemesinde (`cargo run` `--release`'siz) kabuk aynı sayfayı 40 sn'de açıyor |
+| Kaydırma | Bir tekerlek çentiği 673 ms: yerleşim çalışmıyor, ama display list 90 006 öğenin hepsini yeniden kuruyor ve raster hepsini çiziyor; görüntü alanında olan yüz kadar. Görünmeyeni çizmemek M5.6'nın ilk maddesi oldu; kaydırmanın kalanı (kaydırılan parçayı yeniden kurmadan taşımak) M5.6'nın parçaları ve kısmi sunumu |
+

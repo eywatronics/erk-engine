@@ -130,6 +130,7 @@ impl StyleEngine {
             reacts: reacts(&stylist),
             styled: computed.iter().flatten().count(),
             damage: Vec::new(),
+            moved: Vec::new(),
             computed,
         }
     }
@@ -302,6 +303,8 @@ pub struct Styles {
     styled: usize,
     /// What each element whose style changed makes dirty (M5.3).
     damage: Vec<(NodeId, Invalidation)>,
+    /// The elements that moved to another parent since the last frame.
+    moved: Vec<NodeId>,
 }
 
 /// Which parts of an [`Interaction`] some selector of the document's
@@ -343,6 +346,13 @@ impl Styles {
     /// decision 10). Empty when styling from nothing.
     pub fn damage(&self) -> &[(NodeId, Invalidation)] {
         &self.damage
+    }
+
+    /// The elements that moved to another parent since the last frame:
+    /// what their new place gives them (a containing block, a language)
+    /// may not show in their style. Empty when styling from nothing.
+    pub fn moved(&self) -> &[NodeId] {
+        &self.moved
     }
 }
 

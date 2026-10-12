@@ -914,6 +914,159 @@ mod tests {
     }
 
     #[test]
+    fn a_containing_block_built_again_gets_back_what_was_taken_as_it_was() {
+        // The block that finds the absolutely positioned element is taken
+        // from the last tree as it is; its containing block is built again
+        // and must get the element back.
+        let mut engine = verifying(
+            "<div style='position: relative; width: 200px'>\
+             <div><span style='position: absolute; left: 30px; top: 5px'>mutlak</span>iç</div>\
+             <p id=t>metin</p></div>",
+        );
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        for text in ["daha uzun bir metin", "kısa", ""] {
+            engine.set_text(t, text).unwrap();
+            boxes_laid_out(&mut engine);
+        }
+    }
+
+    #[test]
+    fn what_moves_is_built_where_it_went_with_what_it_holds() {
+        // The positioned element inside goes with it to another containing
+        // block, though its own style does not change.
+        let mut engine = verifying(
+            "<div id=a style='position: relative; margin-left: 10px'>\
+             <div id=m><b style='position: absolute; left: 5px'>x</b>m</div></div>\
+             <div id=b style='position: relative; margin-left: 70px'></div>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (a, b, m) = (
+            find(&engine, "#a"),
+            find(&engine, "#b"),
+            find(&engine, "#m"),
+        );
+        engine.insert(b, m, None).unwrap();
+        boxes_laid_out(&mut engine);
+        engine.insert(a, m, None).unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn an_ancestor_that_changes_reaches_what_it_holds() {
+        let mut engine = verifying(
+            "<div id=d><p>başlık <span>İSTANBUL</span></p><div>iç <b>blok</b></div></div>",
+        );
+        let d = engine.query(None, "#d").unwrap().unwrap();
+        // The language picks the case mapping of every text inside.
+        engine.set_attr(d, "lang", "tr").unwrap();
+        engine
+            .set_style_property(d, "text-transform", "lowercase")
+            .unwrap();
+        boxes_laid_out(&mut engine);
+        engine.set_style_property(d, "display", "none").unwrap();
+        boxes_laid_out(&mut engine);
+        engine.remove_style_property(d, "display").unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn the_arena_growing_moves_the_anonymous_boxes_up() {
+        // Anonymous paragraphs and placeholders come after the element
+        // boxes; an arena that outgrows the room kept moves them, and every
+        // index that names one: an atom's parent, a placeholder.
+        let mut engine = verifying(
+            "<div id=d>önce <i id=atom style='display: inline-block; width: 10px'>a</i>\
+             <b style='position: absolute; top: 2px'>çapa</b>\
+             <p>blok</p><div style='position: absolute; left: 3px'>yer</div><p>ikinci</p>\
+             sonra</div><ul id=list></ul>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (list, atom) = (find(&engine, "#list"), find(&engine, "#atom"));
+        for round in 0..3 {
+            for i in 0..150 {
+                let item = engine.create_element("li").unwrap();
+                engine.set_text(item, &format!("{round}.{i}")).unwrap();
+                engine.insert(list, item, None).unwrap();
+            }
+            boxes_laid_out(&mut engine);
+            // What the moved boxes name must still be them.
+            engine
+                .set_style_property(atom, "width", &format!("{}px", 20 + round * 15))
+                .unwrap();
+            boxes_laid_out(&mut engine);
+        }
+    }
+
+    #[test]
+    fn a_containing_block_that_changes_takes_what_is_deep_inside() {
+        // Only the ancestor's style changes; the positioned element deep
+        // inside goes to it all the same.
+        let mut engine = verifying(
+            "<div id=k style='margin-left: 40px'><div><p>iç <span style='position: absolute; left: 7px'>m</span></p></div></div>",
+        );
+        let k = engine.query(None, "#k").unwrap().unwrap();
+        engine
+            .set_style_property(k, "position", "relative")
+            .unwrap();
+        boxes_laid_out(&mut engine);
+        engine.remove_style_property(k, "position").unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn a_slot_given_to_another_element_is_built_for_it() {
+        let mut engine = verifying("<div id=d><p id=a style='height: 30px'></p><p>sonra</p></div>");
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (d, a) = (find(&engine, "#d"), find(&engine, "#a"));
+        engine.remove(a).unwrap();
+        // The arena gives the new element the removed one's slot.
+        let made = engine.create_element("h1").unwrap();
+        assert_eq!(
+            NodeId::from_bits(made).unwrap().index(),
+            NodeId::from_bits(a).unwrap().index()
+        );
+        engine.insert(d, made, None).unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn a_colour_that_changed_without_layout_is_in_the_next_layout() {
+        // A colour that only repaints leaves the tree as it was; when a
+        // later frame lays the paragraph out again, the tree must have it.
+        let mut engine = verifying(
+            "<p id=a style='width: 100px'>a</p><p>bir <span id=s style='color: red'>iki</span> üç</p>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (a, s) = (find(&engine, "#a"), find(&engine, "#s"));
+        engine.set_style_property(s, "color", "blue").unwrap();
+        assert!(!laid_out(&mut engine));
+        // The paragraph above grows: this one moves down.
+        engine
+            .set_text(a, "uzun bir metin ki birkaç satıra sarılır")
+            .unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn what_changes_nothing_taffy_reads_lays_nothing_out() {
+        // A caret blinking: `visibility` runs layout, but no box's inputs
+        // change, the document's box included, which holds the viewport.
+        let mut engine = verifying(
+            "<p>a</p><span id=c style='display: inline-block; width: 1px; height: 16px'></span>",
+        );
+        let c = engine.query(None, "#c").unwrap().unwrap();
+        for visibility in ["hidden", "visible"] {
+            engine
+                .set_style_property(c, "visibility", visibility)
+                .unwrap();
+            assert_eq!(boxes_laid_out(&mut engine), 0);
+        }
+        // Only the viewport changes.
+        engine.resize(250, 200);
+        assert!(boxes_laid_out(&mut engine) > 0);
+    }
+
+    #[test]
     fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
         // Nothing in the paragraph's box changes, and Taffy does not lay it
         // out again; but its rounded width follows where it lands, and a

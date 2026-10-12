@@ -18,7 +18,7 @@
 
 use std::time::{Duration, Instant};
 
-use erk::{App, Config, FrameStats, FrameTimings, Mutation, Node, Ref};
+use erk::{App, Config, FrameStats, FrameTimings, Input, Mutation, Node, Ref};
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
@@ -344,6 +344,62 @@ fn b10() -> Result {
     )
 }
 
+/// `examples/erk-10000.html`'s page, made here: 10 000 cards of a title
+/// and a description, 30 000 elements.
+fn cards() -> String {
+    let mut html = String::from(
+        "<!doctype html><html lang=tr><style>\
+         body { font-family: sans-serif; margin: 16px; color: #222222; background: #f5f5f5 }\
+         h1 { font-size: 24px }\
+         .card { padding: 8px; margin: 4px; border: 1px solid #cccccc; background: #ffffff }\
+         .title { font-size: 16px } .description { font-size: 12px }\
+         </style><body><h1>10.000 Kart Performans Testi</h1><main>",
+    );
+    for i in 0..10_000 {
+        html.push_str(&format!(
+            "<div class=card id=card-{i}><div class=title>Kart {i}</div>\
+             <div class=description>Bu, Erk yerleşim benchmark testi için örnek içeriktir. Kart numarası: {i}.</div></div>"
+        ));
+    }
+    html.push_str("</main>");
+    html
+}
+
+fn b14() -> Result {
+    // Opening the page: parsing, the first style, layout, display list and
+    // paint, every time from nothing.
+    let html = cards();
+    let mut app = app(&html);
+    measure(
+        &mut app,
+        5,
+        "B14",
+        "erk-10000.html opens (10 000 cards)",
+        |app, _| app.load_html(&html),
+    )
+}
+
+fn b15() -> Result {
+    // The wheel on the same page: a notch scrolls the document.
+    let mut app = app(&cards());
+    measure(
+        &mut app,
+        30,
+        "B15",
+        "erk-10000.html scrolls with the wheel",
+        |app, run| {
+            // Down the page, and back up now and then.
+            let dy = if run % 10 == 9 { -300.0 } else { 100.0 };
+            app.input(Input::Wheel {
+                dx: 0.0,
+                dy,
+                x: 400.0,
+                y: 300.0,
+            });
+        },
+    )
+}
+
 /// A scenario's name and how to run it.
 type Scenario = (&'static str, fn() -> Result);
 
@@ -358,7 +414,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 11] = [
+    let all: [Scenario; 13] = [
         ("B1", b1),
         ("B2", b2),
         ("B2b", b2b),
@@ -370,6 +426,8 @@ fn main() {
         ("B10", b10),
         ("B12", b12),
         ("B13", b13),
+        ("B14", b14),
+        ("B15", b15),
     ];
     println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");
     println!(
