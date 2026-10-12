@@ -551,3 +551,15 @@ diyor; doğrusu sonuçların tabanla tam eşit kalması (geçme oranları
 | İlk tasarım | Bant önce üç ayrı örtüydü: glif payı, satır parçalarının yazı tipi kutuları ve göreli kaymanın en büyüğü, arka planlar. Altı mutantı sağ çıktı: örtüler birbirini kapsıyordu. Tek örtüye indirildi |
 | Mutasyonlar | Bandın üstte ya da altta payının kalkması, satır kaymasının, yükseltmenin, gliflerin göreli kaymasının, arka planların ya da onların kaymasının yok sayılması: yakalandı. Paragrafların hiç atlanmaması sağ çıktı: satır düzeyindeki eleme aynı listeyi veriyor, kazanç yalnızca süre (aşağıda) |
 | Ölçüm | Aynı oturumda `main`'e (12a3198) karşı, medyan ms: B15 75 → 31 (display list 55 → 12), B12 13 → 9, B1 24 → 20, B14 1092 → 878. B15'in kalanı: stil 13 ms (değişiklik yokken bütün belgeyi geziyor), display list 12 (gezinti ve her karenin kutu modelleri), raster 5 |
+
+Üçüncü PR: değişiklik yokken stil çalışmıyor (tasarım §3.7.1, adım 1).
+
+| Konu | Not |
+|---|---|
+| Ölçüm önce | B15'in stil aşaması 13 ms, değişiklik olmadığı hâlde: restyle her kare bütün belgeyi geziyor (düğüm başına durum, `<style>` taraması, Stylo gezintisi, 50 bin girişlik stil vektörünün kopyası); aynı aşamada bütün paragrafların renk taraması (`colours_split_alike`) ve belgenin URL taraması (`Resources::requests`) |
+| Aynı stiller | Restyler kesintisizse (bir önceki kareyi görmüş, aynı görüntü alanı), belgede değişiklik yoksa ve etkileşim (hover, active, focus) aynıysa son karenin stilleri hasarsız, taşınmasız ve "stillenen 0" olarak yeniden kullanılıyor (`Styles::unchanged`); restyler'ın kare sayacı ilerliyor, sonraki kare artımlı kalıyor |
+| Sakin kare | Değişiklik yok ve hiçbir elemanın stili değişmedi: renk taraması yapılmıyor (son kare zaten geçti ya da yerleşti). URL taraması ancak kaynak revizyonu da aynıysa atlanıyor: host'un yazı tipi kataloğu sonradan gelirse belge ve stiller aynı kalsa da yeni yazı tipleri istenir |
+| Bulunan hata | İlk sürüm URL taramasını yalnızca sakin karede atlıyordu. Workspace testlerinde kabuğun ekran görüntüsü testi takıldı: katalog ilk kareden sonra geliyor, yazı tipi hiç istenmiyordu. Motor testi eklendi (`fonts_the_host_offers_later_are_asked_for`) |
+| Ölü koşullar | "Belgenin tamamı yeni" (`Changes::everything`) hem stil hem sakin kare koşulunda gereksizdi: yalnızca yeni bir belgenin günlüğünde var, yeni belge yeni bir sayfa anahtarı ve restyler demek. Mutantları sağ çıktı, silindi |
+| Mutasyonlar | Değişikliklerin, etkileşimin, kesintisizliğin yok sayılması, etkileşimin saklanmaması; sakin karede değişikliklerin, hasarın ya da kaynak revizyonunun yok sayılması: yakalandı. Hasar mutantı ilk koşuda sağ çıktı: belge değişmeden de stil değişebilir. İki test eklendi: hover bir span'in rengini komşularınınkine eşitleyince paragraf yeniden yerleşiyor, hover bir görüntü adlandırınca URL isteniyor. Sakin karede taramaların yine yapılması sağ çıktı: yalnızca süre |
+| Ölçüm | Aynı oturumda `main`'e (e13124e) karşı, medyan ms: B15 42 → 21 (stil 17,5 → 0,05), B6 16 → 13, B13 16 → 14, B1 29 → 23. B15'in kalanı display list 14 (gezinti, kutu modelleri, `Scrolling`) ve raster 6: tasarımın 2. ve 3. adımları |
