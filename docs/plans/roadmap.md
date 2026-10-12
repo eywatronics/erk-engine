@@ -369,6 +369,12 @@ bağımlı; düğüme bağlı veri yan tablolarda.
   `now_ns`'inden (p1-contract §7). Rengin "çat" diye değil 150 ms'de
   yumuşakça değişmesi uygulamanın kalitesini belirliyor; tam animasyon
   motoru (`@keyframes`, kompozitörde koşan animasyonlar) M9'da kalır
+- **Bellek** (2026-10-12 kararı, kabulden önceki son adım): Erk'in hedefi
+  az bellek, ölçüm bunu tutmuyor. Küçük sayfada CPU raster'ıyla özel bellek
+  23,7 MB, GPU yolunda 344 MB; 10 bin kartlık sayfada 472 MB (eleman
+  başına ~15 KB). Önce belleğin nereye gittiği ölçülür, sonra küçültülür:
+  küçük sayfada 12–14 MB'a, 10 bin kartlık sayfada eleman başına 3–4 KB'a;
+  GPU yolunun tamponları küçültülür. Bütçe CI'da
 
 M5 de adımlara bölünür; her adım kendi PR'ı ([m5-incremental-forms.md](m5-incremental-forms.md)).
 Tasarımın dokuz adımından sapmalar (M5.8'in bölünmesi, erişilebilirliğin
@@ -389,12 +395,13 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.10 | Onay kutusu, radyo, düğme, `select` (listesi üst katmanda), form gönderimi | Yeni |
 | M5.11 | Erişilebilirlik (AccessKit) | Yeni |
 | M5.12 | Temel geçişler | Yeni |
-| M5.13 | Kabul | Yeni |
+| M5.13 | Bellek: önce ölçüm (aşama aşama döküm, B16), sonra diyet; bütçe CI'da | Yeni (2026-10-12 kararı) |
+| M5.14 | Kabul | Yeni |
 
 **Kabul:** 10 bin düğümlü bir belgede bir metin alanına yazarken p95 kare süresi
 hedefi (sayı bu taşın planında, M2 tabanına göre) tutuyor. p2-incremental §4'ün
 B1–B11 ölçümleri tabana karşı yayımlı. Kısmi kare ile tam kare piksel piksel
-aynı. Türkçe ve CJK IME girişi çalışıyor. Bir ekran okuyucu form etiketlerini
+aynı. Bellek hedefleri (M5.13) tutuyor ve bütçesi CI'da. Türkçe ve CJK IME girişi çalışıyor. Bir ekran okuyucu form etiketlerini
 okuyor.
 
 ---
