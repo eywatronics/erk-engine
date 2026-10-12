@@ -248,6 +248,89 @@ sunumuyla yalnızca o bölgeyi ekrana gönderir. `vello_hybrid` (M2) makas
 dikdörtgeniyle çalışır. Döşeme boyutu ve tam kareye terfi eşiği ölçümle
 seçilen parametrelerdir.
 
+### 3.7.1 Kaydırma: bant, katman, döşeme
+
+**Neden.** M5.6'nın ilk iki adımından sonra 10 bin kartlık sayfada
+(`examples/erk-10000.html`, B15) bir tekerlek çentiği 31 ms: stil 13
+(değişiklik yokken bütün belgeyi geziyor), display list 12, raster 5.
+Hedef Chrome'un hissi: B15'in p95'i 8,3 ms'nin (120 Hz) altında.
+Kaydırmada belge değişmez; değişen tek şey bir ofset. Her kareyi baştan
+stillemek, listelemek ve çizmek bu yüzden yanlış model.
+
+**İlham: Chrome.** Chrome kaydırmayı ana iş parçacığından ayırır:
+
+- Boyama, görüntü alanından büyük bir *ilgi dikdörtgeni* (görüntü
+  alanı ve çevresi) için yapılır.
+- Kullanıcının kaydırdığı her kap, kendi *katmanında* tutulur.
+- Katmanlar *döşemeler* hâlinde rasterlanır; görüntü alanının yakınındaki
+  döşemeler önceden hazırlanır.
+- Kaydırmada compositor iş parçacığı yalnızca kaydırma düğümünün ofsetini
+  değiştirir ve hazır döşemeleri yeni yerlerinde birleştirir. Ana iş
+  parçacığı stil, yerleşim ve boyama yapmaz; kaydırmayı sonra öğrenir.
+- Birleştirilen kaydırma, metin keskin kalsın diye cihaz pikseline
+  yuvarlanır.
+- Döşeme hazır değilse boş alan gösterilir (checkerboarding).
+
+**Erk'in uyarlaması.** Aynı fikir, Erk'in kurallarıyla:
+
+| Chrome | Erk | Neden farklı |
+|---|---|---|
+| Kaydırma compositor iş parçacığında, girdi oraya gider | Ofset UI iş parçacığında kalır, ama bir kaydırma karesinin UI'daki maliyeti bir ofset yazmaktır: stil, yerleşim ve liste çalışmaz | Belgenin ve etkileşimin durumu UI iş parçacığının (p1-contract §1.1); raster'a yalnızca düz veri gider. Chrome'un ayırma sebebi JS'nin ana iş parçacığını tıkaması; Erk'te JS yok |
+| Compositor ayrı bir iş parçacığı | Compositor raster'ın kendisi: tutulan katmanları ve döşemeleri raster iş parçacığı tutar | Bir iş parçacığı ve bir sınır az; raster zaten son kareyi tutuyor (`Rasterizer::last`) |
+| İlgi dikdörtgeni | **Bant**: kaydırma kabının içerik koordinatlarında, görüntü alanının bir ekran yukarısından bir ekran aşağısına (boyutu ölçümle). M5.6'nın görünmeyeni çizmeme kuralı görüntü alanı yerine bandı kullanır | Aynı eleme kodu, daha büyük bir pencere |
+| Döşeme hazır değilse boşluk | Kare her zaman tam: eksik döşeme o karede rasterlanır | Erk'in kuralı: kısmi kare ile tam kare piksel piksel aynı (M5.6 muhafızı). Boşluk o kuralı bozar |
+| Kaydırma cihaz pikseline yuvarlanır | Ofset yazılırken cihaz pikseline yuvarlanır | Tam sayı kaydırmada bir döşemeyi taşımak, onu yeniden çizmekle aynı pikselleri verir |
+
+**Model.**
+
+1. **Katman.** Belgenin kaydırıcısının içeriği bir katmandır: display
+   list'in o kapsamdaki öğeleri, bandın kendi koordinatlarında (bandın
+   tepesine göre). Büyük içerik koordinatları (600 bin piksel) `f32`'de
+   1/16 piksele kadar yuvarlanır; banda göre küçük sayılarla bu olmaz.
+   Kaydırılmayan içerik (sabit kutular, kaydırma çubukları) katmanın
+   üstüne her kare doğrudan çizilir. Katmanlı yol yalnızca listenin
+   böyle bölünebildiği karelerde çalışır: kaydırılan içerik önce, gerisi
+   onun üstünde. Bölünemeyen kare (kaydırılan içeriğin altında boyanan
+   sabit bir kutu) bugünkü gibi tam çizilir.
+2. **Kaydırma karesi.** Kare yalnızca ofset değiştiyse ve görüntü alanı
+   hâlâ bandın içindeyse UI iş parçacığı stil, yerleşim ve liste
+   yapmaz. Raster'a giden kare, katmanın değişmediğini ve yeni ofseti
+   söyler: düz veri. İsabet bölgeleri katmanın koordinatlarında durur,
+   isabet testi ofseti ekler. Görüntü alanı bandın kenarına yaklaşınca
+   bant yeni ofsetin çevresinde yeniden kurulur: bir ekran boyu
+   kaydırmada bir kez, bugünkü liste kurma maliyetiyle.
+3. **Döşeme.** Raster katmanı yatay şeritler hâlinde rasterlar (tam
+   genişlik, T cihaz pikseli yükseklik; T ölçümle, B11). Kare, görünen
+   şeritlerin satırlarının tam sayı ofsetle kopyalanması ve üstüne
+   kaydırılmayan öğelerin çizilmesidir. Yeni görünen şerit o karede
+   rasterlanır. Katman değişince şeritleri gider.
+4. **Hasar.** Belge değişen karelerde (B1, B6, B7) §3.7'nin hasar
+   bölgesi şeritlere uygulanır: yalnızca hasarın değdiği şeritler
+   yeniden rasterlanır.
+5. **Hover.** Kaydırma imlecin altındaki içeriği değiştirir. UI iş
+   parçacığı imlecin altını katmanın isabet bölgelerinden bulur; hover
+   ancak hedef değiştiyse ve stil sayfaları hover'a tepki veriyorsa
+   (`Reacts`) yeniden stillenir.
+6. **GPU yolu.** `vello_hybrid` bütün sahneyi zaten GPU'da çizer;
+   orada da katman listesi tutulur ve kare yeni bir çeviriyle yeniden
+   çizilir. Döşeme önbelleği önce CPU yolunda; GPU'da gerekip gerekmediği
+   ölçümle (§9'un açık sorusu).
+
+**Doğruluk.** Kâhin değişmez: her kare baştan hesaplanan display list'le
+aynı görüntüyü vermeli. Muhafız, M5.6'nın altın testi: katmanlı ve
+döşemeli kare, aynı karenin tam rasterıyla piksel piksel aynı; kaydırma
+ofsetleri, bant sınırları ve şerit sınırları üzerinden.
+
+**Adımlar.** Her biri kendi PR'ı, B15'le ölçülür:
+
+1. Değişiklik yokken stil çalışmaz (B15'in stil aşaması ~13 ms).
+2. Kaydırma karesi: bant, katmanın koordinatları, cihaz pikseline
+   yuvarlanan ofset, isabet bölgeleri. UI iş parçacığı yalnızca ofset
+   yazar.
+3. Raster'da şeritler ve kopyayla birleştirme; altın muhafız.
+4. Belge değişen karelerde hasarlı şeritler.
+5. İç kaydırma kapları kendi katmanları olarak, ölçüm gösterirse.
+
 ### 3.8 Erişilebilirlik
 
 `A11Y_*` bitleri AccessKit ağacının güncellemesini besler. Bağdaştırıcı
@@ -429,7 +512,8 @@ M5.0 yürütme notlarında.
   tabloyu kuruyor. Kalıcı yan tablo, M4'ün arena silmesi ve nesilleriyle
   nasıl eşleşir?
 - `vello_hybrid`'de kısmi sunum: makas dikdörtgeni mi, döşeme önbelleği mi
-  (M9 ile sınır)?
+  (M9 ile sınır)? §3.7.1: önce CPU yolunda şeritler; GPU'da katman listesi
+  tutulup yeniden çeviriyle çiziliyor, döşeme önbelleği ölçüm gösterirse.
 - `contain` css-support.md'ye hangi değerlerle girer (`size`, `layout`,
   `paint`) ve hangi testle?
 
