@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<style>
+  /* 1. Custom Properties (Değişkenler) Testi */
+  :root {
+    --bg-base: #f3f4f6;
+    --card-bg: #ffffff;
+    --primary: #4f46e5;
+    --text-main: #111827;
+    --text-muted: #6b7280;
+    --border-light: #e5e7eb;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    margin: 0;
+    padding: 40px;
+    /* Font Fallback ve System UI Testi */
+    font-family: system-ui, sans-serif;
+    color: var(--text-main);
+  }
+
+  /* 2. Flexbox, Calc() ve Box-Shadow (M1.5 Gölge) Testi */
+  .card {
+    background-color: var(--card-bg);
+    border-radius: 16px;
+    padding: 24px;
+    width: calc(100% - 48px);
+    max-width: 380px;
+    /* Erk'in gururu: Çoklu ve bulanık gölgeler */
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    /* Absolute çocuklar için Containing Block */
+    position: relative; 
+    border: 1px solid var(--border-light);
+  }
+
+  /* 3. Absolute Position ve Z-Index Testi */
+  .badge {
+    position: absolute;
+    top: -12px;
+    right: 20px;
+    background-color: var(--primary);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 9999px; /* Tam yuvarlak (Pill) köşe */
+    font-size: 12px;
+    font-weight: bold;
+    z-index: 10;
+    /* Türkçeye özel i -> İ dönüşüm testi! */
+    text-transform: uppercase; 
+    box-shadow: 0 4px 6px rgba(79, 70, 229, 0.3);
+  }
+
+  /* 4. Flex Satır ve Hizalama Testi */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .avatar {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%; /* Tam Daire Testi */
+    background-color: #c7d2fe;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: bold;
+    /* Border width ve color testi */
+    border: 3px solid #e0e7ff; 
+  }
+
+  .user-info {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .name {
+    font-size: 20px;
+    font-weight: bold;
+    margin: 0;
+  }
+
+  .title {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0;
+    text-transform: capitalize;
+  }
+
+  /* 5. Flex Wrap (Satır Kaydırma) Testi */
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tag {
+    background-color: var(--bg-base);
+    color: #374151;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    border: 1px solid var(--border-light);
+  }
+
+  /* 6. Inline Layout, Line-Height ve Baseline Testi */
+  .description {
+    line-height: 1.6;
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  .highlight {
+    font-weight: bold;
+    color: var(--primary);
+    background-color: #e0e7ff;
+    padding: 0 4px;
+    border-radius: 4px;
+  }
+
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--border-light); /* Dashed şimdilik solid çizilecek (Known M1.5 behaviour) */
+  }
+
+  /* 7. Atomic Inline ve Vertical-Align Testi */
+  .btn {
+    display: inline-block;
+    background-color: var(--text-main);
+    color: white;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 14px;
+    /* Baseline hizalamasını zorlayan özellik */
+    vertical-align: middle; 
+  }
+
+  /* 8. Opacity (Saydamlık) Z-Index Context Testi */
+  .status {
+    opacity: 0.5;
+    font-size: 12px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <!-- Bu yazıdaki küçük i harfi, lang="tr" ve text-transform sayesinde İ'ye dönüşmeli -->
+  <div class="badge">yeni̇ sürüme geçti̇</div>
+
+  <div class="header">
+    <div class="avatar">E</div>
+    <div class="user-info">
+      <div class="name">Erk Engine</div>
+      <!-- capitalize sayesinde kelimelerin baş harfi büyüyecek -->
+      <div class="title">sıfır electron, tam performans</div>
+    </div>
+  </div>
+
+  <p class="description">
+    Erk, modern bir masaüstü uygulaması yazmak için gereken <span class="highlight">standart CSS</span> alt kümesini destekler. İçinde JavaScript motoru barındırmaz.
+  </p>
+
+  <div class="tags">
+    <div class="tag">Rust</div>
+    <div class="tag">Flexbox</div>
+    <div class="tag">Stylo</div>
+    <div class="tag">Vello GPU</div>
+    <div class="tag">Taffy</div>
+  </div>
+
+  <div class="footer">
+    <span class="status">● Sistem Hazır</span>
+    <span class="btn">Derle & Çalıştır</span>
+  </div>
+</div>
+
+</body>
+</html>
