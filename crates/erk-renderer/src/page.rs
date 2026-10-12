@@ -150,6 +150,8 @@ struct Kept {
     /// The page's frame it last styled: one that missed frames knows
     /// nothing of their changes.
     frame: u64,
+    /// What the user was doing in that frame.
+    interaction: Interaction,
     /// The viewport (CSS pixels) and scale it styles for.
     viewport: (f32, f32, f32),
     restyler: Restyler,
@@ -279,10 +281,16 @@ impl Page {
         let (w, h, _) = viewport;
         let revision = resources.revision();
         let last = self.layout.take();
+        // Neither the document nor any element's style changed: what was
+        // true of them last frame still is. The colours split the text as
+        // they did; and with the same resources (the host's font catalogue
+        // among them), no URL is named that was not asked for.
+        let quiet = changes.count() == 0 && styles.damage().is_empty();
+        let same_resources = last.as_ref().is_some_and(|kept| kept.revision == revision);
         let reusable = last.as_ref().is_some_and(|kept| {
             kept.revision == revision
                 && only_repaints(&self.styles, &styles, &changes)
-                && kept.layouts.colours_split_alike(&self.doc, &styles)
+                && (quiet || kept.layouts.colours_split_alike(&self.doc, &styles))
         });
         // A layout that does not hold is dropped after the frame: freeing
         // ten thousand boxes takes milliseconds, which are no stage's.
@@ -310,7 +318,7 @@ impl Page {
                 tree: &mut tree,
             },
             resources,
-            true,
+            !(quiet && same_resources),
             mark,
         );
         self.shapes = (shapes, revision);
@@ -359,22 +367,35 @@ impl Page {
             let mine = kept
                 .iter()
                 .position(|entry| std::ptr::eq(entry.page.as_ptr(), Arc::as_ptr(&self.style_key)));
-            let mut entry = match mine.map(|at| kept.swap_remove(at)) {
+            let (mut entry, continues) = match mine.map(|at| kept.swap_remove(at)) {
                 // It saw every frame, at this viewport: another viewport may
                 // change media queries and viewport units anywhere.
                 Some(entry) if entry.frame + 1 == self.frames && entry.viewport == viewport => {
-                    entry
+                    (entry, true)
                 }
-                _ => Kept {
-                    page: Arc::downgrade(&self.style_key),
-                    frame: 0,
-                    viewport,
-                    restyler: Restyler::new(style_engine(viewport)),
-                    tree: None,
-                },
+                _ => (
+                    Kept {
+                        page: Arc::downgrade(&self.style_key),
+                        frame: 0,
+                        interaction,
+                        viewport,
+                        restyler: Restyler::new(style_engine(viewport)),
+                        tree: None,
+                    },
+                    false,
+                ),
             };
             entry.frame = self.frames;
-            let styles = entry.restyler.restyle(&self.doc, &interaction, changes);
+            // Nothing styles depend on changed: neither the document nor
+            // what the user is doing (a scroll, a frame the host asked
+            // for). The last frame's styles hold, and the restyler, which
+            // saw this frame, stays in step.
+            let styles = if continues && changes.count() == 0 && entry.interaction == interaction {
+                std::mem::take(&mut self.styles).unchanged()
+            } else {
+                entry.restyler.restyle(&self.doc, &interaction, changes)
+            };
+            entry.interaction = interaction;
             kept.push(entry);
             styles
         })

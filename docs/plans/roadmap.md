@@ -382,7 +382,7 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.3 | Kalıcı stil (Stylo invalidation'ı, `:has()`), CSSOM stil yardımcısı | Bitti: snapshot'lar, ipuçları, stil farkından bitler; satır içi tek özellik (CSSOM, C-ABI 0.7); değişen bir `<style>` yalnızca kurallarının eşleşebildiklerini stilliyor. `:has()` Stylo 0.20'de ayrıştırılmıyor |
 | M5.4 | Kalıcı layout: Taffy önbelleği, sınırlar, erken kesme | Bitti: yalnızca boyayan kare yerleşimi tutuyor (B13 326 → 65 ms, yerleşen 0); şekillendirme önbelleği (B1 345 → 199 ms, şekillenen 8000 → 1); kalıcı Taffy ağacı (B1'de yerleşen 10003 → 5); ağaç yalnızca değişen yerde kuruluyor (B1 147 → 71 ms, yerleşim 62 → 8 ms). Sınırlar ve erken kesme ölçüme göre gerekmedi |
 | M5.5 | Kalıcı metin şekillendirmesi | Bitti, M5.4'ün ikinci PR'ıyla: bir harf yalnızca kendi paragrafını şekillendiriyor |
-| M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Sürüyor: görüntü alanının dışı listede yok (B15, 10 bin kartlık sayfada kaydırma, 709 → 88 ms; raster 491 → 7 ms); görünmeyen paragraf gezilmiyor (B15 75 → 31 ms). Sırada kaydırmada listenin yeniden kurulmaması |
+| M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Sürüyor: görüntü alanının dışı listede yok (B15, 10 bin kartlık sayfada kaydırma, 709 → 88 ms; raster 491 → 7 ms); görünmeyen paragraf gezilmiyor (B15 75 → 31 ms); değişiklik yokken stil çalışmıyor (B15 42 → 21 ms). Sırada kaydırmada listenin yeniden kurulmaması (tasarım §3.7.1) |
 | M5.7 | Odak, Tab sırası, varsayılan eylemin iptali, girdi/değişiklik/gönderim olayları | Yeni |
 | M5.8 | Metin alanları: imleç, seçim, pano, IME | Yeni |
 | M5.9 | Üst katman; `<details>`, `<dialog>`, `popover`, `commandfor` | Yeni |

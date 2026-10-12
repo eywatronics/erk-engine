@@ -317,6 +317,15 @@ struct Reacts {
 }
 
 impl Styles {
+    /// The styles of a frame in which nothing that styles depend on
+    /// changed: these, with nothing styled, damaged or moved.
+    pub fn unchanged(mut self) -> Self {
+        self.styled = 0;
+        self.damage.clear();
+        self.moved.clear();
+        self
+    }
+
     /// Whether styling with `after` instead of `before` can change any
     /// style: a page with no `:hover` rule looks the same wherever the
     /// pointer is.

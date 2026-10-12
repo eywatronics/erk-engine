@@ -1066,6 +1066,67 @@ mod tests {
         assert!(boxes_laid_out(&mut engine) > 0);
     }
 
+    /// The pointer moved onto the middle of `node`'s box.
+    fn hover(engine: &mut Engine, node: u64) {
+        let model = engine.node_box(node).unwrap().unwrap();
+        engine.pointer(&PointerInput {
+            kind: PointerKind::Move,
+            x: model.x + model.width / 2.0,
+            y: model.y + model.height / 2.0,
+            button: PointerButton::None,
+            modifiers: Modifiers::default(),
+        });
+    }
+
+    #[test]
+    fn a_style_the_pointer_changes_splits_the_text_again() {
+        // Nothing in the document changes, but the hover makes the span's
+        // colour its neighbours': the runs split elsewhere, and the
+        // paragraph is laid out again.
+        let mut engine = verifying(
+            "<style>p { color: #000 } #s { color: #c00 } p:hover #s { color: #000 }</style>\
+             <p id=p>bir <span id=s>iki</span> üç</p>",
+        );
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        hover(&mut engine, p);
+        assert!(laid_out(&mut engine));
+    }
+
+    #[test]
+    fn fonts_the_host_offers_later_are_asked_for() {
+        // Nothing in the document changes, but the host's catalogue comes
+        // after the first frame and has the family the page names.
+        let mut engine = verifying("<p style='font-family: Erk Test'>bir</p>");
+        engine.set_fonts(crate::FontCatalog {
+            families: vec!["Erk Test".to_owned()],
+            generic: Vec::new(),
+            fallback: Vec::new(),
+        });
+        let (_, requests) = engine.prepare();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.url.starts_with("font:Erk Test")),
+            "{requests:?}"
+        );
+    }
+
+    #[test]
+    fn a_url_the_pointer_names_is_asked_for() {
+        // Nothing in the document changes, but the hover names an image.
+        let mut engine =
+            verifying("<style>p:hover { background-image: url(hover.png) }</style><p id=p>bir</p>");
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        hover(&mut engine, p);
+        let (_, requests) = engine.prepare();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.url.ends_with("hover.png")),
+            "{requests:?}"
+        );
+    }
+
     #[test]
     fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
         // Nothing in the paragraph's box changes, and Taffy does not lay it
