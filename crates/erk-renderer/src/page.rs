@@ -1670,9 +1670,9 @@ mod tests {
         // Things that paint, or take the pointer, past their box: a
         // blurred shadow, a shadow moved far, glyphs taller than their
         // line, text moved by a relatively positioned span or raised by
-        // `vertical-align`, lines pushed down by a tall inline box, a
-        // transformed box and what is painted after it, a scroll container,
-        // a fixed box.
+        // `vertical-align`, an inline background padded past its line,
+        // lines pushed down by a tall inline box, a transformed box and
+        // what is painted after it, a scroll container, a fixed box.
         let lines: String = (0..12)
             .map(|i| format!("<p>satır {i} <span style='background: #fd8'>vurgu</span> devam</p>"))
             .collect();
@@ -1688,6 +1688,8 @@ mod tests {
              <p id=moved><span style='position: relative; top: 250px; background: #9cf'>aşağı kayan</span></p>\
              {lines}\
              <p id=raised>x <span style='vertical-align: 80px'>yukarı</span></p>\
+             {lines}\
+             <p id=padded>a <span style='padding: 40px 0; background: #fc9; border-bottom: 3px solid #333'>dolgulu</span> b</p>\
              {lines}\
              <p id=tall>önce <span style='display: inline-block; width: 10px; height: 300px; background: #888'></span> sonra<br>alt satır</p>\
              {lines}\
@@ -1716,6 +1718,7 @@ mod tests {
             ("#spread", 40.0),
             ("#moved", 270.0),
             ("#raised", 100.0),
+            ("#padded", 50.0),
             ("#tall", 40.0),
             ("#turned", 420.0),
         ] {

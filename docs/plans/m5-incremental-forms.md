@@ -205,7 +205,8 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 - [x] Görüntü alanının dışındaki öğeler ne display list'e giriyor ne
   çiziliyor. B15 (`erk-10000.html` tekerlekle kayıyor): kare 673 ms,
   yerleşim 0, display list 191, raster 465; 90 006 öğenin ekranda olanı
-  yüz kadar (M5.4 notları). B15 709'dan 88 ms'ye indi (M5.6 notları).
+  yüz kadar (M5.4 notları). B15 709'dan 88 ms'ye, paragrafın bandıyla
+  31 ms'ye indi (M5.6 notları).
 - [ ] Kutu başına parçalar, düğüm → parça yan tablosu, hasar bölgesi,
   `RenderBackend`; vello_cpu ve vello_hybrid'de kısmi sunum.
 - [ ] Muhafız: kısmi kare ile tam kare piksel piksel aynı (altın test).
@@ -539,3 +540,14 @@ diyor; doğrusu sonuçların tabanla tam eşit kalması (geçme oranları
 | Mutasyonlar | Gölge bulanıklığının, yarısının, kaymasının (yatay ve dikey), yayılmasının yok sayılması; glif payının üstte ya da altta kalkması; yükseltmenin, göreli kaymanın, satır kaymasının (glif ve satır bandında) yok sayılması; satır bandında yazı tipi yükselişinin ya da inişinin unutulması; dönüşüm sayacının artmaması ya da geri alınmaması; süslemenin, satır içi arka planların, metin isabetlerinin, satırların, koşuların hiç elenmemesi: yakalandı. Sağ çıkanlar: dikdörtgenlere kenar yumuşatma için bir piksel pay (şekil geometrisinin dışına boyanmıyor, kenar dahil sayılıyor: ölüydü, silindi); satırın ön kontrolü (yalnızca süre; yerine aralıklar ilk görünen koşuda tembel hesaplanıyor) |
 | Ölçüm | Aynı oturumda `main`'e (b71410a) karşı, medyan ms: B1 78 → 27, B6 60 → 16, B12 79 → 14, B13 68 → 20, B14 1559 → 997, B15 709 → 88. B15'te raster 491'den 7 ms'ye, display list 197'den 65 ms'ye indi; öğe 90 006'dan 100'e. Kalan display list süresi, öğe üretmese de her karede 30 000 elemanın stilini ve konumunu okuyan gezinti (~45 ms) ve kutu modelleri (~8 ms); kaydırmada listeyi hiç yeniden kurmamak M5.6'nın parçaları ve kısmi sunumunun işi. B14'ün kalanı ilk yerleşim (20 bin paragrafın ilk şekillendirmesi, ~790 ms) |
 
+
+İkinci PR: görünmeyen paragraf gezilmiyor.
+
+| Konu | Not |
+|---|---|
+| Ölçüm önce | Görünmeyeni çizmemekten sonra B15'in display list aşaması 65 ms'ydi, 100 öğe için. Geçici bir ölçümle: süsleme 1,3 ms, metin 49 ms (satır parçaları 26, glifler 22). Paragraf başına 2,4 µs, bütün satırları elendiği hâlde: bir satırın glif koşularını gezmek (`line.items()`) her koşunun genişliğini kümelerini toplayarak buluyor, ve eleme kararı için her kare iki kez gezildi |
+| Bant | `ShapedText::band`: paragrafın metninin içerik kutusunun tepesinden aşağı nereden nereye boyayabildiği ya da imleç alabildiği. Her koşunun glif payı (taban çizgisinin 3 em üstü, 2 em altı; satır kayması, yükseltme ve koşunun göreli kayması dahil), satır parçalarının yazı tipi kutularını da kapsıyor (hiçbir yazı tipi 3 em yükselmiyor, 2 em inmiyor); ve satır içi arka planlar, kaymalarıyla. Paragrafın yerleşimiyle bir kez yapılıyor ve onunla kareler arasında paylaşılıyor (`Arc`). Gezinti bandı görüntü alanına değmeyen paragrafı tek karşılaştırmayla atlıyor; satır ve koşu düzeyindeki eleme uzun paragraflar için kalıyor |
+| Test | `a_paragraphs_band_holds_all_its_text_paints_and_measures`: satırından yüksek metin, dolgulu arka planlı ve arka plansız göreli span, yükselen metin, satırından taşan dolgulu arka plan, uzun satır içi kutunun ittiği satırlar ve anonim paragraflar; her paragrafın satır parçaları, glifleri (taban çizgisinin bir em üstü, yarım em altı) ve arka planları bandının içinde. Görünmeyeni çizmemenin piksel testi bu sayfaya dolgulu satır içi arka planla genişledi |
+| İlk tasarım | Bant önce üç ayrı örtüydü: glif payı, satır parçalarının yazı tipi kutuları ve göreli kaymanın en büyüğü, arka planlar. Altı mutantı sağ çıktı: örtüler birbirini kapsıyordu. Tek örtüye indirildi |
+| Mutasyonlar | Bandın üstte ya da altta payının kalkması, satır kaymasının, yükseltmenin, gliflerin göreli kaymasının, arka planların ya da onların kaymasının yok sayılması: yakalandı. Paragrafların hiç atlanmaması sağ çıktı: satır düzeyindeki eleme aynı listeyi veriyor, kazanç yalnızca süre (aşağıda) |
+| Ölçüm | Aynı oturumda `main`'e (12a3198) karşı, medyan ms: B15 75 → 31 (display list 55 → 12), B12 13 → 9, B1 24 → 20, B14 1092 → 878. B15'in kalanı: stil 13 ms (değişiklik yokken bütün belgeyi geziyor), display list 12 (gezinti ve her karenin kutu modelleri), raster 5 |

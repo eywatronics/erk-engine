@@ -107,6 +107,9 @@ pub(crate) struct ShapedText {
     pub(crate) atom_boxes: Vec<u64>,
     pub(crate) layout: InlineLayout,
     pub(crate) decorations: Vec<DecorationRect>,
+    /// Where its text may paint or take the pointer, from the top of the
+    /// content box down (`display::text_band`).
+    pub(crate) band: (f32, f32),
 }
 
 impl Layouts {
@@ -248,8 +251,11 @@ pub(crate) fn layout(
                 return Some(kept.clone());
             }
             let layout = node.shaped.clone()?;
+            let relative = relative_offsets(paragraph, &node.layout);
+            let decorations = layout.decorations(paragraph);
             let shaped = Arc::new(ShapedText {
-                relative: relative_offsets(paragraph, &node.layout),
+                band: crate::display::text_band(&layout, &relative, &decorations),
+                relative,
                 text: paragraph.text.clone(),
                 sources: paragraph.sources.clone(),
                 colours: source_colours(doc, styles, &paragraph.sources),
@@ -261,7 +267,7 @@ pub(crate) fn layout(
                     .filter(|(_, item)| matches!(item.kind, crate::text::InlineItemKind::Atom(..)))
                     .map(|(id, _)| id as u64)
                     .collect(),
-                decorations: layout.decorations(paragraph),
+                decorations,
                 layout,
             });
             node.result = Some((node.layout, shaped.clone()));
