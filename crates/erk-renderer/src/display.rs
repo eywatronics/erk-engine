@@ -42,6 +42,7 @@ pub(crate) use crate::list::{
 };
 use crate::resources::{Resources, image_url};
 use crate::scroll::{Scrolling, VIEWPORT};
+use crate::text::{DecorationRect, InlineLayout};
 
 /// The part of a text node on one line, in CSS pixels relative to the
 /// viewport: from its first to its last placed cluster (white space at the
@@ -171,6 +172,45 @@ fn around(frame: Frame, by: f32) -> Frame {
         width: frame.width + 2.0 * by,
         height: frame.height + 2.0 * by,
     }
+}
+
+/// Where a paragraph's text may paint or take the pointer, from the top
+/// of its content box down: its glyph runs as `glyph_runs` keeps them,
+/// which holds their font boxes and so the fragments `text_fragments`
+/// measures (no font rises 3 em or falls 2), and its inline backgrounds;
+/// each moved by the relatively positioned element it is in. Made once
+/// with the paragraph's layout, so that a paragraph out of view costs one
+/// comparison: walking a line's runs adds up their clusters.
+pub(crate) fn text_band(
+    layout: &InlineLayout,
+    relative: &[(f32, f32)],
+    decorations: &[DecorationRect],
+) -> (f32, f32) {
+    let moved = |relative_index: u16| {
+        usize::from(relative_index)
+            .checked_sub(1)
+            .and_then(|at| relative.get(at))
+            .map_or(0.0, |(_, dy)| *dy)
+    };
+    let mut band = (f32::INFINITY, f32::NEG_INFINITY);
+    let mut cover = |top: f32, bottom: f32| band = (band.0.min(top), band.1.max(bottom));
+    for (index, line) in layout.layout.lines().enumerate() {
+        let shift = layout.shifts.get(index).copied().unwrap_or(0.0);
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(run) = item else {
+                continue;
+            };
+            let size = run.run().font_size();
+            let baseline = shift + run.baseline() - run.style().brush.raise
+                + moved(run.style().brush.relative);
+            cover(baseline - 3.0 * size, baseline + 2.0 * size);
+        }
+    }
+    for rect in decorations {
+        let top = rect.y + moved(rect.relative);
+        cover(top, top + rect.height);
+    }
+    band
 }
 
 /// Whether the band from `top` to `bottom` meets `view` across: text is
@@ -708,7 +748,16 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 
     // Hidden text is laid out all the same: its fragments are kept, only
     // its painting is skipped.
-    if let Some(shaped) = walk.layouts.text(id) {
+    // A paragraph out of view is not walked at all.
+    let shown = |shaped: &ShapedText, top: f32| {
+        walk.view()
+            .is_none_or(|view| crosses(view, top + shaped.band.0, top + shaped.band.1))
+    };
+    if let Some(shaped) = walk
+        .layouts
+        .text(id)
+        .filter(|shaped| shown(shaped, cy + layout.border.top + layout.padding.top))
+    {
         let content_x = cx + layout.border.left + layout.padding.left;
         let content_y = cy + layout.border.top + layout.padding.top;
         let fragments = text_fragments(shaped, (content_x, content_y), walk.view());
@@ -723,7 +772,12 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 
     // Anonymous boxes inherit their block's visibility and have no
     // border or padding of their own.
-    for anonymous in walk.layouts.anonymous(id) {
+    for anonymous in walk
+        .layouts
+        .anonymous(id)
+        .iter()
+        .filter(|anonymous| shown(&anonymous.text, cy + anonymous.layout.location.y))
+    {
         let origin = (
             cx + anonymous.layout.location.x,
             cy + anonymous.layout.location.y,
@@ -1404,4 +1458,100 @@ fn child_element(doc: &Document, parent: NodeId, name: &erk_dom::LocalName) -> O
 
 fn hex([r, g, b, a]: Rgba) -> String {
     format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use erk_dom::Document;
+    use erk_style::StyleEngine;
+
+    use super::*;
+    use crate::scroll::Offsets;
+    use crate::text::{EmbeddedFontMetrics, TextEngine};
+
+    #[test]
+    fn a_paragraphs_band_holds_all_its_text_paints_and_measures() {
+        // Text taller than its line, moved by a relatively positioned span
+        // with a padded background and without one, raised, padded past
+        // its line, and lines pushed down by a tall inline box.
+        let html = "<body style='margin: 0; font: 14px Noto Sans'>\
+             <p>satır <span style='background: #fd8'>vurgu</span></p>\
+             <p style='font-size: 60px; line-height: 10px'>Büyük</p>\
+             <p><span style='position: relative; top: 250px; padding: 40px 0; background: #9cf'>aşağı</span></p>\
+             <p><span style='position: relative; top: 250px'>arka plansız</span></p>\
+             <p>x <span style='vertical-align: 80px'>yukarı</span></p>\
+             <p>a <span style='padding: 40px 0; background: #fc9'>dolgulu</span> b</p>\
+             <p>önce <span style='display: inline-block; width: 10px; height: 300px'></span> sonra<br>alt</p>\
+             <div>anonim <p>blok</p> sonra</div>";
+        let doc = Document::parse_html(html);
+        let styles =
+            StyleEngine::with_font_metrics(400.0, 300.0, Arc::new(EmbeddedFontMetrics)).style(&doc);
+        let resources = Resources::default();
+        let layouts = crate::layout::layout(
+            &doc,
+            &styles,
+            &resources,
+            &mut TextEngine::with_fonts(resources.fonts()),
+            (400.0, 300.0),
+            None,
+        )
+        .0;
+        let scrolling = Scrolling::new(&doc, &styles, &layouts, (400.0, 300.0), &Offsets::new());
+        // Each paragraph with the top-left corner of its content box.
+        let mut paragraphs: Vec<(&ShapedText, (f32, f32))> = Vec::new();
+        let mut stack = vec![doc.root()];
+        while let Some(id) = stack.pop() {
+            stack.extend(doc.children(id));
+            let (Some(layout), Some((cx, cy))) = (layouts.get(id), scrolling.content_origin(id))
+            else {
+                continue;
+            };
+            if let Some(shaped) = layouts.text(id) {
+                let left = cx + layout.border.left + layout.padding.left;
+                paragraphs.push((shaped, (left, cy + layout.border.top + layout.padding.top)));
+            }
+            for anonymous in layouts.anonymous(id) {
+                let origin = (
+                    cx + anonymous.layout.location.x,
+                    cy + anonymous.layout.location.y,
+                );
+                paragraphs.push((&anonymous.text, origin));
+            }
+        }
+        assert_eq!(paragraphs.len(), 10);
+        for (shaped, origin) in paragraphs {
+            let (top, bottom) = (origin.1 + shaped.band.0, origin.1 + shaped.band.1);
+            let holds = |from: f32, to: f32| top <= from + 0.01 && to <= bottom + 0.01;
+            for fragment in text_fragments(shaped, origin, None) {
+                assert!(
+                    holds(fragment.y, fragment.y + fragment.height),
+                    "{fragment:?} out of {top}..{bottom}"
+                );
+            }
+            let colors = |_: &std::ops::Range<usize>, colour: Rgba| colour;
+            for run in glyph_runs(shaped, origin, &resources, &colors, None) {
+                let DisplayItem::Glyphs(run) = run else {
+                    continue;
+                };
+                // Above the baseline about an em, below it a little.
+                for glyph in &run.glyphs {
+                    assert!(
+                        holds(glyph.y - run.size, glyph.y + run.size / 2.0),
+                        "{:?} at {} out of {top}..{bottom}",
+                        run.text,
+                        glyph.y
+                    );
+                }
+            }
+            for rect in &shaped.decorations {
+                let y = origin.1 + rect.y + moved(shaped, rect.relative).1;
+                assert!(
+                    holds(y, y + rect.height),
+                    "a background at {y} out of {top}..{bottom}"
+                );
+            }
+        }
+    }
 }
