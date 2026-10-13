@@ -19,7 +19,7 @@ use erk_style::style::computed_values::visibility::T as Visibility;
 use erk_style::style::values::computed::Display;
 use erk_style::{ComputedValues, Interaction, Invalidation, Restyler, StyleEngine, Styles};
 
-use crate::display::{Content, DisplayItem, DisplayList, Frame as Rect};
+use crate::display::{Content, Cull, DisplayItem, DisplayList, Extents, Frame as Rect};
 use crate::layout;
 use crate::messages::{
     BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
@@ -91,6 +91,9 @@ struct Last<'a> {
     /// The last frame's list, when the layout, the styles and the
     /// resources still hold.
     list: Option<KeptList>,
+    /// Whether a list may leave out boxes by their extents. The oracle
+    /// walks every box: a wrong extent shows as a difference.
+    bounded: bool,
 }
 
 /// A frame's layout, and the resources' revision it was made at. Another
@@ -155,6 +158,9 @@ thread_local! {
 /// §3.7.1).
 struct KeptList {
     scrolling: Scrolling,
+    /// Where each box and what it holds may paint: a list for another
+    /// band walks only what may meet it.
+    extents: Extents,
     content: Content,
     /// The scroll offsets but the document's.
     inner: Offsets,
@@ -342,6 +348,7 @@ impl Page {
                 shapes: &mut shapes,
                 tree: &mut tree,
                 list,
+                bounded: true,
             },
             resources,
             !(quiet && same_resources),
@@ -511,6 +518,7 @@ impl Page {
                 shapes: &mut ShapeCache::default(),
                 tree: &mut None,
                 list: None,
+                bounded: false,
             },
             resources,
             false,
@@ -546,6 +554,7 @@ impl Page {
             shapes,
             tree,
             list: last_list,
+            bounded,
         } = last;
         let reused = kept.is_some();
         let layouts = kept.unwrap_or_else(|| {
@@ -581,18 +590,35 @@ impl Page {
             .map(|(node, offset)| (*node, *offset))
             .collect();
         let document = self.offsets.get(&doc.root()).copied().unwrap_or_default();
-        // The last list, if only the document scrolled, inside its band.
+        // The last frame's boxes, if only the document scrolled; its list
+        // too, inside its band.
         let kept_list = last_list
             .filter(|kept| kept.inner == inner && kept.bars == bars)
-            .and_then(|mut kept| {
+            .map(|mut kept| {
                 kept.scrolling.scroll_document(document);
-                let offset = kept.scrolling.document_offset();
-                (kept.content.band == Some(crate::display::band(view, offset))).then_some(kept)
+                kept
             });
-        let (scrolling, content, listed) = match kept_list {
-            Some(kept) => (kept.scrolling, kept.content, false),
-            None => {
-                let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+        let (scrolling, extents, content, listed) = match kept_list {
+            Some(kept)
+                if kept.content.band
+                    == Some(crate::display::band(view, kept.scrolling.document_offset())) =>
+            {
+                (kept.scrolling, kept.extents, kept.content, false)
+            }
+            kept => {
+                let (scrolling, extents) = match kept {
+                    Some(kept) => (kept.scrolling, kept.extents),
+                    None => {
+                        let scrolling =
+                            Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+                        let extents = Extents::new(doc, &styles, &layouts, &scrolling);
+                        (scrolling, extents)
+                    }
+                };
+                let cull = Cull {
+                    view,
+                    extents: bounded.then_some(&extents),
+                };
                 let (content, _) = Content::build(
                     doc,
                     &styles,
@@ -600,9 +626,9 @@ impl Page {
                     resources,
                     &scrolling,
                     &bars,
-                    Some(view),
+                    Some(cull),
                 );
-                (scrolling, content, true)
+                (scrolling, extents, content, true)
             }
         };
         let mut list = content.scrolled(&scrolling, &bars);
@@ -644,6 +670,7 @@ impl Page {
                 .collect(),
             kept_list: KeptList {
                 scrolling,
+                extents,
                 content,
                 inner,
                 bars,
@@ -1726,11 +1753,24 @@ mod tests {
         // are in the document's coordinates): a span moves text 250 px at
         // most, so a line kept that far off holds a fragment as far again.
         // In a transform nothing is left out.
-        let turned = page.query(None, "#turned").unwrap().unwrap();
+        let transformed = |node: NodeId| {
+            let mut at = Some(node);
+            while let Some(id) = at {
+                if page
+                    .styles
+                    .computed(id)
+                    .is_some_and(|style| crate::transform::transforms(&style))
+                {
+                    return true;
+                }
+                at = page.doc.node(id).and_then(|node| node.parent());
+            }
+            false
+        };
         let (_, fragments) = list_in(page, resources, Some(view));
         let far: Vec<_> = fragments
             .iter()
-            .filter(|f| page.doc.node(f.node).and_then(|node| node.parent()) != Some(turned))
+            .filter(|f| !transformed(f.node))
             .filter(|f| f.y + f.height < band.y - 510.0 || f.y > band.y + band.height + 510.0)
             .collect();
         assert!(far.is_empty(), "scrolled to {at}: {far:?}");
@@ -1761,9 +1801,11 @@ mod tests {
         // Things that paint, or take the pointer, past their box: a
         // blurred shadow, a shadow moved far, glyphs taller than their
         // line, text moved by a relatively positioned span or raised by
-        // `vertical-align`, an inline background padded past its line,
-        // lines pushed down by a tall inline box, a transformed box and
-        // what is painted after it, a scroll container, a fixed box.
+        // `vertical-align`, an inline background padded past its line, text
+        // moved in an anonymous paragraph, lines pushed down by a tall
+        // inline box, a transformed box and what is painted after it, one
+        // lifted far from the box that holds it, a scroll container, fixed
+        // boxes on their own and inside a box.
         let lines: String = (0..12)
             .map(|i| format!("<p>satır {i} <span style='background: #fd8'>vurgu</span> devam</p>"))
             .collect();
@@ -1781,6 +1823,12 @@ mod tests {
              <p id=raised>x <span style='vertical-align: 80px'>yukarı</span></p>\
              {lines}\
              <p id=padded>a <span style='padding: 40px 0; background: #fc9; border-bottom: 3px solid #333'>dolgulu</span> b</p>\
+             {lines}\
+             <div id=anonymous>önce <span style='position: relative; top: 250px'>anonim kayan</span><p>blok</p></div>\
+             {lines}\
+             <div id=nested style='height: 10px'><div style='position: fixed; left: 100px; top: 100px; width: 20px; height: 20px; background: #f0f'></div></div>\
+             {lines}\
+             <div id=lifted style='height: 10px'><div style='transform: translateY(-500px); height: 20px; background: #0cc'>yukarı dönüşen</div></div>\
              {lines}\
              <p id=tall>önce <span style='display: inline-block; width: 10px; height: 300px; background: #888'></span> sonra<br>alt satır</p>\
              {lines}\
@@ -1810,6 +1858,8 @@ mod tests {
             ("#moved", 270.0),
             ("#raised", 100.0),
             ("#padded", 50.0),
+            ("#anonymous", 270.0),
+            ("#lifted", 520.0),
             ("#tall", 40.0),
             ("#turned", 420.0),
         ] {

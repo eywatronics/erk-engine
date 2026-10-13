@@ -91,6 +91,9 @@ struct Walk<'a> {
     viewport: Option<Frame>,
     /// Whether the items being made now move with the document.
     moving: std::cell::Cell<bool>,
+    /// Where each box and what it holds may paint: a box whose extent
+    /// misses the view is not walked. `None`: every box is.
+    extents: Option<&'a Extents>,
     /// How many transforms the walk is inside: their items are in the
     /// coordinates before the transform, and none is left out.
     transformed: std::cell::Cell<usize>,
@@ -253,6 +256,85 @@ fn crosses(view: Frame, top: f32, bottom: f32) -> bool {
     top <= view.y + view.height && view.y <= bottom
 }
 
+/// What a list leaves out: what lies outside `view` (the viewport; the band
+/// around it for what moves with the document), and with `extents`, every
+/// box whose extent misses it without walking it.
+pub(crate) struct Cull<'a> {
+    pub(crate) view: Frame,
+    pub(crate) extents: Option<&'a Extents>,
+}
+
+/// Where each node and everything it holds may paint or take the pointer,
+/// top to bottom, in the coordinates its items are made in: its box and
+/// its outer shadows, its text and its anonymous paragraphs by their bands,
+/// and its descendants'. `None` where a box's items are in other
+/// coordinates: a fixed box's (the viewport's) or a transformed one's (before
+/// the transform), and so every box that holds one. Made with every new
+/// layout or scroll of a container, in one walk of the document, so that a
+/// list for another band walks only the boxes that may meet it.
+pub(crate) struct Extents(Vec<Option<(f32, f32)>>);
+
+impl Extents {
+    pub(crate) fn new(
+        doc: &Document,
+        styles: &Styles,
+        layouts: &Layouts,
+        scrolling: &Scrolling,
+    ) -> Self {
+        // Children after their parents: walked backwards, a node comes
+        // after its children.
+        let mut order = Vec::new();
+        let mut stack = vec![doc.root()];
+        while let Some(id) = stack.pop() {
+            order.push(id);
+            stack.extend(doc.children(id));
+        }
+        let mut extents: Vec<Option<(f32, f32)>> = vec![None; doc.capacity_hint()];
+        let empty = (f32::INFINITY, f32::NEG_INFINITY);
+        let union = |a: (f32, f32), b: (f32, f32)| (a.0.min(b.0), a.1.max(b.1));
+        for &id in order.iter().rev() {
+            let style = styles.computed(id);
+            let elsewhere = style.as_ref().is_some_and(|style| {
+                style.clone_position() == erk_style::style::computed_values::position::T::Fixed
+                    || crate::transform::transforms(style)
+            });
+            let mut extent = Some(empty);
+            if let Some(layout) = layouts.get(id)
+                && let Some((_, y)) = scrolling.position(id)
+            {
+                let reach = style.as_ref().map_or(0.0, |style| shadow_reach(style));
+                let own = (y - reach, y + layout.size.height + reach);
+                extent = extent.map(|extent| union(extent, own));
+                // Text is measured from the box unscrolled: a box that
+                // scrolls its text clips it, and its box holds what shows.
+                if let Some(shaped) = layouts.text(id) {
+                    let top = y + layout.border.top + layout.padding.top;
+                    let band = (top + shaped.band.0, top + shaped.band.1);
+                    extent = extent.map(|extent| union(extent, band));
+                }
+                for anonymous in layouts.anonymous(id) {
+                    let top = y + anonymous.layout.location.y;
+                    let band = (top + anonymous.text.band.0, top + anonymous.text.band.1);
+                    extent = extent.map(|extent| union(extent, band));
+                }
+            }
+            for child in doc.children(id) {
+                let child = extents[child.index() as usize];
+                extent = extent
+                    .zip(child)
+                    .map(|(extent, child)| union(extent, child));
+            }
+            extents[id.index() as usize] = if elsewhere { None } else { extent };
+        }
+        Self(extents)
+    }
+
+    /// `id`'s extent; `None` if it cannot be bounded.
+    fn of(&self, id: NodeId) -> Option<(f32, f32)> {
+        self.0.get(id.index() as usize).copied().flatten()
+    }
+}
+
 /// A display list before the document's scroll: what moves with the
 /// document in the document's coordinates (`moves`), the rest in the
 /// viewport's, and without the document's scroll bars. Nothing in it
@@ -281,8 +363,9 @@ impl Content {
         resources: &Resources,
         scrolling: &Scrolling,
         bars: &[NodeId],
-        view: Option<Frame>,
+        cull: Option<Cull<'_>>,
     ) -> (Self, Vec<TextFragment>) {
+        let view = cull.as_ref().map(|cull| cull.view);
         let mut list = DisplayList {
             canvas: WHITE,
             items: Vec::new(),
@@ -300,6 +383,7 @@ impl Content {
             band,
             viewport: view,
             moving: std::cell::Cell::new(true),
+            extents: cull.and_then(|cull| cull.extents),
             transformed: std::cell::Cell::new(0),
         };
         let items = stacking_context(&walk, doc.root());
@@ -426,8 +510,12 @@ impl DisplayList {
         bars: &[NodeId],
         view: Option<Frame>,
     ) -> (Self, Vec<TextFragment>) {
+        let cull = view.map(|view| Cull {
+            view,
+            extents: None,
+        });
         let (content, text) =
-            Content::build(doc, styles, layouts, resources, scrolling, bars, view);
+            Content::build(doc, styles, layouts, resources, scrolling, bars, cull);
         (content.scrolled(scrolling, bars), text)
     }
 
@@ -850,6 +938,14 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
     // own clip, if it scrolls.
     let (cx, cy) = walk.scrolling.content_origin(id).unwrap_or((x, y));
     let (scope, inner) = (walk.scrolling.scope(id), walk.scrolling.inner_scope(id));
+    // Nothing it holds may show: not walked at all.
+    walk.painting_in(scope);
+    if let Some(view) = walk.view()
+        && let Some((top, bottom)) = walk.extents.and_then(|extents| extents.of(id))
+        && !crosses(view, top, bottom)
+    {
+        return;
+    }
     let tag = |items: Vec<DisplayItem>, scope| items.into_iter().map(move |item| (scope, item));
     // `visibility: hidden` keeps the box but paints nothing of it; its
     // descendants may still be visible, so the walk continues.
@@ -863,7 +959,6 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         width: layout.size.width,
         height: layout.size.height,
     };
-    walk.painting_in(scope);
     if let Some(style) = &style
         && visible
         && walk.shows(around(frame, shadow_reach(style)))
