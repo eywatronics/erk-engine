@@ -169,11 +169,13 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                     engine.wheel((dx, dy), (x, y));
                     Vec::new()
                 }
-                ToRenderer::Key(input) => engine
-                    .key(&input)
-                    .into_iter()
-                    .map(FromRenderer::Event)
-                    .collect(),
+                // A host that prevents nothing: the key's event, then what
+                // the key does by default.
+                ToRenderer::Key(input) => {
+                    let mut events: Vec<_> = engine.key(&input).into_iter().collect();
+                    events.extend(engine.key_default(&input));
+                    events.into_iter().map(FromRenderer::Event).collect()
+                }
                 ToRenderer::InspectAt { request, x, y } => vec![FromRenderer::Inspected {
                     request,
                     node: engine.inspect_at(x, y),

@@ -874,25 +874,18 @@ impl Page {
         }
     }
 
-    /// Keyboard input: Tab and Shift+Tab move the focus through the page in
-    /// sequential focus order (HTML §6.6.3), wrapping around; Enter on a
-    /// focused link or button and Space released on a focused button click
-    /// it, as browsers do. Keyboard clicks are at 0, 0.
-    pub(crate) fn key(&mut self, input: &KeyInput) -> Vec<Event> {
-        // The key itself first, at the focused element or else the body, as
-        // DOM's keydown and keyup; then what the key does by default.
-        let mut events = Vec::new();
-        if let Some(target) = self.key_target() {
-            let kind = match input.state {
-                KeyState::Down => EventKind::KeyDown,
-                KeyState::Up => EventKind::KeyUp,
-            };
-            let mut event = self.event(kind, target, (0.0, 0.0), input.modifiers);
-            event.key = Some(input.key.clone());
-            events.push(event);
-        }
-        events.extend(self.key_action(input));
-        events
+    /// Keyboard input: the key itself, at the focused element or else the
+    /// body, as DOM's keydown and keyup. What it does by default is
+    /// [`Page::key_default`], done only if the host does not prevent it.
+    pub(crate) fn key(&mut self, input: &KeyInput) -> Option<Event> {
+        let target = self.key_target()?;
+        let kind = match input.state {
+            KeyState::Down => EventKind::KeyDown,
+            KeyState::Up => EventKind::KeyUp,
+        };
+        let mut event = self.event(kind, target, (0.0, 0.0), input.modifiers);
+        event.key = Some(input.key.clone());
+        Some(event)
     }
 
     /// Where a key event goes: the focused element, else the body, else
@@ -915,9 +908,11 @@ impl Page {
         Some(body.unwrap_or(html))
     }
 
-    /// What a key does by default: Tab moves the focus, Enter and Space
-    /// activate the focused link or button.
-    fn key_action(&mut self, input: &KeyInput) -> Vec<Event> {
+    /// What a key does by default: Tab and Shift+Tab move the focus through
+    /// the page in sequential focus order (HTML §6.6.3), wrapping around;
+    /// Enter on a focused link or button and Space released on a focused
+    /// button click it, as browsers do. Keyboard clicks are at 0, 0.
+    pub(crate) fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
         let focused = self.focus.filter(|node| self.doc.node(*node).is_some());
         match (&input.key, input.state) {
             (Key::Tab, KeyState::Down) => {

@@ -39,13 +39,20 @@ static void on_click(void *user_data, ErkApp *app, const ErkEvent *event) {
   CHECK(erk_app_tick(app, 0) == ERK_ERR_REENTRANT);
 }
 
+/* Enter on the focused button would click it: not while this runs. */
+static void on_key(void *user_data, ErkApp *app, const ErkEvent *event) {
+  (void)user_data;
+  CHECK(event->kind == ERK_EVENT_KEY_DOWN);
+  CHECK(erk_event_prevent_default(app) == ERK_OK);
+}
+
 static void on_destroy(void *user_data) {
   struct Counter *counter = user_data;
   counter->destroyed++;
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 7u));
+  CHECK(erk_abi_version() == ((0u << 16) | 8u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -155,6 +162,19 @@ int main(void) {
   input.kind = ERK_INPUT_POINTER_UP;
   CHECK(erk_app_input(app, &input) == ERK_OK);
   CHECK(counter.clicks == 1);
+
+  /* The press focused the button: Enter clicks it, unless a subscription
+   * prevents what the key does by default. */
+  CHECK(erk_event_prevent_default(app) == ERK_ERR_INVALID_ARGUMENT);
+  ErkSubscription key_subscription = 0;
+  CHECK(erk_on(app, button, ERK_EVENT_KEY_DOWN, on_key, NULL, NULL, &key_subscription) == ERK_OK);
+  input.kind = ERK_INPUT_KEY_DOWN;
+  input.key = ERK_KEY_ENTER;
+  CHECK(erk_app_input(app, &input) == ERK_OK);
+  CHECK(counter.clicks == 1);
+  CHECK(erk_off(app, key_subscription) == ERK_OK);
+  CHECK(erk_app_input(app, &input) == ERK_OK);
+  CHECK(counter.clicks == 2);
 
   char text[64];
   CHECK(erk_node_text(app, label, text, sizeof text, &len) == ERK_OK);

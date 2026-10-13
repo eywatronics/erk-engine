@@ -70,6 +70,8 @@ pub struct Context {
     listeners: Listeners,
     /// Set by [`Context::stop_propagation`] during a dispatch.
     stopped: bool,
+    /// Set by [`Context::prevent_default`] during a dispatch.
+    prevented: bool,
     /// The way in for other threads, which handles copy, and what they sent.
     entry: Inbox,
     inbox: Receiver<Message>,
@@ -85,6 +87,7 @@ impl Context {
             key,
             listeners: Listeners::default(),
             stopped: false,
+            prevented: false,
             entry: Inbox {
                 to,
                 waker: Waker::default(),
@@ -518,6 +521,14 @@ impl Context {
         self.stopped = true;
     }
 
+    /// Inside an event callback: what the event does by default is not
+    /// done (M5 plan, decision 7). For a key: Tab no longer moves the focus,
+    /// Enter or Space no longer clicks the focused button or link. The
+    /// event still goes on to the other subscriptions.
+    pub fn prevent_default(&mut self) {
+        self.prevented = true;
+    }
+
     /// A handle any thread may use to reach this app.
     pub fn handle(&self) -> AppHandle {
         AppHandle {
@@ -541,25 +552,32 @@ impl Context {
     /// Send `event` through its phases (p1-contract §5): down the path from
     /// the root element in the capture phase, at the target, and back up in
     /// the bubble phase for the kinds that bubble. A panic in a callback
-    /// reaches the caller once the subscription is back in place.
-    pub(crate) fn dispatch(&mut self, event: erk_renderer::Event) {
+    /// reaches the caller once the subscription is back in place. Whether a
+    /// callback prevented what the event does by default.
+    pub(crate) fn dispatch(&mut self, event: erk_renderer::Event) -> bool {
+        self.prevented = false;
+        self.propagate(&event);
+        self.prevented
+    }
+
+    fn propagate(&mut self, event: &erk_renderer::Event) {
         let Some(&target) = event.path.first() else {
             return;
         };
         let ancestors = &event.path[1..];
         self.stopped = false;
         for &node in ancestors.iter().rev() {
-            if self.call(node, &event, true, Phase::Capture) {
+            if self.call(node, event, true, Phase::Capture) {
                 return;
             }
         }
-        let capture_stopped = self.call(target, &event, true, Phase::Target);
-        if self.call(target, &event, false, Phase::Target) || capture_stopped {
+        let capture_stopped = self.call(target, event, true, Phase::Target);
+        if self.call(target, event, false, Phase::Target) || capture_stopped {
             return;
         }
         if events::bubbles(event.kind) {
             for &node in ancestors {
-                if self.call(node, &event, false, Phase::Bubble) {
+                if self.call(node, event, false, Phase::Bubble) {
                     return;
                 }
             }

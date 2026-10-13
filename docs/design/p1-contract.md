@@ -189,6 +189,13 @@ dışında) ve onu da `now_ns` olarak verir.
   kabarmaz (UI Events), tıklama kabarır. `stop_propagation` olayı bulunduğu
   düğümde bitirir; o düğümdeki öteki abonelikler yine çalışır. Bir
   callback'in kaldırdığı, henüz çağrılmamış abonelik çağrılmaz.
+- **Varsayılan eylem (M5.7):** bir olayın varsayılan işi, olay bütün
+  aboneliklerden geçtikten sonra yapılır; bir callback `prevent_default`
+  (C-ABI'de `erk_event_prevent_default`, ABI 8) çağırırsa yapılmaz. Bir
+  tuşun varsayılanı: Tab odağı taşır, Enter ve Space odaklı düğmeye ya da
+  bağlantıya tıklar; doğurduğu odak ve tıklama olayları kendi
+  dağıtımlarından geçer. `prevent_default` yayılmayı durdurmaz; callback
+  dışından çağrı `ERK_ERR_INVALID_ARGUMENT`.
 
 ## 6. Kaynaklar
 

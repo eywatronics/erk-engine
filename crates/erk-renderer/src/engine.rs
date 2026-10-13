@@ -204,9 +204,18 @@ impl Engine {
         self.restyled_by(|page| page.pointer(input))
     }
 
-    /// A key went down or up while the page has the keyboard.
-    pub fn key(&mut self, input: &KeyInput) -> Vec<Event> {
+    /// A key went down or up while the page has the keyboard: its key
+    /// event. What the key does by default comes from
+    /// [`Engine::key_default`], once the host has seen the event and not
+    /// prevented it (M5 plan, decision 7).
+    pub fn key(&mut self, input: &KeyInput) -> Option<Event> {
         self.restyled_by(|page| page.key(input))
+    }
+
+    /// What `input` does by default: Tab moves the focus, Enter and Space
+    /// click the focused link or button. The events that follow from it.
+    pub fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
+        self.restyled_by(|page| page.key_default(input))
     }
 
     /// The wheel scrolled by `dx`, `dy` CSS pixels at `x`, `y`.
@@ -1488,7 +1497,13 @@ mod tests {
             state: crate::messages::KeyState::Down,
             modifiers: Modifiers::default(),
         };
-        let focused = engine.key(&tab);
+        // The key event and what the key does by default.
+        let press = |engine: &mut Engine| {
+            let mut events: Vec<Event> = engine.key(&tab).into_iter().collect();
+            events.extend(engine.key_default(&tab));
+            events
+        };
+        let focused = press(&mut engine);
         assert!(focused.iter().any(|event| event.target == a), "{focused:?}");
         engine.pointer(&PointerInput {
             kind: PointerKind::Down,
@@ -1499,7 +1514,7 @@ mod tests {
         });
         engine.remove(a).unwrap();
         engine.prepare();
-        let events = engine.key(&tab);
+        let events = press(&mut engine);
         assert!(events.iter().all(|event| event.target != a), "{events:?}");
         let released = engine.pointer(&PointerInput {
             kind: PointerKind::Up,

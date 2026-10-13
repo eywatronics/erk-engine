@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 7;
+pub const ERK_ABI_VERSION: u32 = 8;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -1572,6 +1572,21 @@ pub extern "C" fn erk_event_stop_propagation(app: *mut ErkApp) -> ErkStatus {
             return Err(ERK_ERR_INVALID_ARGUMENT);
         }
         app.cx().stop_propagation();
+        Ok(())
+    })
+}
+
+/// Inside an event callback: what the event does by default is not done.
+/// For a key, Tab no longer moves the focus and Enter or Space no longer
+/// clicks the focused button or link (ABI 8).
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_event_prevent_default(app: *mut ErkApp) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        if app.current.get().is_none() {
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        }
+        app.cx().prevent_default();
         Ok(())
     })
 }

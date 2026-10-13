@@ -218,7 +218,8 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 - [ ] Tab sırasının tamamı (`tabindex` sırası, `:focus-visible`), varsayılan
   eylemin iptali (karar 7), `INPUT`/`CHANGE`/`SUBMIT` olay türleri ve
-  değer API'si (karar 8); sözleşme ve C-ABI.
+  değer API'si (karar 8); sözleşme ve C-ABI. Üç PR: varsayılan eylemin
+  iptali (bitti); `:focus-visible`; olay türleri ve değer API'si.
 
 ### M5.8: Metin alanları
 
@@ -640,4 +641,17 @@ Altıncı PR: belge değişen karede raster yalnızca değişen yeri çiziyor.
 | Mutasyonlar | Grupların özette olmaması, sıranın yok sayılması, dönüşümün sınırlı sayılması, glif payının üstte ya da sonda kalkması, tuval renginin, dikdörtgen renginin, glif renginin ve yerlerinin, saydamlığın, gölge bulanıklığının, gradyan duraklarının özette olmaması: yakalandı. İlk koşuda yedisi sağ çıktı: dördü için test sayfasına adım, üçü için alan birim testi eklendi. Kenar yumuşatma için bir piksel pay sağ çıktı: şekil geometrisinin dışına boyanmıyor, ölüydü, silindi. Tuvali yalnızca hasarlı alanlara doldurmak sağ çıktı: yalnızca hasarlı pikseller kopyalandığı için aynı; sadeleştirildi. Sağ çıkanlar (yalnızca süre): isabet bölgelerinin hasar sayılması, eşiğin yok sayılması ve hasarlı çizimde her öğenin çizilmesi; sonuncusu ölçüldü, raster'ı yarıya indiriyor |
 | B11 | Aynı oturumda döşeme 16, 32, 64 px: raster B1 1,89 / 1,94 / 1,51, B6 1,79 / 1,66 / 1,63, B7 1,98 / 2,12 / 1,93, B13 1,70 / 1,64 / 1,79 ms; fark gürültü düzeyinde, 32 kaldı |
 | Ölçüm | Aynı oturumda `main`'e (17111a5) karşı, raster aşaması: B1 4,02 → 1,94, B6 3,99 → 1,66, B7 3,96 → 2,12, B13 4,27 → 1,64 ms; kare B1 20,9 → 18,6, B6 11,6 → 9,9, B7 12,0 → 10,4, B13 12,8 → 9,5 ms. Kaydırma (B15) bütün döşemeleri değiştiriyor, tam kare çiziliyor; o yol değişmedi |
+
+### M5.7
+
+İlk PR: varsayılan eylemin iptali (karar 7).
+
+| Konu | Not |
+|---|---|
+| Önce | Bir tuşun varsayılan işi (Tab odağı taşır, Enter ve Space odaklı düğmeye ya da bağlantıya tıklar) `Page::key` içinde, olay host'a ulaşmadan yapılıyordu; host onu durduramıyordu (M4.1 notu) |
+| Model | Motor tuş olayını (`Engine::key`, en fazla bir olay) ve varsayılan işini (`Engine::key_default`) ayrı veriyor. `App::input` önce olayı dağıtıyor; hiçbir callback `Context::prevent_default` çağırmadıysa varsayılan işi yapıyor ve doğurduğu odak ve tıklama olaylarını dağıtıyor. Bayrak her dağıtımda sıfırlanıyor. Yayılmayı durdurmaz: DOM'daki gibi iki ayrı şey |
+| C-ABI | `erk_event_prevent_default(app)`, `erk_event_stop_propagation`'ın eşi: yalnızca callback içinde, dışarıda `ERK_ERR_INVALID_ARGUMENT`. ABI 8 (ekleme, kırıcı değil); `erk.h` cbindgen'den; C örneği Enter'ı iptal edip tıklamanın gelmediğini, abonelik kalkınca geldiğini denetliyor |
+| Kapsam dışı | İşaretçi basışının odağı taşıması iptal edilemiyor: host'a basış (`pointerdown`) olayı gitmiyor; o olay geldiğinde iptali de gelir. Gönderimin (`SUBMIT`) varsayılanı formlarla (M5.10) |
+| Testler | Rust: iptal edilen Tab odağı taşımıyor, sonraki taşıyor (bayrak sızmıyor); capture aşamasında iptal edilen Enter ve Space tıklamıyor, iptal kalkınca tıklıyor. C-ABI'nin Rust testi ve C örneği. Fuzz yorumlayıcısının callback'leri de iptal edebiliyor: kâhin bu yolu da görüyor |
+| Mutasyonlar | İptalin yok sayılması, varsayılan işin hiç yapılmaması, bayrağın sıfırlanmaması, `prevent_default`'un bir şey yapmaması, C-ABI'nin callback dışında da kabul etmesi ya da iptal etmemesi: yakalandı. Olayların döngüyle dağıtılması sağ çıktı (bir tuş tek olay üretiyor): `Engine::key` artık `Option<Event>` |
 
