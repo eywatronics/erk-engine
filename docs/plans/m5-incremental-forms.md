@@ -258,10 +258,42 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   doğrusal enterpolasyon ve standart zamanlama eğrileri, zaman host'un
   `now_ns`'inden; altın görüntüler belirli zamanlarda.
 
-### M5.13: Kabul
+### M5.13: Bellek
+
+Erk'in hedefi az bellek; 2026-10-12'nin ölçümü bunu tutmuyor. Kabulden
+önce, M5'in son adımı (proje sahibinin kararı, 2026-10-12).
+
+| Ölçüm (yayın derlemesi, kabuk, 2026-10-12) | Çalışma kümesi | Özel bellek |
+|---|---|---|
+| `m2-demo.html`, CPU raster'ı (`--cpu`) | 40,8 MB | 23,7 MB |
+| `m2-demo.html`, GPU (vello_hybrid, varsayılan) | 194 MB | 344 MB |
+| `erk-10000.html`, CPU raster'ı | 485 MB | 472 MB (eleman başına ~15 KB) |
+| `erk-10000.html`, GPU | 633 MB | 793 MB |
+
+- [ ] Önce ölçüm: belleğin nereye gittiği aşama aşama (DOM, stil, yerleşim
+  ağacı, şekillendirme önbelleği ve paragraf sonuçları, tutulan liste,
+  yazı tipleri, raster ve GPU tamponları), sayaçlı ayırıcıyla (C-ABI'nin
+  bellek testindeki gibi) ve ölçüm aracında bir bellek senaryosuyla (B16:
+  açılışta ve kaydırmada tepe ve kalıcı bellek). Ölçülmeden doğrulanmayacak
+  şüpheler: paragraf düzeninin iki kopyası (önbellekte kırılmamış, sonuçta
+  satırlara bölünmüş), kalıcı yerleşim ağacının düğüm boyutu (Taffy
+  önbelleği), eleman başına stil verisi, GPU yolunda wgpu ve vello_hybrid
+  tamponlarının ön tahsisi.
+- [ ] Hedefler (proje sahibinin, 2026-10-12): küçük sayfada CPU raster'ıyla
+  özel bellek 24 MB'tan 12–14 MB'a; `erk-10000.html`'de eleman başına
+  15 KB'tan 3–4 KB'a (toplam 100–150 MB); GPU yolunun özel belleği ölçülüp
+  ön tahsisi küçültülmüş (sayı ölçümden sonra).
+- [ ] Sciter ve Slint gibi hafif motorlarla karşılaştırma aynı sayfalarla ve
+  aynı yöntemle ölçülür; ölçülmemiş sayı yayımlanmaz.
+- [ ] Muhafız: bellek bütçesi CI'da (ikili boyut bütçesi gibi): B16'nın
+  kalıcı belleği `.github/memory-budget.txt`'teki tavanın altında,
+  yükseltme `# raised:` gerekçesi ister. Bütçeyle aynı PR'da gelir.
+
+### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
-  B1–B11 tabana karşı yayımlı; `roadmap.md`'de M5 "Bitti".
+  B1–B11 tabana karşı yayımlı; bellek hedefleri tutuyor; `roadmap.md`'de
+  M5 "Bitti".
 
 ### M5 kabulü
 
@@ -269,6 +301,7 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   hedefi tutuyor (test ve ölçüm).
 - [ ] B1–B11 ölçümleri tabana karşı yayımlı.
 - [ ] Kısmi kare ile tam kare piksel piksel aynı (altın test).
+- [ ] Bellek hedefleri tutuyor ve bütçesi CI'da (M5.13).
 - [ ] Türkçe ve CJK IME girişi çalışıyor (test; gerçek IME ile elle).
 - [ ] Bir ekran okuyucu form etiketlerini okuyor (ağaç testi; ekran
   okuyucuyla elle).
