@@ -283,7 +283,8 @@ pub fn query(
 /// What the user is doing with a document, for the pseudo-classes that
 /// follow it. An element matches `:hover` when it or a descendant is under
 /// the pointer, `:active` likewise for the pressed element, `:focus` when
-/// it has the focus and `:focus-within` when it or a descendant has it.
+/// it has the focus, `:focus-within` when it or a descendant has it, and
+/// `:focus-visible` when it has the focus and shows it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Interaction {
     /// The element under the pointer.
@@ -292,6 +293,9 @@ pub struct Interaction {
     pub active: Option<NodeId>,
     /// The element that has the focus.
     pub focus: Option<NodeId>,
+    /// Whether the focused element shows that it has the focus: what moved
+    /// the focus there is for the embedding to say (Selectors 4 §9.4).
+    pub focus_visible: bool,
 }
 
 /// The result of styling one document.
@@ -376,7 +380,7 @@ fn reacts(stylist: &Stylist) -> Reacts {
     Reacts {
         hover: depends(ElementState::HOVER),
         active: depends(ElementState::ACTIVE),
-        focus: depends(ElementState::FOCUS | ElementState::FOCUS_WITHIN),
+        focus: depends(ElementState::FOCUS | ElementState::FOCUS_WITHIN | ElementState::FOCUSRING),
     }
 }
 
@@ -426,9 +430,14 @@ fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
         ElementState::empty(),
         ElementState::ACTIVE,
     );
+    let ring = if interaction.focus_visible {
+        ElementState::FOCUSRING
+    } else {
+        ElementState::empty()
+    };
     mark(
         interaction.focus,
-        ElementState::FOCUS,
+        ElementState::FOCUS | ring,
         ElementState::FOCUS_WITHIN,
     );
     states
