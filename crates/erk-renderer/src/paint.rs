@@ -196,15 +196,51 @@ pub(crate) fn paint(
         ctx: RenderContext::new_with(width, height, settings),
         resources: Resources::new(),
     };
-    paint_list(&mut cpu, list, tables, width, height, scale);
+    paint_list(&mut cpu, list, tables, width, height, scale, None);
     let mut pixmap = Pixmap::new(width, height);
     cpu.ctx.render(&mut pixmap, &mut cpu.resources);
     pixmap
 }
 
+/// Paint again only `areas` of `frame`, the RGBA pixels [`paint`] made of
+/// the last list at the same size and scale (M5.6): the items that may
+/// paint in them, in the coordinates of a whole frame, and only their
+/// pixels copied. A pixel there comes out as `paint` makes it: the same
+/// items cover it, in the same order, at the same places.
+pub(crate) fn paint_damage(
+    list: &DisplayList,
+    tables: &Tables,
+    (width, height, scale): (u16, u16, f32),
+    areas: &[crate::damage::Area],
+    frame: &mut [u8],
+) {
+    let settings = RenderSettings {
+        level: Level::fallback(),
+        num_threads: 0,
+    };
+    let mut cpu = Cpu {
+        ctx: RenderContext::new_with(width, height, settings),
+        resources: Resources::new(),
+    };
+    paint_list(&mut cpu, list, tables, width, height, scale, Some(areas));
+    let mut pixmap = Pixmap::new(width, height);
+    cpu.ctx.render(&mut pixmap, &mut cpu.resources);
+    let painted = pixmap.data_as_u8_slice();
+    let stride = usize::from(width) * 4;
+    for area in areas {
+        for row in usize::from(area.y)..usize::from(area.y) + usize::from(area.height) {
+            let start = row * stride + usize::from(area.x) * 4;
+            let end = start + usize::from(area.width) * 4;
+            frame[start..end].copy_from_slice(&painted[start..end]);
+        }
+    }
+}
+
 /// Paint `list` onto `ctx`, a `width` × `height` target of device pixels,
 /// with the faces and images in `tables`. An item whose face or image is
-/// not there is left out.
+/// not there is left out. With `only`, the canvas is filled in those areas
+/// of device pixels alone, and an item that cannot paint in them is left
+/// out (one inside a transform is always painted).
 pub(crate) fn paint_list(
     ctx: &mut impl Canvas,
     list: &DisplayList,
@@ -212,6 +248,7 @@ pub(crate) fn paint_list(
     width: u16,
     height: u16,
     scale: f32,
+    only: Option<&[crate::damage::Area]>,
 ) {
     // The canvas colour is laid over white, as browsers do: a translucent
     // root background must not make the frame itself translucent.
@@ -228,12 +265,34 @@ pub(crate) fn paint_list(
     ctx.fill_rect(&page);
     ctx.set_color(list.canvas);
     ctx.fill_rect(&page);
+    // Whether an item outside the transforms may paint in `only`.
+    let reaches = |item: &DisplayItem| {
+        only.is_none_or(|areas| {
+            crate::damage::reach(item).is_none_or(|frame| {
+                let (left, top) = (
+                    f64::from(frame.x) * scale - 1.0,
+                    f64::from(frame.y) * scale - 1.0,
+                );
+                let right = f64::from(frame.x + frame.width) * scale + 1.0;
+                let bottom = f64::from(frame.y + frame.height) * scale + 1.0;
+                areas.iter().any(|area| {
+                    left <= f64::from(area.x + area.width)
+                        && f64::from(area.x) <= right
+                        && top <= f64::from(area.y + area.height)
+                        && f64::from(area.y) <= bottom
+                })
+            })
+        })
+    };
 
     // The transforms of the groups the painter is in, outermost first: each
     // composed with those around it.
     let mut transforms: Vec<Affine> = vec![Affine::IDENTITY];
     let base = Affine::scale(scale);
     for item in &list.items {
+        if transforms.len() == 1 && !reaches(item) {
+            continue;
+        }
         match item {
             DisplayItem::PushTransform([a, b, c, d, e, f]) => {
                 let local = Affine::new([a, b, c, d, e, f].map(|v| f64::from(*v)));

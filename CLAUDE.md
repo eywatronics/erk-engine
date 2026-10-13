@@ -135,6 +135,7 @@ başarısız bir `cargo tree`, adımı geçirmez, düşürür.
 | Erk'te JS motoru yok, `<script>` hiçbir zaman çalışmaz | İçerik hiçbir zaman kod çalıştıramamalı; JS/TS Erk'i yalnızca host dili olarak dışarıdan sürer (p1-embedded §3.3) | `check-no-js-engine.sh`: `Cargo.lock` ve `fuzz/Cargo.lock`'ta bilinen JS motorları yok (kilit her özelliği, hedefi ve dev-dependency'yi çözer; yeniden adlandırma paket adıyla görünür; altı eşdeğer ihlalle denendi). Belge betiği kapalı ayrıştırılır (`documents_are_parsed_as_with_scripting_disabled`) | 2026-10-07 |
 | `erk-invalidation` projeden yalnızca `erk-dom`'a bağımlı | Kirlenme çekirdeği hizmet ettiği aşamaları (stil, layout, display list) bilmemeli; onu onlar tüketir (p2-incremental §3.12) | CI `guards` (`check-invalidation-deps.sh`): normal ve derleme bağımlılıkları, her hedef ve özellik, derinlik 1'de projeden yalnızca `erk-dom`; beş eşdeğer ihlalle denendi. Crate çekirdeğin parçası: `check-core-io.sh` onu da tarar | M5.2 |
 | Her kare, belgenin baştan hesabıyla aynı display list'i verir | Artımlılığın en sinsi hatası ekranda unutulmuş eski bir parça; tam yeniden hesap her artımlı yolun doğruluk kâhini (M5 planı, karar 9) | Fuzz yorumlayıcısı (`crates/erk/tests/script/`) her `tick`'ten sonra `verify_frame` ile son kareyi kâhinle, değişiklik günlüğünü belgenin gerçek farkıyla karşılaştırır: sabit tohumlu test ve `fuzz mutations` job'ları. Karenin isabet bölgelerini ya da tuval rengini değiştiren ve günlüğün kayıt yollarını silen kasıtlı ihlallerle denendi | M5.0, M5.1 |
+| Kısmi kare ile tam kare piksel piksel aynı | Raster yalnızca döşeme özetleri değişen yeri yeniden çiziyor; özette unutulan bir alan ya da dar bir erişim ekranda eski piksel bırakır, kâhin bunu göremez (display list'ler aynı) | `a_frame_painted_again_only_where_it_changed_is_the_whole_frame`: metin, renk, imleç, sürüklenen kutu, saydamlık ve değeri, boyama sırası takası, dönüşüm, kırpan kap, gölge, gradyan, tuval ve kaydırma boyunca her kısmi kare aynı listenin tam çizimine eşit; `every_field_an_item_paints_with_is_in_its_digest`: her öğe türünün her alanı özette. Özetten alan çıkaran, payı daraltan, sırayı ya da grupları yok sayan kasıtlı ihlallerle denendi | M5.6 |
 | CI kilit dosyasıyla derler | Altın görüntüler ve Chrome skorları `Cargo.lock`'taki sürümlerle üretildi; kilitten sapan bir manifest CI'da sessizce yeniden çözülmemeli | clippy, build, test ve `cargo tree` adımlarında `--locked` | M0 Task 8 |
 
 ## Kural takvimi
@@ -145,7 +146,6 @@ zorlama yöntemi: [p0-verification.md](docs/design/p0-verification.md).
 | Taş | Gelen kural |
 |---|---|
 | M0.5 | Sözleşmenin her kuralı hangi taşta hangi muhafızla zorlanacağını söyler (p1-contract.md) |
-| M5 | Kısmi kare ile tam kare piksel piksel aynı (M5.6) |
 | M6 | Bağlamalar (Python, Go, Node.js/Bun) yalnızca C-ABI'ye bağlanır: workspace'te `erk`'e bağımlı olan yalnızca `erk-ffi` ve kabuk (`cargo tree --invert`); bağlama paketleri yalnızca `erk.h`'yi ve paylaşımlı kütüphaneyi kullanır |
 
 ## unsafe ve C/C++ politikası

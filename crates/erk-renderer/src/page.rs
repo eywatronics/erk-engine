@@ -1939,6 +1939,134 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_painted_again_only_where_it_changed_is_the_whole_frame() {
+        // The M5.6 guard: each frame painted from the last one where its
+        // tiles differ equals the same list painted whole, through text,
+        // colours, a blinking caret, a dragged box, an opacity group and
+        // its opacity, boxes trading places in paint order, a transform
+        // that moves what it holds, a clipped scroller, shadows, a gradient
+        // and scrolls.
+        let lines: String = (0..30)
+            .map(|i| format!("<p id=p{i}>satır {i} <span>vurgu</span></p>"))
+            .collect();
+        let html = format!(
+            "<body style='margin: 0; font: 14px Noto Sans'>\
+             <div id=shadow style='margin: 8px; height: 30px; background: #fff; box-shadow: 0 4px 12px #345'>gölge</div>\
+             <div id=grad style='height: 40px; background: linear-gradient(#fd8, #36c)'></div>\
+             <div id=faded style='opacity: 0.5; background: #c33; height: 20px'>yarı saydam</div>\
+             <div id=turned style='transform: translate(60px, 10px) rotate(3deg); background: #6a6; height: 20px; width: 80px'>dönen</div>\
+             <div id=under style='position: absolute; left: 120px; top: 60px; width: 40px; height: 30px; background: #f80; z-index: 1'></div>\
+             <div id=over style='position: absolute; left: 140px; top: 70px; width: 40px; height: 30px; background: #08f; z-index: 2'></div>\
+             <div id=clip style='height: 40px; overflow: auto'><div style='height: 200px; background: linear-gradient(#000, #fff)'>kap</div></div>\
+             <p>renk <span id=coloured>vurgu</span> sonra</p>\
+             <span id=caret style='display: inline-block; width: 1px; height: 16px; background: #111'></span>\
+             <div id=drag style='position: absolute; left: 10px; top: 10px; width: 30px; height: 30px; background: #2563eb'></div>\
+             {lines}"
+        );
+        let mut page = Page::parse(&html);
+        let mut resources = Resources::default();
+        let mut tables = Tables::default();
+        let node =
+            |page: &Page, selector: &str| page.query(None, selector).unwrap().unwrap().to_bits();
+        let mut kept: Option<(crate::damage::Tiles, Vec<u8>)> = None;
+        let (mut partial, mut steps) = (0, 0);
+        let mut frame = |page: &mut Page, resources: &mut Resources, tables: &mut Tables| {
+            let (list, _) = page.prepare(200, 150, 1.0, resources, &mut |_| {});
+            tables.apply(resources.table_updates(&list));
+            let tiles = crate::damage::Tiles::of(&list, 200, 150, 1.0);
+            let whole = paint::paint(&list, tables, 200, 150, 1.0)
+                .data_as_u8_slice()
+                .to_vec();
+            let pixels = match kept.take().and_then(|(before, pixels)| {
+                tiles.damage_to_paint(&before).map(|areas| (areas, pixels))
+            }) {
+                Some((areas, mut pixels)) => {
+                    partial += 1;
+                    paint::paint_damage(&list, tables, (200, 150, 1.0), &areas, &mut pixels);
+                    pixels
+                }
+                None => whole.clone(),
+            };
+            steps += 1;
+            assert!(pixels == whole, "step {steps}: {}", list.dump());
+            kept = Some((tiles, pixels));
+        };
+        frame(&mut page, &mut resources, &mut tables);
+        for step in 0..12 {
+            let p = node(&page, &format!("#p{}", step % 5));
+            page.set_text(p, &format!("değişen {step}")).unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            let span = node(&page, "#coloured");
+            let color = ["#c00", "#0a0", "#00c"][step % 3];
+            page.set_style_property(span, "color", color).unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            let caret = node(&page, "#caret");
+            let visibility = if step % 2 == 0 { "hidden" } else { "visible" };
+            page.set_style_property(caret, "visibility", visibility)
+                .unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            let drag = node(&page, "#drag");
+            page.set_style_property(drag, "left", &format!("{}.5px", 10 + step * 7))
+                .unwrap();
+            page.set_style_property(drag, "top", &format!("{}px", 10 + step * 5))
+                .unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            for selector in ["#faded", "#turned", "#shadow"] {
+                let at = node(&page, selector);
+                page.set_style_property(at, "color", color).unwrap();
+                frame(&mut page, &mut resources, &mut tables);
+            }
+            // A group's opacity, and two boxes trading places in paint
+            // order with nothing else about them changed.
+            let faded = node(&page, "#faded");
+            let opacity = ["0.5", "0.3", "0.8"][step % 3];
+            page.set_style_property(faded, "opacity", opacity).unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            // The canvas, an inline background, text moved inside its
+            // tiles, a shadow's blur, a gradient's colours.
+            let body = node(&page, "body");
+            let canvas = ["#fff", "#f4f4f4", "#eef"][step % 3];
+            page.set_style_property(body, "background", canvas).unwrap();
+            let coloured = node(&page, "#coloured");
+            page.set_style_property(coloured, "background", color)
+                .unwrap();
+            let moved = node(&page, "#p10");
+            let padding = ["0px", "3px", "1px"][step % 3];
+            page.set_style_property(moved, "padding-left", padding)
+                .unwrap();
+            let shadow = node(&page, "#shadow");
+            let blur = ["0 4px 12px #345", "0 4px 6px #345", "0 4px 9px #345"][step % 3];
+            page.set_style_property(shadow, "box-shadow", blur).unwrap();
+            let grad = node(&page, "#grad");
+            let colours = [
+                "linear-gradient(#fd8, #36c)",
+                "linear-gradient(#fd8, #c36)",
+                "linear-gradient(#8df, #36c)",
+            ][step % 3];
+            page.set_style_property(grad, "background", colours)
+                .unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            let (under, over) = (node(&page, "#under"), node(&page, "#over"));
+            let (low, high) = if step % 2 == 0 {
+                ("3", "2")
+            } else {
+                ("1", "2")
+            };
+            page.set_style_property(under, "z-index", low).unwrap();
+            page.set_style_property(over, "z-index", high).unwrap();
+            frame(&mut page, &mut resources, &mut tables);
+            if step % 4 == 3 {
+                page.wheel((0.0, 30.0), (100.0, 100.0));
+                frame(&mut page, &mut resources, &mut tables);
+            }
+        }
+        assert!(
+            partial > steps / 2,
+            "{partial} of {steps} frames painted in part"
+        );
+    }
+
+    #[test]
     fn a_page_paints_every_frame_as_a_fresh_parse_would() {
         let mut page = Page::parse(HTML);
         let mut resources = Resources::default();
