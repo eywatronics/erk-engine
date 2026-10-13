@@ -201,7 +201,7 @@ impl Gpu {
                 resources: &mut self.resources,
                 images: &self.images,
             };
-            paint_list(&mut canvas, list, tables, w as u16, h as u16, scale);
+            paint_list(&mut canvas, list, tables, w as u16, h as u16, scale, None);
         }
         let size = RenderSize {
             width: w,

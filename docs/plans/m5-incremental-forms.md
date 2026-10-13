@@ -207,9 +207,11 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   yerleşim 0, display list 191, raster 465; 90 006 öğenin ekranda olanı
   yüz kadar (M5.4 notları). B15 709'dan 88 ms'ye, paragrafın bandıyla
   31 ms'ye indi (M5.6 notları).
-- [ ] Kutu başına parçalar, düğüm → parça yan tablosu, hasar bölgesi,
-  `RenderBackend`; vello_cpu ve vello_hybrid'de kısmi sunum.
-- [ ] Muhafız: kısmi kare ile tam kare piksel piksel aynı (altın test).
+- [x] Kutu başına parçalar, düğüm → parça yan tablosu, hasar bölgesi,
+  `RenderBackend`; vello_cpu ve vello_hybrid'de kısmi sunum. Parça tablosu
+  yerine döşeme özetleri; vello_hybrid'de kısmi sunum ölçüme göre
+  gerekmedi (M5.6 notları).
+- [x] Muhafız: kısmi kare ile tam kare piksel piksel aynı (altın test).
   B6, B7, B11 ölçülmüş; döşeme boyutu ölçümle seçilmiş.
 
 ### M5.7: Odak ve olaylar
@@ -623,4 +625,19 @@ Beşinci PR: bant değişince yalnızca bandın kutuları geziliyor.
 | Testler | Görünmeyeni çizmemenin piksel testinin sayfasına üç durum eklendi: anonim paragrafta göreli kayan metin, sayfanın ortasında bir kutunun içindeki sabit kutu, tuttuğu kutudan 500 px yukarı taşınan dönüşüm; her biri kenarlarına kaydırılıyor. Liste kâhinsiz kuruluyor ve piksel piksel, isabet isabet karşılaştırılıyor |
 | Mutasyonlar | Gölgenin, kendi metninin, anonim metnin, çocukların yok sayılması; sabit ya da dönüşümlü kutunun sınırlı sayılması; sınırsız çocuğun yok sayılması: yakalandı. Üç durum ilk koşuda sağ çıktı (test sayfasında yoktu; eklendi). Sağ çıkanlar: hiç atlamamak (yalnızca süre, aşağıda) ve kâhinin aralıkları kullanması (kâhinin bağımsızlığı, testle görünmez) |
 | Ölçüm | Aynı oturumda `main`'e (77ea4df) karşı, medyan ms: B15 6,00 → 5,99, p95 13,41 → 7,32, p99 13,99 → 7,37: kaydırmanın en kötü karesi de 120 Hz'in 8,3 ms'sinin altında (CPU raster'ıyla; GPU'da raster 1,5–4,6 ms). Bedeli yerleşim değişen karelerde aralıkların bir gezintisi: B6 10,9 → 11,7 |
+
+Altıncı PR: belge değişen karede raster yalnızca değişen yeri çiziyor.
+
+| Konu | Not |
+|---|---|
+| Ölçüm önce | Kaydırma bittikten sonra belge değişen karelerde (B1 metin, B6 imleç, B7 sürükleme, B13 renk) raster her kare bütün kareyi çiziyordu: ~4 ms, karenin üçte biri |
+| Model | Raster kareyi 32 px'lik döşemelere bölüyor (`damage::Tiles`). Her döşemenin özeti, ona boyayabilen öğelerin boyama sırasıyla özeti; her öğe onu saran kırpmaların, saydamlık gruplarının ve dönüşümlerin özetiyle birlikte. Bir dönüşümün içindeki öğe her döşemeye sayılıyor (dönüşümden sonra nereye düşeceği bilinmiyor). Tuvalin rengi her döşemenin tohumu. İsabet bölgeleri boyamadığı için özette yok. Son karenin özetinden farklı döşemeler hasar; satır satır dikdörtgenlere birleşiyor |
+| Kısmi çizim | `paint::paint_damage`: tam karenin boyutunda ve koordinatlarında, hasara değebilen öğeler çiziliyor (dönüşüm içindekiler ve push/pop'lar hep), yalnızca hasarlı piksellerin kopyası son kareye yazılıyor. Bir piksel tam karedekiyle aynı çıkıyor: aynı öğeler aynı sırayla aynı yerde. Öğeleri ötelemek (döşemeyi kendi koordinatlarında çizmek) `f32` yuvarlamasıyla tam kareden ayrılabilirdi |
+| Tasarımdan sapma | Tasarım kutu başına display list parçaları ve düğüm → parça yan tablosu öngörüyordu. Döşeme özetleri her değişikliği (stil, yerleşim, kaydırma, gelen görüntü, boyama sırası) yan tablosuz görüyor; özetin eksiksizliği birim testiyle kanıtlanıyor. `RenderBackend` yerine CPU ve GPU yolunun ortak `Canvas` arayüzü yetti |
+| GPU yolu | vello_hybrid'de kısmi sunum ölçüme göre gerekmedi: tam kare 1,5–4,6 ms (`measure --paint --gpu`, 10 bin kartlık sayfa). Hasar yalnızca CPU yolunda; GPU sunduğunda tutulan CPU karesi bırakılıyor |
+| Eşik | Karenin yarısından fazlası hasarlıysa tam kare (`WHOLE_ABOVE`); boyut ya da ölçek değişince de |
+| Muhafız | `a_frame_painted_again_only_where_it_changed_is_the_whole_frame`: metin, renk, satır içi arka plan, imleç, kesirli konumda sürüklenen kutu, saydamlık grubu ve değeri, `z-index` takası, içeriğini taşıyan dönüşüm, kırpan kap, gölge ve bulanıklığı, gradyan ve renkleri, tuval rengi ve kaydırma boyunca her kısmi kare aynı listenin tam çizimiyle piksel piksel aynı; karelerin yarısından fazlası kısmi. `every_field_an_item_paints_with_is_in_its_digest`: her öğe türünün her alanı değişince özet değişiyor. `a_glyph_damages_the_tiles_its_ink_reaches`: döşeme sınırındaki glif sonraki ve üstteki döşemeyi hasarlıyor. Kural tablosuna girdi |
+| Mutasyonlar | Grupların özette olmaması, sıranın yok sayılması, dönüşümün sınırlı sayılması, glif payının üstte ya da sonda kalkması, tuval renginin, dikdörtgen renginin, glif renginin ve yerlerinin, saydamlığın, gölge bulanıklığının, gradyan duraklarının özette olmaması: yakalandı. İlk koşuda yedisi sağ çıktı: dördü için test sayfasına adım, üçü için alan birim testi eklendi. Kenar yumuşatma için bir piksel pay sağ çıktı: şekil geometrisinin dışına boyanmıyor, ölüydü, silindi. Tuvali yalnızca hasarlı alanlara doldurmak sağ çıktı: yalnızca hasarlı pikseller kopyalandığı için aynı; sadeleştirildi. Sağ çıkanlar (yalnızca süre): isabet bölgelerinin hasar sayılması, eşiğin yok sayılması ve hasarlı çizimde her öğenin çizilmesi; sonuncusu ölçüldü, raster'ı yarıya indiriyor |
+| B11 | Aynı oturumda döşeme 16, 32, 64 px: raster B1 1,89 / 1,94 / 1,51, B6 1,79 / 1,66 / 1,63, B7 1,98 / 2,12 / 1,93, B13 1,70 / 1,64 / 1,79 ms; fark gürültü düzeyinde, 32 kaldı |
+| Ölçüm | Aynı oturumda `main`'e (17111a5) karşı, raster aşaması: B1 4,02 → 1,94, B6 3,99 → 1,66, B7 3,96 → 2,12, B13 4,27 → 1,64 ms; kare B1 20,9 → 18,6, B6 11,6 → 9,9, B7 12,0 → 10,4, B13 12,8 → 9,5 ms. Kaydırma (B15) bütün döşemeleri değiştiriyor, tam kare çiziliyor; o yol değişmedi |
 

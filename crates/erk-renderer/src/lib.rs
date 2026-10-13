@@ -10,6 +10,7 @@
 
 mod case;
 mod color;
+mod damage;
 mod display;
 mod engine;
 mod fonts;

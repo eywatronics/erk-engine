@@ -51,6 +51,9 @@ pub(crate) struct Rasterizer {
     /// The last frame painted, its table updates applied: painted again
     /// when the GPU path takes over.
     last: Option<Prepared>,
+    /// The last frame painted on the CPU: its tiles and its pixels, which
+    /// the next frame paints again only where it differs (M5.6).
+    cpu_frame: Option<(crate::damage::Tiles, Vec<u8>)>,
 }
 
 impl Rasterizer {
@@ -71,6 +74,7 @@ impl Rasterizer {
             },
             #[cfg(feature = "gpu")]
             last: None,
+            cpu_frame: None,
         }
     }
 
@@ -165,6 +169,7 @@ impl Rasterizer {
             );
             match drawn {
                 Ok(()) => {
+                    self.cpu_frame = None;
                     out.push(Painted::Presented {
                         width: prepared.width,
                         height: prepared.height,
@@ -179,20 +184,29 @@ impl Rasterizer {
                 }
             }
         }
-        let pixmap = paint::paint(
-            &prepared.list,
-            &self.tables,
-            prepared.width,
-            prepared.height,
-            prepared.scale,
-        );
-        let frame = Frame::new(
-            prepared.width,
-            prepared.height,
-            pixmap.data_as_u8_slice().to_vec(),
-            prepared.list.dump(),
-        )
-        .painted_with_resources_pending(prepared.pending);
+        let (width, height, scale) = (prepared.width, prepared.height, prepared.scale);
+        let tiles = crate::damage::Tiles::of(&prepared.list, width, height, scale);
+        // The last frame painted again where it differs, or a whole frame.
+        let pixels = match self.cpu_frame.take().and_then(|(before, pixels)| {
+            tiles.damage_to_paint(&before).map(|areas| (areas, pixels))
+        }) {
+            Some((areas, mut pixels)) => {
+                paint::paint_damage(
+                    &prepared.list,
+                    &self.tables,
+                    (width, height, scale),
+                    &areas,
+                    &mut pixels,
+                );
+                pixels
+            }
+            None => paint::paint(&prepared.list, &self.tables, width, height, scale)
+                .data_as_u8_slice()
+                .to_vec(),
+        };
+        self.cpu_frame = Some((tiles, pixels.clone()));
+        let frame = Frame::new(width, height, pixels, prepared.list.dump())
+            .painted_with_resources_pending(prepared.pending);
         out.push(Painted::Frame(frame));
         self.last = Some(prepared);
         out
