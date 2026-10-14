@@ -612,6 +612,12 @@ impl Paragraph {
                             &mut last_was_space,
                             &mut space_owner,
                         );
+                        // A mark right after a forced break would join the
+                        // break's cluster when shaped, which Parley does not
+                        // allow; a zero-width space before it takes the mark.
+                        if paragraph.text.ends_with('\n') && continues_cluster(c) {
+                            paragraph.text.push('\u{200B}');
+                        }
                         start.get_or_insert(paragraph.text.len());
                         let at = paragraph.text.len();
                         paragraph.text.push(c);
@@ -1448,6 +1454,19 @@ fn alignment(block: &ComputedValues) -> Alignment {
         TextAlign::Justify => Alignment::Justify,
         _ => Alignment::Start,
     }
+}
+
+/// Whether `c` belongs to the grapheme cluster before it (a combining
+/// mark, a joiner, a spacing mark), as shaping clusters it.
+fn continues_cluster(c: char) -> bool {
+    use icu_properties::CodePointMapData;
+    use icu_properties::props::GraphemeClusterBreak;
+    matches!(
+        CodePointMapData::<GraphemeClusterBreak>::new().get(c),
+        GraphemeClusterBreak::Extend
+            | GraphemeClusterBreak::ZWJ
+            | GraphemeClusterBreak::SpacingMark
+    )
 }
 
 fn is_document_whitespace(c: char) -> bool {
