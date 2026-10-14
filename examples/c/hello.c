@@ -52,7 +52,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 8u));
+  CHECK(erk_abi_version() == ((0u << 16) | 9u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -101,6 +101,30 @@ int main(void) {
   CHECK(margin_len == 3 && memcmp(margin, "8px", 3) == 0);
   CHECK(erk_node_remove_style_property(app, note, str("margin")) == ERK_OK);
   CHECK(erk_node_style_property(app, note, str("margin-left"), margin, sizeof margin, &margin_len) == ERK_ERR_NOT_FOUND);
+
+  /* What a form control holds: a text field's value, a checkbox checked. */
+  ErkNodeId field = ERK_NODE_NONE, box = ERK_NODE_NONE;
+  CHECK(erk_node_create(app, str("input"), &field) == ERK_OK);
+  CHECK(erk_node_set_attr(app, field, str("value"), str("eski")) == ERK_OK);
+  CHECK(erk_node_set_value(app, field, str("yeni değer")) == ERK_OK);
+  char value[8];
+  size_t value_len = 0;
+  memset(value, '#', sizeof value);
+  /* "yeni değer" is 11 bytes: too long, and the buffer is left as it was. */
+  CHECK(erk_node_value(app, field, value, sizeof value, &value_len) == ERK_ERR_BUFFER_TOO_SMALL);
+  CHECK(value_len == 11 && value[0] == '#');
+  CHECK(erk_node_set_value(app, field, str("kısa")) == ERK_OK);
+  CHECK(erk_node_value(app, field, value, sizeof value, &value_len) == ERK_OK);
+  CHECK(value_len == 5 && memcmp(value, "kısa", 5) == 0);
+  CHECK(erk_node_create(app, str("input"), &box) == ERK_OK);
+  CHECK(erk_node_set_attr(app, box, str("type"), str("checkbox")) == ERK_OK);
+  uint32_t checked = 7;
+  CHECK(erk_node_checked(app, box, &checked) == ERK_OK && checked == 0);
+  CHECK(erk_node_set_checked(app, box, 1) == ERK_OK);
+  CHECK(erk_node_checked(app, box, &checked) == ERK_OK && checked == 1);
+  CHECK(erk_node_checked(app, field, &checked) == ERK_ERR_NOT_FOUND);
+  CHECK(erk_node_remove(app, field) == ERK_OK);
+  CHECK(erk_node_remove(app, box) == ERK_OK);
 
   /* The same in one call: a list of two items, the second naming the
    * first's element by its position in the batch. */
