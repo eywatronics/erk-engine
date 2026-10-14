@@ -219,7 +219,7 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 - [ ] Tab sırasının tamamı (`tabindex` sırası, `:focus-visible`), varsayılan
   eylemin iptali (karar 7), `INPUT`/`CHANGE`/`SUBMIT` olay türleri ve
   değer API'si (karar 8); sözleşme ve C-ABI. Üç PR: varsayılan eylemin
-  iptali (bitti); `:focus-visible`; olay türleri ve değer API'si.
+  iptali (bitti); `:focus-visible` (bitti); olay türleri ve değer API'si.
 
 ### M5.8: Metin alanları
 
@@ -668,4 +668,20 @@ Altıncı PR: belge değişen karede raster yalnızca değişen yeri çiziyor.
 | Kapsam dışı | İşaretçi basışının odağı taşıması iptal edilemiyor: host'a basış (`pointerdown`) olayı gitmiyor; o olay geldiğinde iptali de gelir. Gönderimin (`SUBMIT`) varsayılanı formlarla (M5.10) |
 | Testler | Rust: iptal edilen Tab odağı taşımıyor, sonraki taşıyor (bayrak sızmıyor); capture aşamasında iptal edilen Enter ve Space tıklamıyor, iptal kalkınca tıklıyor. C-ABI'nin Rust testi ve C örneği. Fuzz yorumlayıcısının callback'leri de iptal edebiliyor: kâhin bu yolu da görüyor |
 | Mutasyonlar | İptalin yok sayılması, varsayılan işin hiç yapılmaması, bayrağın sıfırlanmaması, `prevent_default`'un bir şey yapmaması, C-ABI'nin callback dışında da kabul etmesi ya da iptal etmemesi: yakalandı. Olayların döngüyle dağıtılması sağ çıktı (bir tuş tek olay üretiyor): `Engine::key` artık `Option<Event>` |
+
+Arada bir düzeltme PR'ı (#80): fuzz, belge imlecin üstünde gezdiği karede
+kaydırılacak kadar uzayınca çubuğunun çizilmediğini buldu (M2'den beri). Çubuklar
+önceki karenin kaydırma kaplarından alınıyordu; artık çizilen karenin
+kendisinden. Önceki karenin listesi yalnızca aynı çubuklarla yeniden
+kullanılıyor: iç kapların çubukları içeriğin içinde.
+
+İkinci PR: `:focus-visible`.
+
+| Konu | Not |
+|---|---|
+| Önce | Stylo `:focus-visible`'ı ayrıştırıp `FOCUSRING` durumuna bağlıyor, ama Erk'in eşleyicisi onu hiç eşlemiyordu: klavye kullanıcısı için çizilen halka ya her tıklanan düğmede görünüyor ya da hiç görünmüyordu |
+| Model | `Interaction.focus_visible` odaklı elemanın odağını gösterip göstermediğini söylüyor; gösteriyorsa eleman `FOCUSRING` durumunu alıyor. Sayfa odak taşınırken belirliyor: klavye taşıdıysa ya da eleman yazı alıyorsa (metin `input`, `textarea`) gösteriliyor, başka bir şeye basış taşıdıysa gösterilmiyor; tarayıcılar gibi (Selectors 4 §9.4). Yerinde kalan odak eskisini koruyor |
+| Yeniden stil | Gösterilip gösterilmemesi yalnızca odakla birlikte değiştiği için, seçicilerin bağlı olduğu durumlara `FOCUSRING`'in eklenmesi yetiyor: yalnızca `:focus-visible` kuralı olan bir sayfa Tab'dan sonra yeniden çiziliyor. `react_to`'da ayrıca `focus_visible` karşılaştırması mutasyonda sağ çıktı (odak değişimi zaten yakalıyor) ve kaldırıldı |
+| Testler | `the_keyboard_shows_the_focus_and_a_press_does_not` (Tab gösteriyor, basış göstermiyor, basılan metin alanı gösteriyor), `a_page_with_only_focus_visible_rules_shows_the_keyboards_focus` (kâhinle) |
+| Mutasyonlar | Hiç eşlememe, her odakla eşleme, halka durumunun verilmemesi, seçici bağımlılığında halkanın unutulması, klavyenin göstermemesi, basışın göstermesi, yazı alanın göstermemesi, etkileşimin değeri taşımaması: sekizi de yakalandı |
 

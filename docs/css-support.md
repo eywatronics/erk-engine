@@ -135,7 +135,7 @@ does not lay out or paint is not supported.
 | Focus: a press focuses the focusable element pressed (links, enabled controls, `tabindex`), Tab and Shift+Tab walk the sequential focus order, with focus and blur events | Supported | `a_press_moves_the_focus_and_reports_blur_then_focus`, `tab_walks_the_focus_order_and_shift_tab_walks_it_back`. The order wraps around at the ends; Tab from an element outside the order (a negative tabindex) starts from the first |
 | Keyboard activation: Enter clicks a focused link or button, Space released clicks a focused button; Tab moving the focus and these clicks are the key's default, which a subscription can prevent (`prevent_default`) | Supported | `enter_and_space_click_the_focused_link_or_button_as_browsers_do`, `a_prevented_tab_leaves_the_focus_where_it_is`, `a_prevented_enter_or_space_clicks_nothing` |
 | Key events to the host (`keydown`, `keyup`) at the focused element or else the body, bubbling, with the key (Tab, Enter, Space, Escape, Backspace, or the character typed) | Supported | `keys_reach_the_focused_element_and_bubble`, `a_key_event_comes_before_what_the_key_does_and_names_its_key` |
-| Text input, `input` and `change` events, cancelling a key's default action | M5 | With form controls |
+| Text input, `input` and `change` events | M5 | With form controls |
 | `cursor` keywords; `auto` is a text cursor over text; links show the hand | Supported | `the_cursor_follows_what_the_pointer_is_over`. Cursor images (`url()`) fall back to their keyword |
 | Other `pointer-events` values (SVG) | Not planned | Only `auto` and `none` apply to HTML boxes |
 
