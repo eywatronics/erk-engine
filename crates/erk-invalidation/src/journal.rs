@@ -28,6 +28,8 @@ pub struct State {
     /// An element's attributes, by name.
     attrs: Vec<(String, String)>,
     children: Vec<NodeId>,
+    /// A form control's value, if one was set (M5.8: drawn in the field).
+    value: Option<String>,
 }
 
 impl State {
@@ -52,6 +54,7 @@ impl State {
             text,
             attrs,
             children: doc.children(id).collect(),
+            value: doc.value_set(id).map(str::to_owned),
         }
     }
 }
@@ -80,12 +83,14 @@ pub struct Changes {
     pub attrs: Vec<AttrChange>,
     /// Nodes whose children changed: added, removed or moved.
     pub children: Vec<NodeId>,
+    /// Form controls whose value was set to another.
+    pub values: Vec<NodeId>,
 }
 
 impl Changes {
     /// How many changes there are.
     pub fn count(&self) -> usize {
-        self.text.len() + self.attrs.len() + self.children.len()
+        self.text.len() + self.attrs.len() + self.children.len() + self.values.len()
     }
 
     /// The changes between `before` and `after`, for one node.
@@ -112,12 +117,16 @@ impl Changes {
         if before.children != after.children {
             self.children.push(id);
         }
+        if before.value != after.value {
+            self.values.push(id);
+        }
     }
 
     fn sort(&mut self) {
         self.text.sort_by_key(|id| id.index());
         self.attrs.sort_by_key(|change| change.node.index());
         self.children.sort_by_key(|id| id.index());
+        self.values.sort_by_key(|id| id.index());
     }
 }
 
@@ -150,7 +159,8 @@ impl Journal {
         }
     }
 
-    /// `id` is about to change: its text, its attributes or its children.
+    /// `id` is about to change: its text, its attributes, its children or
+    /// its value.
     /// The first touch this frame keeps its state before.
     pub fn touch(&mut self, doc: &Document, id: NodeId) {
         self.recorded += 1;
@@ -377,5 +387,25 @@ mod tests {
             ]
         );
         assert_eq!(changes.children, [q]);
+    }
+
+    #[test]
+    fn a_value_set_is_a_change_and_set_back_is_none() {
+        let mut doc = doc("<input id=t value=a>");
+        let t = find(&doc, "t");
+        let before = snapshot(&doc);
+        let mut journal = Journal::default();
+        journal.touch(&doc, t);
+        doc.set_value(t, "b").unwrap();
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.values, [t]);
+        assert_eq!(changes.count(), 1);
+        assert_eq!(changes, difference(&before, &doc));
+        // The same value again: nothing.
+        journal.touch(&doc, t);
+        doc.set_value(t, "c").unwrap();
+        journal.touch(&doc, t);
+        doc.set_value(t, "b").unwrap();
+        assert_eq!(journal.take(&doc).0, Changes::default());
     }
 }

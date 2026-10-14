@@ -311,8 +311,10 @@ impl VerticalAlign {
 /// One item of a block's inline content, in tree order.
 pub(crate) enum InlineToken<S> {
     /// The text of a text node, with the style of its element, the
-    /// language it is written in (for `text-transform`) and the text node.
-    Text(String, S, LanguageIdentifier, NodeId),
+    /// language it is written in (for `text-transform`) and the text node;
+    /// no node for text Erk writes itself (a text field's value), which
+    /// paints and is hit as its block.
+    Text(String, S, LanguageIdentifier, Option<NodeId>),
     /// An inline element starts; its style gives its padding, border,
     /// margin and background.
     Open(S, NodeId),
@@ -590,14 +592,14 @@ impl Paragraph {
                         if is_document_whitespace(c) && !keeps_spaces {
                             if has_content && !last_was_space && !pending_space {
                                 pending_space = true;
-                                space_owner = Some(*node);
+                                space_owner = *node;
                                 paragraph.space_wraps = style.wrap;
                             }
                             continue;
                         }
                         // A space this node wrote is in its own range: from
                         // the space on if the node starts with it.
-                        let own_space = pending_space && space_owner == Some(*node);
+                        let own_space = pending_space && node.is_some() && space_owner == *node;
                         if own_space {
                             space_owner = None;
                             if start.is_none() {
@@ -635,7 +637,9 @@ impl Paragraph {
                     }
                     if let Some(start) = start {
                         let end = paragraph.text.len();
-                        paragraph.attribute(*node, start..end);
+                        if let Some(node) = node {
+                            paragraph.attribute(*node, start..end);
+                        }
                         if style != paragraph.base {
                             paragraph.spans.push((start..end, style));
                         }
@@ -1230,9 +1234,13 @@ fn wrap_mode(style: &TextStyle) -> parley::TextWrapMode {
     }
 }
 
-/// The `white-space-collapse` of a text token.
+/// The `white-space-collapse` of a text token. Text Erk writes itself, a
+/// field's value, keeps its spaces and line breaks whatever the field's
+/// `white-space` says, which only wraps it (as browsers keep a field's
+/// value as typed).
 fn token_collapse<S: AsRef<ComputedValues>>(token: &InlineToken<S>) -> Option<WhiteSpaceCollapse> {
     match token {
+        InlineToken::Text(_, _, _, None) => Some(WhiteSpaceCollapse::Preserve),
         InlineToken::Text(_, style, ..) => Some(
             style
                 .as_ref()

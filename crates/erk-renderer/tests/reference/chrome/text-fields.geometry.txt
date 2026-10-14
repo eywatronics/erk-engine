@@ -1,0 +1,14 @@
+0 body block 0 20 800 356
+1 div block 20 20 456 356
+2 div block 38 38 420 32
+3 input inline-block 64.734375 38 238 32
+4 div block 38 82 420 32
+5 input inline-block 77.546875 82 238 32
+6 div block 38 126 420 32
+7 input inline-block 82.484375 126 178 32
+8 div block 38 170 420 32
+9 input inline-block 71.9375 170 238 32
+10 div block 38 214 420 76
+11 textarea block 38 214 318 76
+12 div block 38 302 420 44
+13 input inline-block 92.265625 302 248 44
