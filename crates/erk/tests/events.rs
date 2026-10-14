@@ -133,6 +133,74 @@ fn focus_does_not_bubble() {
     assert_eq!(*seen.borrow(), ["button Target"]);
 }
 
+fn key(app: &mut App, key: erk::Key, state: KeyState) {
+    app.input(Input::Key(KeyInput {
+        key,
+        state,
+        modifiers: Modifiers::default(),
+    }));
+}
+
+#[test]
+fn a_prevented_tab_leaves_the_focus_where_it_is() {
+    let mut app =
+        app(r#"<body style="margin: 0"><button id="a">a</button><button id="b">b</button>"#);
+    let (body, a) = (node(&app, "body"), node(&app, "#a"));
+    let focused = Log::default();
+    let on_a = focused.clone();
+    app.on(a, EventKind::Focus, move |_, _| {
+        on_a.borrow_mut().push("a".to_owned())
+    })
+    .unwrap();
+    // The first Tab is prevented where it bubbles to; the next is not.
+    let prevent = Rc::new(Cell::new(true));
+    let first = prevent.clone();
+    app.on(body, EventKind::KeyDown, move |cx, event| {
+        assert_eq!(event.key, Some(erk::Key::Tab));
+        if first.replace(false) {
+            cx.prevent_default();
+        }
+    })
+    .unwrap();
+    key(&mut app, erk::Key::Tab, KeyState::Down);
+    assert!(focused.borrow().is_empty(), "{:?}", focused.borrow());
+    key(&mut app, erk::Key::Tab, KeyState::Down);
+    assert_eq!(*focused.borrow(), ["a"]);
+}
+
+#[test]
+fn a_prevented_enter_or_space_clicks_nothing() {
+    let mut app = app(r#"<body style="margin: 0"><button id="b">tamam</button>"#);
+    let (html, button) = (node(&app, "html"), node(&app, "#b"));
+    let clicks = Rc::new(Cell::new(0));
+    let counted = clicks.clone();
+    app.on(button, EventKind::Click, move |_, _| {
+        counted.set(counted.get() + 1)
+    })
+    .unwrap();
+    key(&mut app, erk::Key::Tab, KeyState::Down);
+    // Prevented on the way down, before the focused button sees the key.
+    let prevent = Rc::new(Cell::new(true));
+    let now = prevent.clone();
+    let prevent_keys = move |cx: &mut Context, _: &Event| {
+        if now.get() {
+            cx.prevent_default();
+        }
+    };
+    app.on_capture(html, EventKind::KeyDown, prevent_keys.clone())
+        .unwrap();
+    app.on_capture(html, EventKind::KeyUp, prevent_keys)
+        .unwrap();
+    key(&mut app, erk::Key::Enter, KeyState::Down);
+    key(&mut app, erk::Key::Space, KeyState::Down);
+    key(&mut app, erk::Key::Space, KeyState::Up);
+    assert_eq!(clicks.get(), 0);
+    prevent.set(false);
+    key(&mut app, erk::Key::Enter, KeyState::Down);
+    key(&mut app, erk::Key::Space, KeyState::Up);
+    assert_eq!(clicks.get(), 2);
+}
+
 /// Counts its drops: the closure's `destroy`.
 struct Drops(Rc<Cell<u32>>);
 

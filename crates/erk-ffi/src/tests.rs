@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_7() {
-    assert_eq!(erk_abi_version(), 7);
+fn the_abi_version_is_0_8() {
+    assert_eq!(erk_abi_version(), 8);
 }
 
 #[test]
@@ -382,6 +382,78 @@ fn a_key_event_names_its_key_and_what_it_typed() {
         seen(),
         (ERK_EVENT_KEY_DOWN, ERK_KEY_BACKSPACE, String::new())
     );
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+/// The status of the last `erk_event_prevent_default` a callback called.
+static PREVENTED: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+#[allow(unsafe_code)] // SAFETY: a C callback; reads nothing through its pointers.
+unsafe extern "C" fn prevent(_: *mut c_void, app: *mut ErkApp, _: *const ErkEvent) {
+    PREVENTED.store(erk_event_prevent_default(app), Ordering::SeqCst);
+}
+
+#[allow(unsafe_code)] // SAFETY: a C callback; dereferences the test's counter.
+unsafe extern "C" fn count(user_data: *mut c_void, _: *mut ErkApp, _: *const ErkEvent) {
+    // SAFETY: the test passes a live AtomicU32 that outlives the app.
+    let clicks = unsafe { &*user_data.cast::<AtomicU32>() };
+    clicks.fetch_add(1, Ordering::SeqCst);
+}
+
+#[test]
+fn a_key_prevented_from_c_does_nothing_by_default() {
+    let app = app_with(PAGE);
+    let button = query(app, "#b");
+    // Only inside a callback.
+    assert_eq!(erk_event_prevent_default(app), ERK_ERR_INVALID_ARGUMENT);
+    let clicks = AtomicU32::new(0);
+    let mut subscription = 0;
+    let clicks_data = std::ptr::from_ref(&clicks).cast_mut().cast();
+    assert_eq!(
+        erk_on(
+            app,
+            button,
+            ERK_EVENT_CLICK,
+            Some(count),
+            clicks_data,
+            None,
+            &mut subscription
+        ),
+        ERK_OK
+    );
+    let key = |key| ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind: ERK_INPUT_KEY_DOWN,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key,
+        text: s(""),
+        modifiers: 0,
+    };
+    // Tab focuses the button; then Enter, prevented, clicks nothing.
+    assert_eq!(erk_app_input(app, &key(ERK_KEY_TAB)), ERK_OK);
+    let mut preventing = 0;
+    assert_eq!(
+        erk_on(
+            app,
+            button,
+            ERK_EVENT_KEY_DOWN,
+            Some(prevent),
+            std::ptr::null_mut(),
+            None,
+            &mut preventing
+        ),
+        ERK_OK
+    );
+    assert_eq!(erk_app_input(app, &key(ERK_KEY_ENTER)), ERK_OK);
+    assert_eq!(PREVENTED.load(Ordering::SeqCst), ERK_OK);
+    assert_eq!(clicks.load(Ordering::SeqCst), 0);
+    assert_eq!(erk_off(app, preventing), ERK_OK);
+    assert_eq!(erk_app_input(app, &key(ERK_KEY_ENTER)), ERK_OK);
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 

@@ -364,11 +364,24 @@ impl App {
 
     /// Give the page input, as a window would. Events it causes reach their
     /// subscriptions before this returns; a panic in one of them comes out
-    /// of here.
+    /// of here. A key does what it does by default (Tab moves the focus,
+    /// Enter clicks a button) after its event, unless a subscription
+    /// prevented it ([`Context::prevent_default`]).
     pub fn input(&mut self, input: Input) {
         let events = match input {
             Input::Pointer(pointer) => self.cx.engine.pointer(&pointer),
-            Input::Key(key) => self.cx.engine.key(&key),
+            Input::Key(key) => {
+                let prevented = self
+                    .cx
+                    .engine
+                    .key(&key)
+                    .is_some_and(|event| self.cx.dispatch(event));
+                if prevented {
+                    Vec::new()
+                } else {
+                    self.cx.engine.key_default(&key)
+                }
+            }
             Input::Wheel { dx, dy, x, y } => {
                 self.cx.engine.wheel((dx, dy), (x, y));
                 Vec::new()

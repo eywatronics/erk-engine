@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 7
+#define ERK_ABI_VERSION 8
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -672,6 +672,13 @@ ErkStatus erk_off(ErkApp *app, ErkSubscription subscription);
  Inside an event callback: the event goes no further than this node.
  */
 ErkStatus erk_event_stop_propagation(ErkApp *app);
+
+/*
+ Inside an event callback: what the event does by default is not done.
+ For a key, Tab no longer moves the focus and Enter or Space no longer
+ clicks the focused button or link (ABI 8).
+ */
+ErkStatus erk_event_prevent_default(ErkApp *app);
 
 ErkStatus erk_node_parent(ErkApp *app, ErkNodeId node_id, ErkNodeId *out);
 

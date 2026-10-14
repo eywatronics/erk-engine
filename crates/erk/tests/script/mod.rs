@@ -191,7 +191,7 @@ fn subscribe(app: &mut App, state: &mut State, bytes: &mut Bytes) {
     let node = state.node(bytes);
     let kind = KINDS[bytes.below(KINDS.len())];
     let action = bytes.byte();
-    let callback = move |cx: &mut erk::Context, event: &erk::Event| match action % 5 {
+    let callback = move |cx: &mut erk::Context, event: &erk::Event| match action % 6 {
         0 => {
             let _ = cx.remove(event.target);
         }
@@ -200,6 +200,7 @@ fn subscribe(app: &mut App, state: &mut State, bytes: &mut Bytes) {
         }
         2 => cx.stop_propagation(),
         3 => cx.load_html("<p>yeni</p>"),
+        4 => cx.prevent_default(),
         _ => {
             if let Ok(made) = cx.create_element("p") {
                 let _ = cx.append(event.target, made);
