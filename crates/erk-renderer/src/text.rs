@@ -1234,9 +1234,13 @@ fn wrap_mode(style: &TextStyle) -> parley::TextWrapMode {
     }
 }
 
-/// The `white-space-collapse` of a text token.
+/// The `white-space-collapse` of a text token. Text Erk writes itself, a
+/// field's value, keeps its spaces and line breaks whatever the field's
+/// `white-space` says, which only wraps it (as browsers keep a field's
+/// value as typed).
 fn token_collapse<S: AsRef<ComputedValues>>(token: &InlineToken<S>) -> Option<WhiteSpaceCollapse> {
     match token {
+        InlineToken::Text(_, _, _, None) => Some(WhiteSpaceCollapse::Preserve),
         InlineToken::Text(_, style, ..) => Some(
             style
                 .as_ref()

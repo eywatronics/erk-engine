@@ -1360,6 +1360,28 @@ mod tests {
     }
 
     #[test]
+    fn a_fields_value_keeps_its_spaces_whatever_its_white_space() {
+        // `white-space: normal` wraps a textarea's value but keeps its
+        // spaces and line breaks (WPT textarea-always-preserves-spaces).
+        let style = "style='white-space: normal; width: 300px; height: auto'";
+        let mut engine = verifying(&format!(
+            "<textarea id=a {style}>eski</textarea><textarea id=b {style}>bir</textarea>"
+        ));
+        let (a, b) = (
+            engine.query(None, "#a").unwrap().unwrap(),
+            engine.query(None, "#b").unwrap().unwrap(),
+        );
+        engine.set_value(a, "a    b\nc").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("a    b"), "{text:?}");
+        // Two lines: twice as tall as the one-line field beside it.
+        let height = |id| engine.node_box(id).unwrap().unwrap().height;
+        assert!(height(a) > 1.5 * height(b), "{} {}", height(a), height(b));
+    }
+
+    #[test]
     fn a_text_field_laid_out_inline_still_shows_its_value() {
         // What it shows is not its children's: an inline field is atomic.
         let mut engine = verifying(
