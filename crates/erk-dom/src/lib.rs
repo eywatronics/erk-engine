@@ -6,6 +6,7 @@
 
 mod arena;
 mod document;
+mod forms;
 mod node;
 mod sink;
 

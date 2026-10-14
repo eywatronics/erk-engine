@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 8
+#define ERK_ABI_VERSION 9
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -576,6 +576,39 @@ ErkStatus erk_node_attr(ErkApp *app,
                         char *buf,
                         size_t cap,
                         size_t *len);
+
+/*
+ Element `node`'s value as DOM's `value` reads it: what was set, or else
+ what the markup says (an `input`'s `value` attribute, a `textarea`'s
+ text, a `select`'s selected option), into the caller's buffer as
+ `erk_node_attr` does. `ERK_ERR_NOT_FOUND` for an element that has no
+ value.
+ */
+ErkStatus erk_node_value(ErkApp *app, ErkNodeId node_id, char *buf, size_t cap, size_t *len);
+
+/*
+ Set element `node`'s value as DOM's `value` does: a `select` selects
+ its first option with that value. No `ERK_EVENT_INPUT` follows: those
+ are the user's. `ERK_ERR_INVALID_ARGUMENT` for an element that has no
+ value.
+ */
+ErkStatus erk_node_set_value(ErkApp *app, ErkNodeId node_id, ErkStr value);
+
+/*
+ Whether element `node`, a checkbox or radio button, is checked, or an
+ `option` selected: `*out` is 1 or 0. `ERK_ERR_NOT_FOUND` for any other
+ element.
+ */
+ErkStatus erk_node_checked(ErkApp *app, ErkNodeId node_id, uint32_t *out);
+
+/*
+ Check (`checked` 1) or uncheck (0) element `node`, a checkbox or radio
+ button, or select or unselect an `option`; a radio button checked
+ unchecks the others of its group (same `name`, same form), an option
+ selected in a single-choice list the other options.
+ `ERK_ERR_INVALID_ARGUMENT` for any other element or another `checked`.
+ */
+ErkStatus erk_node_set_checked(ErkApp *app, ErkNodeId node_id, uint32_t checked);
 
 /*
  Set property `name` of element `node`'s inline style to `value`, as

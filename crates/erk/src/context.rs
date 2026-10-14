@@ -252,6 +252,38 @@ impl Context {
         Ok(self.engine.set_attr(self.inward(node), name, value)?)
     }
 
+    /// Element `node`'s value as DOM's `value` reads it: what was set, or
+    /// else what the markup says (an `input`'s `value` attribute, a
+    /// `textarea`'s text, a `select`'s selected option). `None` for an
+    /// element that has no value.
+    pub fn value(&self, node: Node) -> Result<Option<String>, Status> {
+        Ok(self.engine.value(self.inward(node))?)
+    }
+
+    /// Set element `node`'s value as DOM's `value` does: a `select`
+    /// selects its first option with that value. No `Input` event follows:
+    /// those are the user's. `InvalidArgument` for an element that has no
+    /// value.
+    pub fn set_value(&mut self, node: Node, value: &str) -> Result<(), Status> {
+        Ok(self.engine.set_value(self.inward(node), value)?)
+    }
+
+    /// Whether element `node`, a checkbox or radio button, is checked, or
+    /// an `option` selected (DOM's `selected`); `None` for any other
+    /// element.
+    pub fn checked(&self, node: Node) -> Result<Option<bool>, Status> {
+        Ok(self.engine.checked(self.inward(node))?)
+    }
+
+    /// Check or uncheck element `node`, a checkbox or radio button, or
+    /// select or unselect an `option`; a radio button checked unchecks the
+    /// others of its group (same `name`, same form), an option selected in
+    /// a single-choice list the other options. `InvalidArgument` for any
+    /// other element.
+    pub fn set_checked(&mut self, node: Node, checked: bool) -> Result<(), Status> {
+        Ok(self.engine.set_checked(self.inward(node), checked)?)
+    }
+
     /// Remove attribute `name` of element `node`; whether it had one.
     pub fn remove_attr(&mut self, node: Node, name: &str) -> Result<bool, Status> {
         Ok(self.engine.remove_attr(self.inward(node), name)?)

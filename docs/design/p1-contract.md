@@ -435,6 +435,24 @@ gerekçeli bir daraltma:
   bildirim bloğuyla ayrıştırılıp yeniden yazılır, sıradan bir öznitelik
   değişikliği olarak yeniden stillenir. Bilinmeyen ad ya da özelliğin
   almadığı değer `ERK_ERR_INVALID_ARGUMENT`, hiçbir şey değişmez.
+- **v0.8 (M5.7):** `erk_event_prevent_default` (§5): bir tuşun varsayılan
+  işi aboneliklerden sonra, iptal edilmediyse yapılır.
+- **v0.9 (M5.7):** `erk_on` girdi, değişiklik ve gönderim türlerini
+  (`ERK_EVENT_INPUT`, `ERK_EVENT_CHANGE`, `ERK_EVENT_SUBMIT`) kabul ediyor;
+  olaylar kontrollerle gelir (M5.8, M5.10), host'un değer yazması olay
+  doğurmaz (DOM'daki gibi). Değer API'si, DOM'un `value` ve `checked`'i
+  gibi: `erk_node_value` (`erk_node_attr` gibi tampona; değeri olmayan
+  elemanda `ERK_ERR_NOT_FOUND`), `erk_node_set_value`, `erk_node_checked`
+  (`*out` 1 ya da 0; `option`'da seçili olup olmadığı, DOM'un
+  `selected`'ı gibi; onay kutusu, radyo düğmesi ve seçenek dışında
+  `ERK_ERR_NOT_FOUND`), `erk_node_set_checked` (yalnızca 0 ya da 1; tek
+  seçimli listede seçilen seçenek ötekileri bırakır).
+  Değer: `input`'ta yazılan, yoksa `value` özniteliği (satır sonları
+  atılmış); `textarea`'da yazılan, yoksa metni; `select`'te seçili
+  seçeneğin değeri, yazmak o değerdeki ilk seçeneği seçer; onay kutusu,
+  radyo ve `option`'da `value` özniteliği. İşaretlenen bir radyo düğmesi
+  grubundakileri (aynı `name`, aynı form) kaldırır. Değeri olmayan
+  elemana yazmak `ERK_ERR_INVALID_ARGUMENT`.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

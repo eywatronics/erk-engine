@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_8() {
-    assert_eq!(erk_abi_version(), 8);
+fn the_abi_version_is_0_9() {
+    assert_eq!(erk_abi_version(), 9);
 }
 
 #[test]
@@ -530,6 +530,60 @@ fn a_document_is_built_from_c() {
 }
 
 #[test]
+fn values_and_checkedness_are_read_and_set_from_c() {
+    let app = app_with(
+        "<input id=t value=eski><select id=s><option>a<option value=b>B</select>\
+         <input type=radio name=r id=r1 checked><input type=radio name=r id=r2>",
+    );
+    let value_of = |node| {
+        let mut buf = [0u8; 16];
+        let mut len = 0;
+        match erk_node_value(app, node, buf.as_mut_ptr().cast(), buf.len(), &mut len) {
+            ERK_OK => Ok(String::from_utf8(buf[..len].to_vec()).unwrap()),
+            status => Err(status),
+        }
+    };
+    let checked_of = |node| {
+        let mut out = 7;
+        match erk_node_checked(app, node, &mut out) {
+            ERK_OK => Ok(out),
+            status => Err(status),
+        }
+    };
+    let (t, select, r1, r2) = (
+        query(app, "#t"),
+        query(app, "#s"),
+        query(app, "#r1"),
+        query(app, "#r2"),
+    );
+    assert_eq!(value_of(t).as_deref(), Ok("eski"));
+    assert_eq!(erk_node_set_value(app, t, s("yeni")), ERK_OK);
+    assert_eq!(value_of(t).as_deref(), Ok("yeni"));
+    assert_eq!(value_of(select).as_deref(), Ok("a"));
+    assert_eq!(erk_node_set_value(app, select, s("b")), ERK_OK);
+    assert_eq!(value_of(select).as_deref(), Ok("b"));
+    assert_eq!(checked_of(r1), Ok(1));
+    assert_eq!(erk_node_set_checked(app, r2, 1), ERK_OK);
+    assert_eq!((checked_of(r1), checked_of(r2)), (Ok(0), Ok(1)));
+    assert_eq!(erk_node_set_checked(app, r2, 2), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(checked_of(r2), Ok(1));
+    // An element without a value or checkedness.
+    let body = query(app, "body");
+    assert_eq!(value_of(body), Err(ERK_ERR_NOT_FOUND));
+    assert_eq!(checked_of(t), Err(ERK_ERR_NOT_FOUND));
+    assert_eq!(
+        erk_node_set_value(app, body, s("x")),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(erk_node_set_checked(app, t, 1), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(
+        erk_node_checked(app, r1, std::ptr::null_mut()),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
 fn removing_a_subscribed_node_runs_its_destroy_once() {
     let app = app_with(PAGE);
     let counts = Counts::default();
@@ -851,7 +905,7 @@ fn destroy_runs_once_however_a_subscription_ends() {
         erk_on(
             app,
             query(app, "#b"),
-            ERK_EVENT_SUBMIT,
+            99,
             Some(count_click),
             user_data,
             Some(count_destroy),
@@ -860,6 +914,24 @@ fn destroy_runs_once_however_a_subscription_ends() {
         ERK_ERR_INVALID_ARGUMENT
     );
     assert_eq!(unknown.destroyed.load(Ordering::SeqCst), 0);
+    // The kinds forms raise are taken.
+    for kind in [ERK_EVENT_INPUT, ERK_EVENT_CHANGE, ERK_EVENT_SUBMIT] {
+        let mut made = 0;
+        assert_eq!(
+            erk_on(
+                app,
+                query(app, "#b"),
+                kind,
+                Some(count_click),
+                std::ptr::null_mut(),
+                None,
+                &mut made
+            ),
+            ERK_OK,
+            "{kind}"
+        );
+        assert_eq!(erk_off(app, made), ERK_OK);
+    }
 
     // With the app.
     let with_app = Counts::default();

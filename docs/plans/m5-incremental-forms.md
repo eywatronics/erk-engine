@@ -216,10 +216,10 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.7: Odak ve olaylar
 
-- [ ] Tab sırasının tamamı (`tabindex` sırası, `:focus-visible`), varsayılan
+- [x] Tab sırasının tamamı (`tabindex` sırası, `:focus-visible`), varsayılan
   eylemin iptali (karar 7), `INPUT`/`CHANGE`/`SUBMIT` olay türleri ve
   değer API'si (karar 8); sözleşme ve C-ABI. Üç PR: varsayılan eylemin
-  iptali (bitti); `:focus-visible` (bitti); olay türleri ve değer API'si.
+  iptali; `:focus-visible`; olay türleri ve değer API'si.
 
 ### M5.8: Metin alanları
 
@@ -684,4 +684,17 @@ kullanılıyor: iç kapların çubukları içeriğin içinde.
 | Yeniden stil | Gösterilip gösterilmemesi yalnızca odakla birlikte değiştiği için, seçicilerin bağlı olduğu durumlara `FOCUSRING`'in eklenmesi yetiyor: yalnızca `:focus-visible` kuralı olan bir sayfa Tab'dan sonra yeniden çiziliyor. `react_to`'da ayrıca `focus_visible` karşılaştırması mutasyonda sağ çıktı (odak değişimi zaten yakalıyor) ve kaldırıldı |
 | Testler | `the_keyboard_shows_the_focus_and_a_press_does_not` (Tab gösteriyor, basış göstermiyor, basılan metin alanı gösteriyor), `a_page_with_only_focus_visible_rules_shows_the_keyboards_focus` (kâhinle) |
 | Mutasyonlar | Hiç eşlememe, her odakla eşleme, halka durumunun verilmemesi, seçici bağımlılığında halkanın unutulması, klavyenin göstermemesi, basışın göstermesi, yazı alanın göstermemesi, etkileşimin değeri taşımaması: sekizi de yakalandı |
+
+Üçüncü PR: girdi, değişiklik ve gönderim olayları, değer API'si (karar 8).
+
+| Konu | Not |
+|---|---|
+| Önce | `erk_on` girdi, değişiklik ve gönderimi reddediyordu; host bir kontrolü yalnızca öznitelikleriyle okuyabiliyordu. `value` özniteliği işaretlemenin varsayılanı; bir şey yazıldıktan sonra alanın tuttuğu değil |
+| Olaylar | `EventKind::Input`, `Change`, `Submit`; `erk_on` kabul ediyor. Onları kontroller doğuracak (M5.8, M5.10); host'un yazdığı değer olay doğurmuyor, DOM'daki gibi |
+| Model | Durum belgenin yan tablosunda (`Document::controls`, `NodeId` → değer, işaretlilik ya da seçililik), elemanda değil: kimsenin yazmadığı eleman yer kaplamıyor (M5.13), silinen düğüm ve değiştirilen belge iz bırakmıyor. Okuma DOM'un `value`, `checked`, `selected`'ı gibi: yazılan, yoksa işaretlemenin söylediği. `input`'ta satır sonları atılıyor, `url` ve `email` kırpılıyor; `textarea`'nın varsayılanı metni (`\r\n` → `\n`); `select`'in değeri seçili seçeneğin değeri, yazmak o değerdeki ilk seçeneği seçiyor, hiçbiri yoksa hiçbirini; onay kutusu, radyo ve `option`'ın değeri `value` özniteliği. Radyo grubu: aynı `name`, aynı form, aynı ağaç. Tek seçimli listede hiçbir şey işaretli değilse ilk devre dışı olmayan seçenek, birden çoğu işaretliyse sonuncusu |
+| Yeniden stil | Onay kutusunun, radyonun ve seçeneğin değeri bir öznitelik: seçiciler görüyor. `set_value` elemanı günlüğe yazıyor ve kare istiyor. Öteki değerler ve `:checked` henüz çizilmiyor; kontrollerle (M5.8, M5.10) günlüğe girecekler |
+| C-ABI | `erk_node_value` (`erk_node_attr` gibi tampona; değeri olmayan elemanda `ERK_ERR_NOT_FOUND`), `erk_node_set_value`, `erk_node_checked` (`*out` 1 ya da 0), `erk_node_set_checked` (yalnızca 0 ya da 1). ABI 9, ekleme |
+| Bilinen eksik | HTML, bir listeye seçenek eklenip çıkarılınca seçililik algoritmasını yeniden çalıştırıyor; Erk ilk seçeneğe yalnızca listede hiçbir şey yazılmamışsa düşüyor. Seçimi kullanıcı yaptığında (M5.10) gelir |
+| Testler | `erk-dom`: metin alanı, `textarea` (host'un yazdığı `\r` dahil), `select` (`optgroup`, devre dışı, çoklu), seçeneğin seçililiği, radyo grubu (ad ve form), değeri olmayan eleman, silinen ve değiştirilen belge. `erk`: Rust API ve olay doğmaması; motor: onay kutusunun değeri yeniden stilliyor (kâhinle); C-ABI testi. Fuzz yorumlayıcısı değer ve işaretlilik yazıyor, okuyor, yeni olay türlerine abone oluyor; form kontrollü bir sayfası var |
+| Mutasyonlar | 30 mutasyondan 29'u yakalandı. İlk turda kaçan yedisi için test eklendi: ayrıştırıcının zaten düzelttiği `\r\n` (host'un yazdığı metinle), aynı değerdeki bütün seçeneklerin seçilmesi (seçililik `checked` ile okunur oldu; plan bunu "seçili seçenek" diye istiyordu), başka addaki radyo, işaret kaldırmanın grubu etkilemesi, metin alanının işaretlenebilmesi, `set_value`'nun günlüğe yazmaması ve kare istememesi. Sağ çıkan: tek seçimli listede seçilen seçeneğin ötekileri bırakması. Gösterim kuralı (son işaretli) aynı sonucu veriyor ve sonraki yazma eski işareti düşürüyor; fark yalnızca seçenek silinince görünürdü, o da bilinen eksikte |
 

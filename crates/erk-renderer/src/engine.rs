@@ -333,6 +333,39 @@ impl Engine {
         self.page.attr(node, name)
     }
 
+    /// Element `node`'s value as DOM's `value` reads it: what was set, or
+    /// else what the markup says (an `input`'s `value` attribute, a
+    /// `textarea`'s text, a `select`'s selected option). `None` for an
+    /// element that has no value.
+    pub fn value(&self, node: u64) -> Result<Option<String>, Status> {
+        self.page.value(node)
+    }
+
+    /// Set element `node`'s value as DOM's `value` does: a `select`
+    /// selects its first option with that value. It is not an `input`
+    /// event: those come from the user. `InvalidArgument` for an element
+    /// that has no value.
+    pub fn set_value(&mut self, node: u64, value: &str) -> Result<(), Status> {
+        self.page.set_value(node, value)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Whether element `node`, a checkbox or radio button, is checked, or
+    /// an `option` selected (DOM's `selected`); `None` for any other
+    /// element.
+    pub fn checked(&self, node: u64) -> Result<Option<bool>, Status> {
+        self.page.checked(node)
+    }
+
+    /// Check or uncheck element `node`, a checkbox or radio button, or
+    /// select or unselect an `option`; a radio button checked unchecks the
+    /// others of its group, an option selected in a single-choice list the
+    /// other options. `InvalidArgument` for any other element.
+    pub fn set_checked(&mut self, node: u64, checked: bool) -> Result<(), Status> {
+        self.page.set_checked(node, checked)
+    }
+
     /// Set property `name` of element `node`'s inline style to `value`
     /// (CSSOM's `style.setProperty`); an empty value removes it.
     pub fn set_style_property(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
@@ -1224,6 +1257,24 @@ mod tests {
         assert_eq!(engine.verify(), Ok(()));
         let style = engine.computed_style(b).unwrap().unwrap();
         assert!(style.contains("color: rgb(255, 0, 0)"), "{style}");
+    }
+
+    #[test]
+    fn a_checkboxs_value_set_is_its_attribute_and_restyles_it() {
+        // A checkbox's value is its `value` attribute, which selectors see.
+        let mut engine = verifying(
+            "<style>input { display: block; width: 20px; height: 20px }\
+             [value=a] { background: rgb(255, 0, 0) }</style><input type=checkbox id=k value=b>",
+        );
+        let k = engine.query(None, "#k").unwrap().unwrap();
+        engine.set_value(k, "a").unwrap();
+        assert!(engine.prepare().0.is_some(), "the value shows: a frame");
+        assert_eq!(engine.verify(), Ok(()));
+        let style = engine.computed_style(k).unwrap().unwrap();
+        assert!(
+            style.contains("background-color: rgb(255, 0, 0)"),
+            "{style}"
+        );
     }
 
     #[test]

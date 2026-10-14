@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use html5ever::tree_builder::QuirksMode;
 use html5ever::{LocalName, QualName, local_name, ns};
 
+use crate::forms::Control;
 use crate::{Arena, Attribute, ElementData, Node, NodeData, NodeId};
 
 /// A DOM tree: an arena of nodes plus the id of the document node.
@@ -8,6 +11,8 @@ pub struct Document {
     nodes: Arena<Node>,
     root: NodeId,
     pub(crate) quirks_mode: QuirksMode,
+    /// What form controls hold apart from their attributes.
+    pub(crate) controls: HashMap<NodeId, Control>,
 }
 
 impl Default for Document {
@@ -25,6 +30,7 @@ impl Document {
             nodes,
             root,
             quirks_mode: QuirksMode::NoQuirks,
+            controls: HashMap::new(),
         }
     }
 
@@ -248,6 +254,7 @@ impl Document {
             let Some(removed) = self.nodes.remove(node) else {
                 continue;
             };
+            self.forget_control(node);
             let mut child = removed.first_child;
             while let Some(id) = child {
                 stack.push(id);
@@ -287,6 +294,7 @@ impl Document {
     /// Remove every node but the document node, which is left empty.
     pub(crate) fn clear(&mut self) {
         self.nodes.remove_all_but(self.root);
+        self.controls.clear();
         let root = self.get_mut(self.root);
         root.first_child = None;
         root.last_child = None;
@@ -318,6 +326,8 @@ pub enum MutationError {
     Hierarchy,
     /// A tag or attribute name that is not a name.
     InvalidName,
+    /// A value or checkedness for an element that has none.
+    NotAControl,
 }
 
 /// Whether `name` is a name an element or attribute may have: XML's Name,
