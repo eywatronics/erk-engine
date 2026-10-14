@@ -595,16 +595,18 @@ ErkStatus erk_node_value(ErkApp *app, ErkNodeId node_id, char *buf, size_t cap, 
 ErkStatus erk_node_set_value(ErkApp *app, ErkNodeId node_id, ErkStr value);
 
 /*
- Whether element `node`, a checkbox or radio button, is checked: `*out`
- is 1 or 0. `ERK_ERR_NOT_FOUND` for any other element.
+ Whether element `node`, a checkbox or radio button, is checked, or an
+ `option` selected: `*out` is 1 or 0. `ERK_ERR_NOT_FOUND` for any other
+ element.
  */
 ErkStatus erk_node_checked(ErkApp *app, ErkNodeId node_id, uint32_t *out);
 
 /*
  Check (`checked` 1) or uncheck (0) element `node`, a checkbox or radio
- button; a radio button checked unchecks the others of its group (same
- `name`, same form). `ERK_ERR_INVALID_ARGUMENT` for any other element
- or another `checked`.
+ button, or select or unselect an `option`; a radio button checked
+ unchecks the others of its group (same `name`, same form), an option
+ selected in a single-choice list the other options.
+ `ERK_ERR_INVALID_ARGUMENT` for any other element or another `checked`.
  */
 ErkStatus erk_node_set_checked(ErkApp *app, ErkNodeId node_id, uint32_t checked);
 
