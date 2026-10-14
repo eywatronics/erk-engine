@@ -233,6 +233,28 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   `tab-size`. Chrome referans sayfası (stillenmiş alanlar) ve altın görüntü
   (varsayılan görünüm).
 
+Dört PR:
+
+1. **Metin alanının çizimi.** UA stil sayfasında `input` ve `textarea`
+   (satır içi blok, kenarlık, dolgu, yazı tipi; `input` tek satır `pre`,
+   `textarea` `pre-wrap`). Değer alanın içinde metin olarak çiziliyor,
+   DOM'a düğüm eklenmeden. Değer değişikliği günlükte, yalnızca o alan
+   yeniden şekilleniyor; kâhin aynı. Taşan satır kırpılıyor, taban çizgisi
+   metninki. Altın görüntü (varsayılan görünüm); Chrome referans sayfası
+   referanslar Chrome 155'le yeniden yakalanınca.
+2. **Düzenleme ve imleç.** Odaktaki alanda imleç; yazılan karakter, Geri
+   Silme, Delete, oklar, Home, End (`ERK_KEY_*` büyür). Düzenleme tuşun
+   varsayılan işi: `keydown` iptal edilirse yapılmaz; düzenleme `input`
+   olayı, odak kaybında değer değiştiyse `change`. İmleç host'un saatiyle
+   yanıp sönüyor (B6); imleç görünür kalacak kadar kaydırma. `placeholder`.
+3. **Seçim ve pano.** Fareyle ve Shift+okla seçim, seçimin boyanması,
+   Ctrl+A/C/X/V. Pano karar 5'teki gibi: C-ABI'de ve ekransız kipte host'un
+   geri çağrısı, pencere kipinde platform panosu (bağımlılık kararı bu
+   PR'da, lisans denetimiyle).
+4. **IME ve imlecin dikdörtgeni.** Ön düzenleme ve onay girdi türleri,
+   altı çizili kompozisyon, imlecin dikdörtgeni; Türkçe ve CJK girişi;
+   `break-spaces`, `tab-size`; `size`, `cols`, `rows`.
+
 ### M5.9: Davranışı olan elemanlar
 
 - [ ] Üst katman (top layer): `<dialog>`'un, `popover`'ın ve M5.10'daki
@@ -698,3 +720,17 @@ kullanılıyor: iç kapların çubukları içeriğin içinde.
 | Testler | `erk-dom`: metin alanı, `textarea` (host'un yazdığı `\r` dahil), `select` (`optgroup`, devre dışı, çoklu), seçeneğin seçililiği, radyo grubu (ad ve form), değeri olmayan eleman, silinen ve değiştirilen belge. `erk`: Rust API ve olay doğmaması; motor: onay kutusunun değeri yeniden stilliyor (kâhinle); C-ABI testi. Fuzz yorumlayıcısı değer ve işaretlilik yazıyor, okuyor, yeni olay türlerine abone oluyor; form kontrollü bir sayfası var |
 | Mutasyonlar | 30 mutasyondan 29'u yakalandı. İlk turda kaçan yedisi için test eklendi: ayrıştırıcının zaten düzelttiği `\r\n` (host'un yazdığı metinle), aynı değerdeki bütün seçeneklerin seçilmesi (seçililik `checked` ile okunur oldu; plan bunu "seçili seçenek" diye istiyordu), başka addaki radyo, işaret kaldırmanın grubu etkilemesi, metin alanının işaretlenebilmesi, `set_value`'nun günlüğe yazmaması ve kare istememesi. Sağ çıkan: tek seçimli listede seçilen seçeneğin ötekileri bırakması. Gösterim kuralı (son işaretli) aynı sonucu veriyor ve sonraki yazma eski işareti düşürüyor; fark yalnızca seçenek silinince görünürdü, o da bilinen eksikte |
 
+### M5.8
+
+İlk PR: metin alanının çizimi.
+
+| Konu | Not |
+|---|---|
+| Önce | `input` ve `textarea` için UA kuralı yoktu: satır içi, boş elemanlardı; değerleri hiçbir yerde çizilmiyordu |
+| Model | Yerleşim kutusunu kurarken (`Builder::build`) bir metin alanı çocuklarının yerine değerini tek bir metin parçası olarak alıyor (`InlineToken::Text`'in düğümü artık isteğe bağlı: düğümsüz metin bloğunun rengiyle boyanıyor, isabeti bloğun). DOM'a düğüm eklenmiyor: host'un gördüğü ağaç aynı. Şifre değeri karakter sayısı kadar nokta. Alan satır içi yazılsa da atomik (`display: inline`) |
+| Günlük | `State`'e yazılmış değer (`Document::value_set`) girdi, `Changes::values` onun farkı. Türetilmiş değer değil: `textarea`'nın türetilmiş değeri metniyle değişiyor, metin zaten kendi değişikliği. Değer değişikliği yalnızca boyama değil; alan sığ dokunuşla yeniden kuruluyor. `value` ve `type` öznitelikleri yerleşim öznitelikleri |
+| UA | HTML'in "Rendering" bölümünden: satır içi blok; görünüm Erk'in (karar 4): 13,333 px sans-serif, 1 px gri kenarlık, beyaz zemin, `width: 20ch`; `input` `pre` ve `overflow: hidden`, `textarea` `pre-wrap`, `overflow: auto`, `2.8em` yükseklik. Metin dışı `input` türleri dışarıda (M5.10) |
+| Taban çizgisi | CSS 2 §10.8.1 taşmayı kırpan satır içi bloğu alt kenarına oturtuyor; tarayıcılar alanı metninin taban çizgisine oturtuyor. Yerleşim kutusunda `field` bayrağı, `measure_atoms` alanda taşmaya bakmıyor |
+| Ölçüm | Bir alana değer yazmak yalnızca iki alanı şekillendiriyor (`shaped` 2); alanı tutan paragraf yalnızca yeniden ölçülüyor |
+| Chrome referansı | Kurulu Chrome 155, referanslar 154'le yakalanmış; yakalama komutu sürüm karıştırmıyor. Referanslar ayrı bir PR'da 155'le yeniden yakalanacak, alanların referans sayfası onunla |
+| Mutasyonlar | 17'den 16'sı yakalandı. İlk turda kaçan üçünden ikisi için test eklendi (onay kutusu metin alanı değil; alanın metnine işaret alanı buluyor), biri ölü koddu ve silindi (boş alana sıfır genişlikli boşluk: boş paragraf da bir satır tutuyor). Sağ çıkan: düğümsüz metni belgede olmayan bir düğüme atfetmek; o düğüm hiçbir aramada çıkmıyor, gözlemlenemez. Gerçekçi hata, metni alanın kendisine atfetmek, isabet testinde yakalanıyor |

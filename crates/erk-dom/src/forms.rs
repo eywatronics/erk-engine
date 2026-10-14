@@ -163,6 +163,17 @@ impl Document {
         Ok(())
     }
 
+    /// The value set on `id`, an `input` or a `textarea`, if one was: what
+    /// replaced the markup's default. A change journal compares it; the
+    /// value itself, which follows a `textarea`'s text until set, is
+    /// [`Document::value`].
+    pub fn value_set(&self, id: NodeId) -> Option<&str> {
+        match self.controls.get(&id) {
+            Some(Control::Value(value)) => Some(value),
+            _ => None,
+        }
+    }
+
     /// Forget the state of `id`, a node that is gone.
     pub(crate) fn forget_control(&mut self, id: NodeId) {
         self.controls.remove(&id);

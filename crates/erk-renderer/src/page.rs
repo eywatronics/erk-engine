@@ -108,8 +108,10 @@ struct KeptLayout {
 }
 
 /// The attributes layout reads besides those styles see: an image's
-/// source, and the language that picks fonts and case mapping.
-const LAYOUT_ATTRIBUTES: [&str; 2] = ["src", "lang"];
+/// source, the language that picks fonts and case mapping, and what a
+/// text field shows: its value until one is set, and its type (a
+/// password's bullets).
+const LAYOUT_ATTRIBUTES: [&str; 4] = ["src", "lang", "value", "type"];
 
 /// Whether an element with `style` puts a decoration (a background or a
 /// border) in its paragraph: an inline element that paints one.
@@ -129,6 +131,7 @@ fn only_repaints(old: &Styles, new: &Styles, changes: &Changes) -> bool {
     !changes.everything
         && changes.children.is_empty()
         && changes.text.is_empty()
+        && changes.values.is_empty()
         && changes.attrs.iter().all(|change| {
             !change
                 .names
@@ -452,6 +455,8 @@ impl Page {
             .deep
             .extend(changes.attrs.iter().map(|change| change.node));
         touched.shallow.extend(&changes.children);
+        // A text field shows its value.
+        touched.shallow.extend(&changes.values);
         touched.shallow.extend(
             changes
                 .text
