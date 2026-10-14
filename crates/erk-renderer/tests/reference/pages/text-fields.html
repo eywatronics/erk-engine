@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Metin alanları</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .form { margin: 20px; padding: 16px; width: 420px; border: 2px solid #cbd5e1; }
+  .satir { margin-bottom: 12px; }
+  input, textarea {
+    appearance: none; margin: 0; font-family: "Noto Sans"; font-size: 15px; color: #1f2933;
+    background: #ffffff; border: 1px solid #94a3b8; padding: 4px 8px; line-height: 22px;
+  }
+  input { width: 220px; height: 22px; }
+  textarea { display: block; width: 300px; height: 66px; resize: none; overflow: hidden; }
+  .sifre { border-color: #f59e0b; background: #fffbeb; }
+  .uzun { width: 160px; }
+  .buyuk { font-size: 20px; line-height: 28px; height: 28px; padding: 6px 12px; border: 2px solid #2563eb; background: #eff6ff; }
+</style>
+</head>
+<body>
+  <div class="form">
+    <div class="satir">Ad: <input value="Ayşe Yılmaz"> zorunlu</div>
+    <div class="satir">Şifre: <input class="sifre" type="password" value="gizli123"></div>
+    <div class="satir">Uzun: <input class="uzun" value="bu değer alana sığmayacak kadar uzun"></div>
+    <div class="satir">Boş: <input> sonra</div>
+    <div class="satir"><textarea>Çok satırlı metin alanı: uzun bir satır kendi içinde sarılır.
+İkinci satır.</textarea></div>
+    <div class="satir">Arama: <input class="buyuk" value="İstanbul"></div>
+  </div>
+</body>
+</html>
