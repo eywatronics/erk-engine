@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 8;
+pub const ERK_ABI_VERSION: u32 = 9;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -1163,6 +1163,88 @@ pub extern "C" fn erk_node_attr(
     })
 }
 
+/// Element `node`'s value as DOM's `value` reads it: what was set, or else
+/// what the markup says (an `input`'s `value` attribute, a `textarea`'s
+/// text, a `select`'s selected option), into the caller's buffer as
+/// `erk_node_attr` does. `ERK_ERR_NOT_FOUND` for an element that has no
+/// value.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_value(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    buf: *mut c_char,
+    cap: usize,
+    len: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let value = app
+            .cx()
+            .value(node(node_id)?)
+            .abi()?
+            .ok_or(ERK_ERR_NOT_FOUND)?;
+        put_text(&value, buf, cap, len)
+    })
+}
+
+/// Set element `node`'s value as DOM's `value` does: a `select` selects
+/// its first option with that value. No `ERK_EVENT_INPUT` follows: those
+/// are the user's. `ERK_ERR_INVALID_ARGUMENT` for an element that has no
+/// value.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_set_value(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    value: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().set_value(node(node_id)?, &text(value)?).abi()
+    })
+}
+
+/// Whether element `node`, a checkbox or radio button, is checked, or an
+/// `option` selected: `*out` is 1 or 0. `ERK_ERR_NOT_FOUND` for any other
+/// element.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_checked(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    out: *mut u32,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let checked = app
+            .cx()
+            .checked(node(node_id)?)
+            .abi()?
+            .ok_or(ERK_ERR_NOT_FOUND)?;
+        put(out, u32::from(checked))
+    })
+}
+
+/// Check (`checked` 1) or uncheck (0) element `node`, a checkbox or radio
+/// button, or select or unselect an `option`; a radio button checked
+/// unchecks the others of its group (same `name`, same form), an option
+/// selected in a single-choice list the other options.
+/// `ERK_ERR_INVALID_ARGUMENT` for any other element or another `checked`.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_set_checked(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    checked: u32,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let checked = match checked {
+            0 => false,
+            1 => true,
+            _ => return Err(ERK_ERR_INVALID_ARGUMENT),
+        };
+        app.cx().set_checked(node(node_id)?, checked).abi()
+    })
+}
+
 /// Set property `name` of element `node`'s inline style to `value`, as
 /// CSSOM's `element.style.setProperty` does: a shorthand sets its
 /// longhands, `--name` is a custom property, an empty value removes the
@@ -1419,11 +1501,13 @@ fn modifier_bits(modifiers: Modifiers) -> u32 {
 fn kind_of(kind: u32) -> Result<EventKind, ErkStatus> {
     match kind {
         ERK_EVENT_CLICK => Ok(EventKind::Click),
+        ERK_EVENT_INPUT => Ok(EventKind::Input),
+        ERK_EVENT_CHANGE => Ok(EventKind::Change),
+        ERK_EVENT_SUBMIT => Ok(EventKind::Submit),
         ERK_EVENT_KEY_DOWN => Ok(EventKind::KeyDown),
         ERK_EVENT_KEY_UP => Ok(EventKind::KeyUp),
         ERK_EVENT_FOCUS => Ok(EventKind::Focus),
         ERK_EVENT_BLUR => Ok(EventKind::Blur),
-        // Input, change and submit come with forms (M5).
         _ => Err(ERK_ERR_INVALID_ARGUMENT),
     }
 }

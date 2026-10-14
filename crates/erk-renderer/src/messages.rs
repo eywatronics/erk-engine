@@ -190,6 +190,15 @@ pub struct Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     Click = 1,
+    /// The user changed a control's value (a text field typed in, a box
+    /// checked); not when the host sets it. Comes with the controls
+    /// (M5.8, M5.10).
+    Input = 2,
+    /// The user committed a change to a control's value.
+    Change = 3,
+    /// A form is about to be submitted; preventing its default keeps it
+    /// (M5.10).
+    Submit = 4,
     /// A key went down, at the focused element or the body.
     KeyDown = 5,
     /// A key came up.

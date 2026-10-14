@@ -77,6 +77,8 @@ const PAGES: &[&str] = &[
     "<ul id=a><li class=a>bir<li>iki</ul><button>b</button>",
     "<div style='overflow: scroll; height: 30px'><p>1</p><p>2</p><p>3</p></div>",
     "<template><p>t</p></template><a href=#>x</a>",
+    "<form><input type=radio name=r checked><input type=radio name=r></form>\
+     <select><option>a<option value=b>b</select><textarea>t</textarea><input value=v>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of
@@ -184,6 +186,9 @@ const KINDS: &[EventKind] = &[
     EventKind::KeyUp,
     EventKind::Focus,
     EventKind::Blur,
+    EventKind::Input,
+    EventKind::Change,
+    EventKind::Submit,
 ];
 
 /// What a callback does to the document while the event is on its way.
@@ -275,7 +280,7 @@ pub fn run(app: &mut App, script: &[u8]) {
             }
             8 => {
                 let node = state.node(&mut bytes);
-                match bytes.below(5) {
+                match bytes.below(7) {
                     0 | 1 => {
                         let class = bytes.pick(VALUES);
                         let _ = if bytes.byte().is_multiple_of(2) {
@@ -291,8 +296,15 @@ pub fn run(app: &mut App, script: &[u8]) {
                     3 => {
                         let _ = app.remove_style_property(node, bytes.pick(PROPERTIES));
                     }
-                    _ => {
+                    4 => {
                         let _ = app.style_property(node, bytes.pick(PROPERTIES));
+                    }
+                    // What a form control holds (M5.7).
+                    5 => {
+                        let _ = app.set_value(node, bytes.pick(VALUES));
+                    }
+                    _ => {
+                        let _ = app.set_checked(node, bytes.byte().is_multiple_of(2));
                     }
                 }
             }
@@ -368,6 +380,7 @@ pub fn run(app: &mut App, script: &[u8]) {
                 // And what a host reads back.
                 let node = state.node(&mut bytes);
                 let _ = (app.text(node), app.node_box(node), app.parent(node));
+                let _ = (app.value(node), app.checked(node));
             }
         }
     }

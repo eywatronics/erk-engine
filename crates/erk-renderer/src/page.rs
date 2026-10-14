@@ -1394,6 +1394,37 @@ impl Page {
             .map(str::to_owned))
     }
 
+    /// Element `node`'s value (DOM's `value`); `None` for an element that
+    /// has none.
+    pub(crate) fn value(&self, node: u64) -> Result<Option<String>, Status> {
+        let node = self.node(node)?;
+        self.doc.value(node).map_err(|_| Status::StaleNode)
+    }
+
+    /// Set element `node`'s value as DOM's `value` does. A checkbox's, a
+    /// radio button's or an option's is its `value` attribute, which
+    /// selectors see; the others are not painted yet (M5.8, M5.10).
+    pub(crate) fn set_value(&mut self, node: u64, value: &str) -> Result<(), Status> {
+        let node = self.node(node)?;
+        self.journal.touch(&self.doc, node);
+        self.doc.set_value(node, value).map_err(status)
+    }
+
+    /// Whether element `node`, a checkbox or radio button, is checked, or
+    /// an option selected; `None` for any other element.
+    pub(crate) fn checked(&self, node: u64) -> Result<Option<bool>, Status> {
+        let node = self.node(node)?;
+        self.doc.checked(node).map_err(|_| Status::StaleNode)
+    }
+
+    /// Check or uncheck element `node`, a checkbox or radio button, or
+    /// select an option; a radio button checked unchecks its group. Not
+    /// painted yet: `:checked` comes with the controls (M5.10).
+    pub(crate) fn set_checked(&mut self, node: u64, checked: bool) -> Result<(), Status> {
+        let node = self.node(node)?;
+        self.doc.set_checked(node, checked).map_err(status)
+    }
+
     /// Set property `name` of element `node`'s inline style to `value`, as
     /// CSSOM's `style.setProperty` does: the `style` attribute is rewritten
     /// with it, an empty value removes it. `InvalidArgument` for a name
@@ -1447,9 +1478,9 @@ impl Page {
 fn status(error: erk_dom::MutationError) -> Status {
     match error {
         erk_dom::MutationError::Stale => Status::StaleNode,
-        erk_dom::MutationError::Hierarchy | erk_dom::MutationError::InvalidName => {
-            Status::InvalidArgument
-        }
+        erk_dom::MutationError::Hierarchy
+        | erk_dom::MutationError::InvalidName
+        | erk_dom::MutationError::NotAControl => Status::InvalidArgument,
     }
 }
 
