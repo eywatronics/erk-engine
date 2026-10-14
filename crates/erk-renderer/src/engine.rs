@@ -1207,6 +1207,26 @@ mod tests {
     }
 
     #[test]
+    fn a_page_with_only_focus_visible_rules_shows_the_keyboards_focus() {
+        // No `:focus` rule: the focus still matters to how the page looks.
+        let mut engine = verifying(
+            "<style>:focus-visible { color: rgb(255, 0, 0) }</style><button id=b>b</button>",
+        );
+        let b = engine.query(None, "#b").unwrap().unwrap();
+        let tab = KeyInput {
+            key: crate::messages::Key::Tab,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        engine.key(&tab);
+        engine.key_default(&tab);
+        assert!(engine.prepare().0.is_some(), "the focus shows: a frame");
+        assert_eq!(engine.verify(), Ok(()));
+        let style = engine.computed_style(b).unwrap().unwrap();
+        assert!(style.contains("color: rgb(255, 0, 0)"), "{style}");
+    }
+
+    #[test]
     fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
         // Nothing in the paragraph's box changes, and Taffy does not lay it
         // out again; but its rounded width follows where it lands, and a

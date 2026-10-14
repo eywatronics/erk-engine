@@ -239,6 +239,7 @@ fn a_node_that_is_not_in_the_document_puts_no_element_in_a_state() {
         hover: stale(doc),
         active: stale(doc),
         focus: stale(doc),
+        focus_visible: true,
     });
     for tag in ["section", "article", "p", "aside"] {
         assert_eq!(rgb(&computed(&doc, &styles, tag)), [0.0, 0.0, 0.0], "{tag}");
@@ -274,6 +275,7 @@ fn styles_say_which_states_their_selectors_depend_on() {
         hover: p,
         active: p,
         focus: p,
+        focus_visible: true,
     };
     assert!(
         !styles.react_to(&none, &all),

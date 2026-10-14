@@ -47,6 +47,9 @@ pub(crate) struct Page {
     pressed: Option<NodeId>,
     /// The element that has the keyboard focus.
     focus: Option<NodeId>,
+    /// Whether the focused element shows it (`:focus-visible`): the
+    /// keyboard moved the focus there, or it takes typing.
+    focus_visible: bool,
     /// The node the developer tools highlight.
     highlight: Option<NodeId>,
     /// The last frame's viewport, in CSS pixels.
@@ -249,6 +252,7 @@ impl Page {
             hover: None,
             pressed: None,
             focus: None,
+            focus_visible: false,
             highlight: None,
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
@@ -765,6 +769,7 @@ impl Page {
             hover: self.hover,
             active: self.pressed,
             focus: self.focus,
+            focus_visible: self.focus_visible,
         }
     }
 
@@ -872,7 +877,7 @@ impl Page {
                         .into_iter()
                         .find(|node| self.focusable(*node))
                 });
-                self.move_focus(focus, input.modifiers)
+                self.move_focus(focus, input.modifiers, false)
             }
             (PointerKind::Up, PointerButton::Primary) => {
                 let (Some(down), Some(up)) = (self.pressed.take(), target) else {
@@ -957,7 +962,7 @@ impl Page {
                         }
                     }
                 };
-                self.move_focus(Some(order[next]), input.modifiers)
+                self.move_focus(Some(order[next]), input.modifiers, true)
             }
             (Key::Enter, KeyState::Down) | (Key::Space, KeyState::Up) => {
                 let Some(node) = focused else {
@@ -982,11 +987,20 @@ impl Page {
     }
 
     /// Move the focus to `focus`: a blur event for the element that had it,
-    /// then a focus event for the one that has it.
-    fn move_focus(&mut self, focus: Option<NodeId>, modifiers: Modifiers) -> Vec<Event> {
+    /// then a focus event for the one that has it. It shows the focus
+    /// (`:focus-visible`) when the keyboard moved it, or when it takes
+    /// typing, as browsers do (Selectors 4 §9.4); focus that stays where it
+    /// is keeps showing or not.
+    fn move_focus(
+        &mut self,
+        focus: Option<NodeId>,
+        modifiers: Modifiers,
+        by_keyboard: bool,
+    ) -> Vec<Event> {
         if focus == self.focus {
             return Vec::new();
         }
+        self.focus_visible = focus.is_some_and(|node| by_keyboard || self.takes_typing(node));
         let mut events = Vec::new();
         if let Some(old) = self
             .focus
@@ -1021,6 +1035,27 @@ impl Page {
             y,
             modifiers,
             key: None,
+        }
+    }
+
+    /// Whether `node` takes typed text: a `textarea`, or an `input` whose
+    /// type is a text field's.
+    fn takes_typing(&self, node: NodeId) -> bool {
+        let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
+            return false;
+        };
+        match &element.name.local {
+            name if *name == local_name!("textarea") => true,
+            name if *name == local_name!("input") => {
+                element.attr(&local_name!("type")).is_none_or(|kind| {
+                    [
+                        "text", "search", "url", "tel", "email", "password", "number",
+                    ]
+                    .iter()
+                    .any(|text| kind.eq_ignore_ascii_case(text))
+                })
+            }
+            _ => false,
         }
     }
 
@@ -2077,6 +2112,70 @@ mod tests {
             partial > steps / 2,
             "{partial} of {steps} frames painted in part"
         );
+    }
+
+    #[test]
+    fn the_keyboard_shows_the_focus_and_a_press_does_not() {
+        // `:focus-visible` when the keyboard moved the focus, or the element
+        // takes typing; `:focus` whichever moved it.
+        let mut page = Page::parse(
+            "<style>:focus { background: rgb(0, 0, 255) } :focus-visible { color: rgb(255, 0, 0) }</style>\
+             <body style='margin: 0'><button id=b style='display: block; height: 20px'>b</button>\
+             <input id=i style='display: block; height: 20px'>",
+        );
+        let mut resources = Resources::default();
+        let mut frame = |page: &mut Page| {
+            page.prepare(200, 100, 1.0, &mut resources, &mut |_| {});
+        };
+        frame(&mut page);
+        let (b, i) = (
+            page.query(None, "#b").unwrap().unwrap(),
+            page.query(None, "#i").unwrap().unwrap(),
+        );
+        let shown = |page: &Page, node: NodeId| {
+            let style = page.styles.computed(node).unwrap();
+            (
+                crate::color::srgb_bytes(style.clone_color()) == [255, 0, 0, 255],
+                crate::color::srgb_bytes(
+                    style.resolve_color(&style.get_background().background_color),
+                ) == [0, 0, 255, 255],
+            )
+        };
+        let tab = KeyInput {
+            key: Key::Tab,
+            state: KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        let press = |page: &mut Page, node: NodeId| {
+            let model = page.node_box(node.to_bits()).unwrap().unwrap();
+            page.pointer(&PointerInput {
+                kind: PointerKind::Down,
+                x: model.x + 2.0,
+                y: model.y + 2.0,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+            page.pointer(&PointerInput {
+                kind: PointerKind::Up,
+                x: model.x + 2.0,
+                y: model.y + 2.0,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+        };
+        page.key_default(&tab);
+        frame(&mut page);
+        assert_eq!(shown(&page, b), (true, true), "Tab to the button");
+        press(&mut page, i);
+        frame(&mut page);
+        assert_eq!(shown(&page, i), (true, true), "a press on a text field");
+        assert_eq!(shown(&page, b), (false, false));
+        press(&mut page, b);
+        frame(&mut page);
+        assert_eq!(shown(&page, b), (false, true), "a press on the button");
+        page.key_default(&tab);
+        frame(&mut page);
+        assert_eq!(shown(&page, i), (true, true), "Tab again");
     }
 
     #[test]
