@@ -240,8 +240,8 @@ Dört PR:
    `textarea` `pre-wrap`). Değer alanın içinde metin olarak çiziliyor,
    DOM'a düğüm eklenmeden. Değer değişikliği günlükte, yalnızca o alan
    yeniden şekilleniyor; kâhin aynı. Taşan satır kırpılıyor, taban çizgisi
-   metninki. Altın görüntü (varsayılan görünüm); Chrome referans sayfası
-   referanslar Chrome 155'le yeniden yakalanınca.
+   metninki. Altın görüntü (varsayılan görünüm) ve Chrome referans
+   sayfası (stillenmiş alanlar).
 2. **Düzenleme ve imleç.** Odaktaki alanda imleç; yazılan karakter, Geri
    Silme, Delete, oklar, Home, End (`ERK_KEY_*` büyür). Düzenleme tuşun
    varsayılan işi: `keydown` iptal edilirse yapılmaz; düzenleme `input`
@@ -732,5 +732,6 @@ kullanılıyor: iç kapların çubukları içeriğin içinde.
 | UA | HTML'in "Rendering" bölümünden: satır içi blok; görünüm Erk'in (karar 4): 13,333 px sans-serif, 1 px gri kenarlık, beyaz zemin, `width: 20ch`; `input` `pre` ve `overflow: hidden`, `textarea` `pre-wrap`, `overflow: auto`, `2.8em` yükseklik. Metin dışı `input` türleri dışarıda (M5.10) |
 | Taban çizgisi | CSS 2 §10.8.1 taşmayı kırpan satır içi bloğu alt kenarına oturtuyor; tarayıcılar alanı metninin taban çizgisine oturtuyor. Yerleşim kutusunda `field` bayrağı, `measure_atoms` alanda taşmaya bakmıyor |
 | Ölçüm | Bir alana değer yazmak yalnızca iki alanı şekillendiriyor (`shaped` 2); alanı tutan paragraf yalnızca yeniden ölçülüyor |
-| Chrome referansı | Kurulu Chrome 155, referanslar 154'le yakalanmış; yakalama komutu sürüm karıştırmıyor. Referanslar ayrı bir PR'da 155'le yeniden yakalanacak, alanların referans sayfası onunla |
-| Mutasyonlar | 17'den 16'sı yakalandı. İlk turda kaçan üçünden ikisi için test eklendi (onay kutusu metin alanı değil; alanın metnine işaret alanı buluyor), biri ölü koddu ve silindi (boş alana sıfır genişlikli boşluk: boş paragraf da bir satır tutuyor). Sağ çıkan: düğümsüz metni belgede olmayan bir düğüme atfetmek; o düğüm hiçbir aramada çıkmıyor, gözlemlenemez. Gerçekçi hata, metni alanın kendisine atfetmek, isabet testinde yakalanıyor |
+| Chrome referansı | Kurulu Chrome 155, referanslar 154'le yakalanmıştı; yakalama komutu sürüm karıştırmıyor. Bütün sayfalar 155'le yeniden yakalandı: her görüntü, kutu ve metin dikdörtgeni bayt bayt aynı, yalnızca sürüm değişti. `text-fields` sayfası (`appearance: none`, CSS'le stillenmiş alanlar): 14 kutunun 14'ü, 7 satırın 7'si Chrome'la 1 piksel içinde; içerik skoru %86,67, fark alanların içindeki gliflerin kenarı (Chrome düzenlenebilir metni başka yumuşatıyor; konumlar aynı) |
+| Kırpma | Tarayıcılar tek satırlı alanın metnini içerik kutusunda kırpıyor: dolgu boş kalıyor. Kaydırma kapsamının alanı tek satırlı alanda içerik kutusu (`scroll.rs`); `textarea` dolgu kutusunda, kaydırılan bir kap gibi. Skor %86,54'ten %86,67'ye |
+| Mutasyonlar | 18'den 17'si yakalandı (kırpmanın dolgu kutusuna dönmesi altın görüntüde ve referans skorunda). İlk turda kaçan üçünden ikisi için test eklendi (onay kutusu metin alanı değil; alanın metnine işaret alanı buluyor), biri ölü koddu ve silindi (boş alana sıfır genişlikli boşluk: boş paragraf da bir satır tutuyor). Sağ çıkan: düğümsüz metni belgede olmayan bir düğüme atfetmek; o düğüm hiçbir aramada çıkmıyor, gözlemlenemez. Gerçekçi hata, metni alanın kendisine atfetmek, isabet testinde yakalanıyor |

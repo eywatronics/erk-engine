@@ -1568,7 +1568,7 @@ fn replaced_size(
 
 /// A text field: what it shows is its value, not its children.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TextField {
+pub(crate) enum TextField {
     /// An `input` whose value is one line of text.
     Line,
     /// An `input type=password`: its value hidden behind bullets.
@@ -1592,7 +1592,7 @@ impl TextField {
 /// Whether element `id` is a text field, and which: a `textarea`, or an
 /// `input` that takes a line of text (not a checkbox, a button or the
 /// like, which come with the other controls, M5.10).
-fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
+pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
     let element = doc.node(id)?.as_element()?;
     if element.name.ns != erk_dom::ns!(html) {
         return None;
