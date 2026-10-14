@@ -1163,6 +1163,50 @@ mod tests {
     }
 
     #[test]
+    fn a_page_that_grows_to_scroll_under_the_pointer_shows_its_scroll_bar() {
+        // The page grows long enough to scroll in the frame the pointer
+        // moves over it: that frame shows the document's scroll bar.
+        let mut engine = verifying("<p id=p style='margin: 0'>kısa</p>");
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        engine.set_style_property(p, "height", "1000px").unwrap();
+        engine.pointer(&PointerInput {
+            kind: PointerKind::Move,
+            x: 10.0,
+            y: 10.0,
+            button: PointerButton::None,
+            modifiers: Modifiers::default(),
+        });
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let thumb = prepared.unwrap().list.items.into_iter().any(|item| {
+            matches!(item, crate::list::DisplayItem::RoundedRect { color, .. } if color == [0, 0, 0, 102])
+        });
+        assert!(thumb, "no scroll bar");
+    }
+
+    #[test]
+    fn the_pointer_moving_into_a_scroll_container_shows_its_scroll_bar() {
+        // Nothing but the pointer changes: the last frame's list would do,
+        // but the container's own scroll bar is in it.
+        let mut engine = verifying(
+            "<div style='height: 50px; overflow: auto'><p style='height: 500px'>uzun</p></div>",
+        );
+        engine.pointer(&PointerInput {
+            kind: PointerKind::Move,
+            x: 10.0,
+            y: 20.0,
+            button: PointerButton::None,
+            modifiers: Modifiers::default(),
+        });
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let thumb = prepared.unwrap().list.items.into_iter().any(|item| {
+            matches!(item, crate::list::DisplayItem::RoundedRect { color, .. } if color == [0, 0, 0, 102])
+        });
+        assert!(thumb, "no scroll bar");
+    }
+
+    #[test]
     fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
         // Nothing in the paragraph's box changes, and Taffy does not lay it
         // out again; but its rounded width follows where it lands, and a

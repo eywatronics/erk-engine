@@ -575,7 +575,6 @@ impl Page {
             layouts
         });
         mark(Stage::Layout);
-        let bars = self.bars(self.hover);
         // Only what may show in the viewport.
         let view = Rect {
             x: 0.0,
@@ -590,31 +589,36 @@ impl Page {
             .map(|(node, offset)| (*node, *offset))
             .collect();
         let document = self.offsets.get(&doc.root()).copied().unwrap_or_default();
-        // The last frame's boxes, if only the document scrolled; its list
-        // too, inside its band.
-        let kept_list = last_list
-            .filter(|kept| kept.inner == inner && kept.bars == bars)
-            .map(|mut kept| {
+        // The last frame's boxes, if only the document scrolled.
+        let (scrolling, extents, kept_content) = match last_list.filter(|kept| kept.inner == inner)
+        {
+            Some(mut kept) => {
                 kept.scrolling.scroll_document(document);
-                kept
-            });
-        let (scrolling, extents, content, listed) = match kept_list {
-            Some(kept)
-                if kept.content.band
-                    == Some(crate::display::band(view, kept.scrolling.document_offset())) =>
-            {
-                (kept.scrolling, kept.extents, kept.content, false)
+                (
+                    kept.scrolling,
+                    kept.extents,
+                    Some((kept.content, kept.bars)),
+                )
             }
-            kept => {
-                let (scrolling, extents) = match kept {
-                    Some(kept) => (kept.scrolling, kept.extents),
-                    None => {
-                        let scrolling =
-                            Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
-                        let extents = Extents::new(doc, &styles, &layouts, &scrolling);
-                        (scrolling, extents)
-                    }
-                };
+            None => {
+                let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+                let extents = Extents::new(doc, &styles, &layouts, &scrolling);
+                (scrolling, extents, None)
+            }
+        };
+        // The scroll bars of this frame's scroll containers: a document that
+        // has just grown long enough to scroll shows its own.
+        let bars = self.bars_in(&scrolling, self.hover);
+        // The last frame's list too, inside its band, with the same bars.
+        let (content, listed) = match kept_content {
+            Some((content, kept_bars))
+                if kept_bars == bars
+                    && content.band
+                        == Some(crate::display::band(view, scrolling.document_offset())) =>
+            {
+                (content, false)
+            }
+            _ => {
                 let cull = Cull {
                     view,
                     extents: bounded.then_some(&extents),
@@ -628,7 +632,7 @@ impl Page {
                     &bars,
                     Some(cull),
                 );
-                (scrolling, extents, content, true)
+                (content, true)
             }
         };
         let mut list = content.scrolled(&scrolling, &bars);
@@ -693,19 +697,33 @@ impl Page {
             || self.bars(before.hover) != self.bars(self.hover)
     }
 
-    /// The scroll containers whose scroll bars show while the pointer is
-    /// over `hover`: those it is in, the document's among them.
+    /// The last frame's scroll containers whose scroll bars show while the
+    /// pointer is over `hover`: those it is in, the document's among them.
     fn bars(&self, hover: Option<NodeId>) -> Vec<NodeId> {
+        self.over(hover, self.scrollers.iter().map(|scroller| scroller.node))
+    }
+
+    /// Like [`Page::bars`], for the scroll containers of `scrolling`, the
+    /// frame being made.
+    fn bars_in(&self, scrolling: &Scrolling, hover: Option<NodeId>) -> Vec<NodeId> {
+        self.over(
+            hover,
+            scrolling
+                .scopes
+                .iter()
+                .filter(|scope| scope.user && (scope.max.0 > 0.0 || scope.max.1 > 0.0))
+                .map(|scope| scope.node),
+        )
+    }
+
+    /// Those of `scrollers` that `hover` is in.
+    fn over(&self, hover: Option<NodeId>, scrollers: impl Iterator<Item = NodeId>) -> Vec<NodeId> {
         let Some(hover) = hover else {
             return Vec::new();
         };
         let mut path = self.element_path(hover);
         path.push(self.doc.root());
-        self.scrollers
-            .iter()
-            .map(|scroller| scroller.node)
-            .filter(|node| path.contains(node))
-            .collect()
+        scrollers.filter(|node| path.contains(node)).collect()
     }
 
     /// The wheel turned by `dx`, `dy` CSS pixels (positive: towards the

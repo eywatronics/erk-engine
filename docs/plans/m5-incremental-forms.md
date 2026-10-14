@@ -288,6 +288,20 @@ Erk'in hedefi az bellek; 2026-10-12'nin ölçümü bunu tutmuyor. Kabulden
   ön tahsisi küçültülmüş (sayı ölçümden sonra).
 - [ ] Sciter ve Slint gibi hafif motorlarla karşılaştırma aynı sayfalarla ve
   aynı yöntemle ölçülür; ölçülmemiş sayı yayımlanmaz.
+
+Dışarıdan gelen öneriler (2026-10-13), Erk'in koduna ve kurallarına göre
+değerlendirildi; tahmini kazançları ölçülmeden alınmadı:
+
+| Öncelik | Öneri | Değerlendirme |
+|---|---|---|
+| P0 | Önce ölçüm: `dhat` ile yığın profili, aşama aşama sayaç | **Alındı.** `dhat` (MIT/Apache) yalnızca ölçüm aracında, bir özelliğin arkasında; çekirdeğin bağımlılığı olmaz. Aşama sayacı C-ABI'nin bellek testindeki sayaçlı ayırıcıyla: ayrıştırma, stil, yerleşim, metin, liste ve raster sonrasında canlı bayt (B16) |
+| P1 | Paragraf düzeninin iki kopyası | **Alındı, mekanizması düzeltilerek.** Parley'nin satırları kendi glif dizisinin dilimleri; kopya Erk'te: `ShapeCache` paragrafın kırılmamış düzenini, `ShapedText` kırılmış kopyasını ayrı tutuyor (M5.4 ikinci PR). Tek kopyaya inmenin yolu (kırılmış düzeni önbellekte tutmak ya da önbelleği sonuçla paylaşmak) ölçümden sonra seçilir |
+| P1 | Stylo'nun stil paylaşımı | **Alındı, denetim olarak.** Aynı stilli 10 bin kart aynı `Arc<ComputedValues>`'u paylaşmalı; restyler'ın yolunda Stylo'nun paylaşım önbelleğinin çalıştığı, karede farklı `Arc` sayısıyla ölçülür |
+| P2 | DOM: çocuk `Vec`'i yerine kardeş bağları | **Zaten öyle.** `erk-dom` ilk günden `first_child` / `next_sibling` / `last_child` bağlarıyla (M0) |
+| P2 | DOM: öznitelikler için `SmallVec` ve interning | **Ölçüme bağlı.** Adlar zaten atom (`QualName`); değerler `String`. 30 bin elemanda birkaç MB beklenir; restyler'ın yuvalarında okunan özniteliklerin ikinci kopyası da ölçülür |
+| P3 | GPU: Vello'nun compute tamponları | **Düzeltilerek alındı.** Erk vello_hybrid kullanıyor (şeritler CPU'da, ince raster GPU'da); klasik Vello'nun compute ve bump tamponları yok. 344 MB'ın kaynağı ölçülür: wgpu cihazı ve sürücünün yığınları, swapchain görüntüleri, görüntü ve glif atlası; arka uç seçimi (Vulkan, DX12) de |
+| P4 | Fontlar için `memmap2` | **Bu hâliyle reddedildi.** Çekirdek G/Ç yapmaz, yazı tipleri host'tan gelir; `Mmap::map` `unsafe` ister ve `unsafe` yalnızca iki listelenmiş crate'te; eşlenen dosya altından değişirse tanımsız davranış. Yerine: gömülü fontların (ikilide, paylaşımlı sayfalar) ve host'un yüklediği yüzlerin payı ölçülür, yalnızca gereken yüzler yüklenir. Eşleme ancak `docs/design/` altında bir kararla |
+| — | Display list için `bumpalo` arenası | **Reddedildi.** Display list raster'a taşınan düz, sahipli veri (proje kuralı, `list.rs`: ödünç ve `Box` yok); arenaya bağlı ömürler bu sınırı bozar. Liste artık kareler arasında tutuluyor ve görünür öğelerle sınırlı (M5.6) |
 - [ ] Muhafız: bellek bütçesi CI'da (ikili boyut bütçesi gibi): B16'nın
   kalıcı belleği `.github/memory-budget.txt`'teki tavanın altında,
   yükseltme `# raised:` gerekçesi ister. Bütçeyle aynı PR'da gelir.

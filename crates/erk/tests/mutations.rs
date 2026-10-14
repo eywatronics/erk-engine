@@ -36,6 +36,12 @@ const FOUND: &[&[u8]] = &[
         54, 54, 0, 0, 115, 116, 33, 43, 136, 136, 136, 136, 136, 218, 3, 0, 203, 136, 136, 136,
         218, 54, 67, 204, 3,
     ],
+    // A page loaded and grown long enough to scroll in the frame the
+    // pointer moved over it: its scroll bar was left out, the bars taken
+    // from the last frame's scroll containers (found by the CI fuzz job).
+    &[
+        249, 43, 10, 248, 247, 64, 167, 59, 10, 246, 241, 10, 10, 10, 43, 10, 10, 10, 63, 182,
+    ],
 ];
 
 fn app() -> App {
