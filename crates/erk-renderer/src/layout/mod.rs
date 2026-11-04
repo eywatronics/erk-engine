@@ -1578,15 +1578,39 @@ pub(crate) enum TextField {
 }
 
 impl TextField {
-    /// The text the field shows: its value, a password's as bullets. An
-    /// empty one still holds a line, as an empty paragraph does.
+    /// The text the field shows: its value, a password's as bullets, or
+    /// while it is empty its placeholder. An empty one still holds a line,
+    /// as an empty paragraph does.
     fn shown(self, doc: &Document, id: NodeId) -> String {
+        if let Some(placeholder) = placeholder(doc, id) {
+            return placeholder;
+        }
         let value = doc.value(id).ok().flatten().unwrap_or_default();
         match self {
             TextField::Password => "\u{2022}".repeat(value.chars().count()),
             TextField::Line | TextField::Area => value,
         }
     }
+}
+
+/// The placeholder text field `id` shows while its value is empty: its
+/// `placeholder` attribute, an input's without line breaks (HTML §4.10.5.3.10).
+pub(crate) fn placeholder(doc: &Document, id: NodeId) -> Option<String> {
+    let field = text_field(doc, id)?;
+    if !doc.value(id).ok()??.is_empty() {
+        return None;
+    }
+    let text = doc
+        .node(id)?
+        .as_element()?
+        .attr(&erk_dom::local_name!("placeholder"))?;
+    let text: String = match field {
+        TextField::Area => text.to_owned(),
+        TextField::Line | TextField::Password => {
+            text.chars().filter(|c| !matches!(c, '\r' | '\n')).collect()
+        }
+    };
+    (!text.is_empty()).then_some(text)
 }
 
 /// Whether element `id` is a text field, and which: a `textarea`, or an

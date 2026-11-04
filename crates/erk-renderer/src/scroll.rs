@@ -310,10 +310,7 @@ impl Walk<'_> {
                 .any(|overflow| matches!(overflow, Overflow::Auto | Overflow::Scroll));
             // A one-line text field keeps its text inside its content box,
             // as browsers draw it: the padding stays clear.
-            let line_field = !matches!(
-                crate::layout::text_field(self.doc, id),
-                None | Some(crate::layout::TextField::Area)
-            );
+            let line_field = line_field(self.doc, id);
             let inset = |side: f32, padding: f32| side + if line_field { padding } else { 0.0 };
             let (left, right) = (
                 inset(layout.border.left, layout.padding.left),
@@ -364,7 +361,10 @@ impl Walk<'_> {
             let left = x + layout.border.left + layout.padding.left;
             let top = y + layout.border.top + layout.padding.top;
             let text = &shaped.layout;
-            self.reach(inner, left + text.width(), top + text.height);
+            // A one-line field's caret at its end is a pixel past its text:
+            // it scrolls that far, as browsers let it.
+            let caret = if line_field(self.doc, id) { 1.0 } else { 0.0 };
+            self.reach(inner, left + text.width() + caret, top + text.height);
         }
         for anonymous in self.layouts.anonymous(id) {
             let (left, top) = (
@@ -437,4 +437,13 @@ fn contains(doc: &Document, ancestor: NodeId, node: NodeId) -> bool {
         current = doc.node(id).and_then(|found| found.parent());
     }
     false
+}
+
+/// Whether element `id` is a one-line text field: an input, not a
+/// textarea.
+fn line_field(doc: &Document, id: NodeId) -> bool {
+    !matches!(
+        crate::layout::text_field(doc, id),
+        None | Some(crate::layout::TextField::Area)
+    )
 }
