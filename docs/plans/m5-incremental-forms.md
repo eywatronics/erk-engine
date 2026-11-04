@@ -333,6 +333,31 @@ değerlendirildi; tahmini kazançları ölçülmeden alınmadı:
   kalıcı belleği `.github/memory-budget.txt`'teki tavanın altında,
   yükseltme `# raised:` gerekçesi ister. Bütçeyle aynı PR'da gelir.
 
+#### Sciter ve Slint Düzeyinde Hafiflik İçin Mimari Yol Haritası (2026-11-04)
+
+> [!NOTE]
+> **Uygulama ve Değerlendirme Notu:** Buradaki maddeler birer araştırma önerisi ve hipotezdir; DX12 backend'inin hemen değiştirilmesi gerekmez. 344 MB'lık farkın ne kadarının sürücüden, ne kadarının wgpu havuzlarından veya iç tamponlardan geldiği M5.13'ün ilk adımı olan bellek profilinde (`dhat` / B16) ölçülmeden kesin kabul edilmemelidir. Geliştirmeyi yapacak yapay zekâ / mühendis, önce ölçüm verilerini toplamalı, performansı (kare hızını) veya CSS uyumluluğunu riske atmadan kendi kararını vermelidir.
+
+GPU açıkken ortaya çıkan 344 MB özel bellek (CPU RAM) ve 10 bin düğümlü sayfadaki 472 MB tüketimin Sciter (~10–15 MB) ve Slint (~15–25 MB) seviyelerine çekilebilmesi için belirlenen çözüm önerileri:
+
+1. **Grafik ve Sürücü Katmanı:**
+   - **Önce Profil ve Ölçüm:** 344 MB'ın sürücü, wgpu ve iç render verileri arasındaki gerçek dağılımı ölçülmeli. DX12'nin hemen terk edilmesi yerine, aynı donanımda DX12 ve Vulkan (`wgpu::Backends::VULKAN`) profilleri karşılaştırılmalı; ardından Linux Mesa altında ölçüm alınmalıdır.
+   - **wgpu Limitleri:** `DeviceDescriptor::default()` yerine 2D motoruna özel sıkılaştırılmış `wgpu::Limits` (ör. `downlevel_webgl2_defaults` veya özel kısıtlar) denenmeli; descriptor heap ve staging havuzlarının etkisi incelenmelidir.
+   - **CPU Rasterizer Önceliği:** Halihazırda 23,7 MB özel bellekle çalışan `vello_cpu` modu, masaüstü arayüzler için SIMD ve döşeme hasar takibiyle Slint benzeri ultra-hafif birincil seçenek olarak değerlendirilebilir.
+
+2. **CPU Fallback Temizliği ve Bellek Ayırıcısı (Allocator):**
+   - Soğuk başlangıçta CPU rasterizer'ın ayırdığı `cpu_frame` pikselleri ve döşemeleri GPU devreye girince bırakılsa da (`self.cpu_frame = None`), Windows varsayılan bellek ayırıcısı bu sayfaları işletim sistemine decommit etmez.
+   - GPU devraldığında agresif bellek iadesi yapılmalı; `mimalloc` veya `snmalloc` gibi decommit davranışı güçlü ayırıcıların kalıcı belleğe etkisi B16 ile ölçülmelidir.
+
+3. **Stylo ve CSS Paylaşımı (Stil Katmanı):**
+   - 10 bin kartlık stres sayfasında aynı stillere sahip elemanların `Arc<ComputedValues>`'u paylaşması (`StyleSharingCache` etkinliği) doğrulanmalı; eleman başına stil yükü asgariye indirilmelidir.
+
+4. **Metin ve Paragraf Tekilleştirmesi:**
+   - `ShapeCache` (kırılmamış saf düzen) ile `ShapedText` (kırılmış sonuç) arasındaki çift kopya tekilleştirilerek dilim (`slice`) modeline geçilmelidir.
+
+5. **DOM Düğüm Boyutu ve String Interning:**
+   - Düğümlerdeki öznitelik dizgileri atom/interning havuzuna alınmalı; eleman başına 15 KB maliyet hedeflenen 3–4 KB bandına çekilmelidir.
+
 ### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
