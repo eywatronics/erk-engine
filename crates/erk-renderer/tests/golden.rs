@@ -67,6 +67,16 @@ fn merhaba() {
     check_golden("merhaba", &repo_root().join("examples/merhaba.html"));
 }
 
+/// The text fields' look before a page restyles them (M5.8, the M5 plan's
+/// decision 4): Erk's own, not Chrome's, so held by this image.
+#[test]
+fn text_fields() {
+    check_golden(
+        "text-fields",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/text-fields.html"),
+    );
+}
+
 #[test]
 fn rendering_is_deterministic() {
     let html = std::fs::read_to_string(repo_root().join("examples/merhaba.html")).unwrap();

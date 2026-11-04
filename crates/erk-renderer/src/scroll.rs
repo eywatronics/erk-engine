@@ -308,11 +308,26 @@ impl Walk<'_> {
             let user = [style.clone_overflow_x(), style.clone_overflow_y()]
                 .iter()
                 .any(|overflow| matches!(overflow, Overflow::Auto | Overflow::Scroll));
+            // A one-line text field keeps its text inside its content box,
+            // as browsers draw it: the padding stays clear.
+            let line_field = !matches!(
+                crate::layout::text_field(self.doc, id),
+                None | Some(crate::layout::TextField::Area)
+            );
+            let inset = |side: f32, padding: f32| side + if line_field { padding } else { 0.0 };
+            let (left, right) = (
+                inset(layout.border.left, layout.padding.left),
+                inset(layout.border.right, layout.padding.right),
+            );
+            let (top, bottom) = (
+                inset(layout.border.top, layout.padding.top),
+                inset(layout.border.bottom, layout.padding.bottom),
+            );
             let area = Frame {
-                x: x + layout.border.left,
-                y: y + layout.border.top,
-                width: (layout.size.width - layout.border.left - layout.border.right).max(0.0),
-                height: (layout.size.height - layout.border.top - layout.border.bottom).max(0.0),
+                x: x + left,
+                y: y + top,
+                width: (layout.size.width - left - right).max(0.0),
+                height: (layout.size.height - top - bottom).max(0.0),
             };
             let border_box = Frame {
                 x,

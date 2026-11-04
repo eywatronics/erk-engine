@@ -598,6 +598,9 @@ struct LayoutNode {
     block_level: bool,
     /// The CSS `order` of a flex or grid item.
     order: i32,
+    /// Whether the box is a text field's: its baseline is its text's, even
+    /// where it clips what overflows (M5.8, as browsers lay fields out).
+    field: bool,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -973,6 +976,23 @@ impl<'a> Builder<'a> {
             }
         }
         let parent_style = styles.computed(parent);
+        // A text field shows its value as its one line or paragraph, in
+        // place of what it holds in the document (M5.8).
+        if let (Some(field), Some(computed)) = (text_field(doc, parent), &parent_style) {
+            let shown = field.shown(doc, parent);
+            let tokens = [InlineToken::Text(
+                shown,
+                computed.clone(),
+                text_language(doc, parent),
+                None,
+            )];
+            let paragraph = Paragraph::new(&tokens, computed);
+            let node = &mut self.nodes[parent_index];
+            node.field = true;
+            node.shape_key = Some(shape_key(parent, &paragraph));
+            node.paragraph = Some(paragraph);
+            return Vec::new();
+        }
         let contains = parent_style
             .as_ref()
             .is_some_and(|style| contains_out_of_flow(style));
@@ -1000,7 +1020,7 @@ impl<'a> Builder<'a> {
                                 text.clone(),
                                 style.clone(),
                                 text_language(doc, parent),
-                                child,
+                                Some(child),
                             )],
                             Vec::new(),
                         ));
@@ -1016,7 +1036,8 @@ impl<'a> Builder<'a> {
                         out_of_flow.push((child, computed, container));
                         entries.push(Entry::OutOfFlow(child));
                     } else if is_atomic_inline(&computed)
-                        || (is_replaced(doc, child) && is_inline_level(&computed))
+                        || ((is_replaced(doc, child) || text_field(doc, child).is_some())
+                            && is_inline_level(&computed))
                     {
                         entries.push(Entry::Inline(
                             vec![InlineToken::Atom(child.index() as usize, computed.clone())],
@@ -1545,6 +1566,55 @@ fn replaced_size(
     }
 }
 
+/// A text field: what it shows is its value, not its children.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextField {
+    /// An `input` whose value is one line of text.
+    Line,
+    /// An `input type=password`: its value hidden behind bullets.
+    Password,
+    /// A `textarea`.
+    Area,
+}
+
+impl TextField {
+    /// The text the field shows: its value, a password's as bullets. An
+    /// empty one still holds a line, as an empty paragraph does.
+    fn shown(self, doc: &Document, id: NodeId) -> String {
+        let value = doc.value(id).ok().flatten().unwrap_or_default();
+        match self {
+            TextField::Password => "\u{2022}".repeat(value.chars().count()),
+            TextField::Line | TextField::Area => value,
+        }
+    }
+}
+
+/// Whether element `id` is a text field, and which: a `textarea`, or an
+/// `input` that takes a line of text (not a checkbox, a button or the
+/// like, which come with the other controls, M5.10).
+pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
+    let element = doc.node(id)?.as_element()?;
+    if element.name.ns != erk_dom::ns!(html) {
+        return None;
+    }
+    match element.name.local {
+        erk_dom::local_name!("textarea") => Some(TextField::Area),
+        erk_dom::local_name!("input") => match element
+            .attr(&erk_dom::local_name!("type"))
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("password") => Some(TextField::Password),
+            Some(
+                "checkbox" | "radio" | "hidden" | "submit" | "reset" | "button" | "image" | "file"
+                | "range" | "color",
+            ) => None,
+            _ => Some(TextField::Line),
+        },
+        _ => None,
+    }
+}
+
 /// Whether element `id` is a replaced element Erk lays out: `<img>`.
 fn is_replaced(doc: &Document, id: NodeId) -> bool {
     doc.node(id)
@@ -1689,7 +1759,7 @@ fn inline_tokens(
                     content.clone(),
                     style.clone(),
                     text_language(doc, id),
-                    child,
+                    Some(child),
                 ));
             }
             Some(NodeData::Element(_)) => {
@@ -1697,7 +1767,10 @@ fn inline_tokens(
                     if is_out_of_flow(&child_style) {
                         tokens.push(InlineToken::Anchor(child.index() as usize));
                         out_of_flow.push((child, child_style, container));
-                    } else if is_atomic_inline(&child_style) || is_replaced(doc, child) {
+                    } else if is_atomic_inline(&child_style)
+                        || is_replaced(doc, child)
+                        || text_field(doc, child).is_some()
+                    {
                         tokens.push(InlineToken::Atom(
                             child.index() as usize,
                             child_style.clone(),
@@ -1906,8 +1979,9 @@ impl<'t> LayoutTree<'t> {
             // An inline-block's baseline is its last line's; one without
             // lines, or that clips its content, sits on its bottom margin
             // edge (CSS 2 §10.8.1).
-            let visible =
-                style.overflow.x == Overflow::Visible && style.overflow.y == Overflow::Visible;
+            let visible = (style.overflow.x == Overflow::Visible
+                && style.overflow.y == Overflow::Visible)
+                || self.nodes[atom].field;
             let baseline = visible
                 .then(|| output.baselines.last.or(output.baselines.first))
                 .flatten();

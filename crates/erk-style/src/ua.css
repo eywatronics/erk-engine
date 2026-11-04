@@ -155,6 +155,46 @@ dir, menu, ol, ul {
   padding-inline-start: 40px;
 }
 
+/* 15.5.15, 15.5.16 Text fields (M5.8): inline-block boxes that show their
+ * value, one line for an input, wrapped for a textarea. The look is Erk's
+ * own (M5 plan, decision 4); the page restyles it. Other kinds of input
+ * come with the other controls (M5.10). */
+input:not([type=checkbox i], [type=radio i], [type=hidden i], [type=submit i],
+    [type=reset i], [type=button i], [type=image i], [type=file i],
+    [type=range i], [type=color i]),
+textarea {
+  display: inline-block;
+  font-family: sans-serif;
+  font-size: 13.333px;
+  color: black;
+  background-color: white;
+  border: 1px solid rgb(118, 118, 118);
+  cursor: text;
+}
+
+input:not([type=checkbox i], [type=radio i], [type=hidden i], [type=submit i],
+    [type=reset i], [type=button i], [type=image i], [type=file i],
+    [type=range i], [type=color i]) {
+  padding: 1px 2px;
+  width: 20ch;
+  white-space: pre;
+  overflow: hidden;
+}
+
+textarea {
+  padding: 2px;
+  width: 20ch;
+  height: 2.8em;
+  font-family: monospace;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: auto;
+}
+
+input[type=hidden i] {
+  display: none;
+}
+
 /* 15.3.2 The page */
 body {
   margin: 8px;

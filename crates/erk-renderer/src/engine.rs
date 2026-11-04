@@ -1277,6 +1277,160 @@ mod tests {
         );
     }
 
+    /// The text the frame paints, run by run.
+    fn painted_text(prepared: &Prepared) -> String {
+        prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) => Some(run.text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_text_field_shows_its_value_and_a_value_set_is_laid_out_again() {
+        let mut engine = verifying(
+            "<p>ad <input id=t value=eski> son</p><textarea id=a>bir iki</textarea>\
+             <input id=s type=password value=gizli><input type=checkbox value=evet>",
+        );
+        let (t, a, s) = (
+            engine.query(None, "#t").unwrap().unwrap(),
+            engine.query(None, "#a").unwrap().unwrap(),
+            engine.query(None, "#s").unwrap().unwrap(),
+        );
+        engine.set_value(t, "yeni").unwrap();
+        engine.set_value(a, "üç").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("yeni") && !text.contains("eski"), "{text}");
+        assert!(text.contains("üç") && !text.contains("bir"), "{text}");
+        // A password shows as many bullets as it has characters.
+        assert!(text.contains("•••••") && !text.contains("gizli"), "{text}");
+        // A checkbox is no text field: its value is not shown.
+        assert!(!text.contains("evet"), "{text}");
+        // Only the two fields are shaped again: the paragraph around the
+        // input keeps its text, only measured again with the field.
+        assert_eq!(engine.stats().shaped, 2, "{:?}", engine.stats());
+        engine.set_value(s, "").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        // A field made a password hides what it shows.
+        engine.set_attr(t, "type", "password").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("••••") && !text.contains("yeni"), "{text}");
+    }
+
+    #[test]
+    fn what_a_field_shows_is_the_field_to_a_pointer() {
+        // Its text is no node's: a point on it finds the field.
+        let engine = verifying(
+            "<body style='margin: 0'><input id=t value=metin style='font: 20px sans-serif; border: 0; padding: 0'>",
+        );
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        assert_eq!(engine.inspect_at(10.0, 10.0), Some(t));
+    }
+
+    #[test]
+    fn a_field_paints_its_value_in_its_own_colour() {
+        // Not in the colour of the element around it.
+        let mut engine = verifying(
+            "<p style='color: rgb(0, 0, 0)'><input id=t value=eski style='color: rgb(255, 0, 0)'></p>",
+        );
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        engine.set_value(t, "kırmızı").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let colours: Vec<[u8; 4]> = prepared
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) => Some(run.color),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(colours, [[255, 0, 0, 255]]);
+    }
+
+    #[test]
+    fn a_fields_value_keeps_its_spaces_whatever_its_white_space() {
+        // `white-space: normal` wraps a textarea's value but keeps its
+        // spaces and line breaks (WPT textarea-always-preserves-spaces).
+        let style = "style='white-space: normal; width: 300px; height: auto'";
+        let mut engine = verifying(&format!(
+            "<textarea id=a {style}>eski</textarea><textarea id=b {style}>bir</textarea>"
+        ));
+        let (a, b) = (
+            engine.query(None, "#a").unwrap().unwrap(),
+            engine.query(None, "#b").unwrap().unwrap(),
+        );
+        engine.set_value(a, "a    b\nc").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("a    b"), "{text:?}");
+        // Two lines: twice as tall as the one-line field beside it.
+        let height = |id| engine.node_box(id).unwrap().unwrap().height;
+        assert!(height(a) > 1.5 * height(b), "{} {}", height(a), height(b));
+    }
+
+    #[test]
+    fn a_text_field_laid_out_inline_still_shows_its_value() {
+        // What it shows is not its children's: an inline field is atomic.
+        let mut engine = verifying(
+            "<p>a <input id=t value=değer style='display: inline'> b <span><input value=iç style='display: inline'></span></p>",
+        );
+        let (prepared, _) = engine.prepare();
+        assert!(prepared.is_none(), "nothing changed since the first frame");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        engine.set_value(t, "yeni").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("yeni") && text.contains("iç"), "{text}");
+    }
+
+    #[test]
+    fn a_fields_value_attribute_shows_until_a_value_is_set() {
+        let mut engine = verifying("<input id=t value=bir>");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        engine.set_attr(t, "value", "iki").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(painted_text(&prepared.unwrap()).contains("iki"));
+        engine.set_value(t, "üç").unwrap();
+        assert!(engine.prepare().0.is_some());
+        engine.set_attr(t, "value", "dört").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(text.contains("üç") && !text.contains("dört"), "{text}");
+    }
+
+    #[test]
+    fn a_text_field_sits_on_the_line_of_the_text_around_it() {
+        // Its text's baseline is the line's, though it clips what overflows.
+        let engine = verifying(
+            "<p id=p style='font: 16px sans-serif; margin: 0'>ad <input id=t value=x style='font: 16px sans-serif; border: 0; padding: 0'></p>",
+        );
+        let p = engine.query(None, "#p").unwrap().unwrap();
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        let (line, field) = (
+            engine.node_box(p).unwrap().unwrap(),
+            engine.node_box(t).unwrap().unwrap(),
+        );
+        // One line: the field's box is the line's height, at its top.
+        assert!((field.y - line.y).abs() < 1.0, "{field:?} in {line:?}");
+        assert!(field.height <= line.height + 0.5, "{field:?} in {line:?}");
+    }
+
     #[test]
     fn a_paragraph_moved_by_a_fraction_of_a_pixel_is_measured_again() {
         // Nothing in the paragraph's box changes, and Taffy does not lay it
