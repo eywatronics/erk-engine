@@ -54,6 +54,9 @@ pub(crate) struct Page {
     highlight: Option<NodeId>,
     /// The focused text field's caret: a byte offset in its value (M5.8).
     caret: Option<(NodeId, usize)>,
+    /// Where the focused field's selection starts: the caret is its other
+    /// end, and with nothing selected the two are one.
+    anchor: usize,
     /// The focused text field's value when it took the focus, and whether
     /// the user has edited it since: leaving it changed is a `change`.
     focus_value: Option<(String, bool)>,
@@ -275,6 +278,7 @@ impl Page {
             focus_visible: false,
             highlight: None,
             caret: None,
+            anchor: 0,
             focus_value: None,
             edited: false,
             now: 0,
@@ -676,6 +680,8 @@ impl Page {
         };
         let mut list = content.scrolled(&scrolling, &bars);
         list.items
+            .extend(self.selection_items(&layouts, &scrolling));
+        list.items
             .extend(self.caret_item(&layouts, &scrolling, &styles));
         let hits = hits(&list.items);
         if let Some(node) = self.highlight {
@@ -896,6 +902,18 @@ impl Page {
     /// as browsers do when the pointer moves between the two).
     pub(crate) fn pointer(&mut self, input: &PointerInput) -> Vec<Event> {
         let target = self.hit_test(input.x, input.y);
+        // A drag that started in the focused text field selects in it.
+        if input.kind == PointerKind::Move
+            && let Some((field, _)) = self.caret
+            && self.pressed == Some(field)
+            && let Some(at) = self.caret_at_point(field, (input.x, input.y))
+            && self.caret != Some((field, at))
+        {
+            self.caret = Some((field, at));
+            self.caret_since = self.now;
+            self.reveal_caret = true;
+            self.edited = true;
+        }
         self.hover = match input.kind {
             PointerKind::Leave => None,
             _ => target,
@@ -919,6 +937,12 @@ impl Page {
                 if let Some(field) = focus
                     && let Some(at) = self.caret_at_point(field, (input.x, input.y))
                 {
+                    // Shift extends the selection to the press, as it
+                    // extends it to where an arrow moves.
+                    let extends = input.modifiers.shift && events.is_empty();
+                    if !extends {
+                        self.anchor = at;
+                    }
                     self.caret = Some((field, at));
                     self.caret_since = self.now;
                     self.reveal_caret = true;
@@ -1081,6 +1105,7 @@ impl Page {
             .filter(|node| crate::layout::text_field(&self.doc, *node).is_some())
             .and_then(|node| Some((node, self.doc.value(node).ok()??)));
         self.caret = value.as_ref().map(|(node, value)| (*node, value.len()));
+        self.anchor = value.as_ref().map_or(0, |(_, value)| value.len());
         self.focus_value = value.map(|(_, value)| (value, false));
         self.edited = true;
         self.caret_since = self.now;
@@ -1102,17 +1127,36 @@ impl Page {
             .filter(|(node, _)| *node == field)
             .map_or(value.len(), |(_, at)| at);
         let at = floor_boundary(&value, at.min(value.len()));
+        let anchor = floor_boundary(&value, self.anchor.min(value.len()));
+        let (low, high) = (anchor.min(at), anchor.max(at));
+        let selected = low < high;
         let lines = kind == crate::layout::TextField::Area;
         let (start, end) = line_around(&value, at, lines);
-        let inserted = |typed: &str| {
+        // What is typed takes the selection's place.
+        let replaced = |typed: &str| {
             let mut edited = value.clone();
-            edited.insert_str(at, typed);
-            (edited, at + typed.len())
+            edited.replace_range(low..high, typed);
+            (edited, low + typed.len())
         };
+        // Control (not AltGr, which is Control and Alt on Windows) or Meta
+        // with a key is a command, not typing.
+        let command = (input.modifiers.control && !input.modifiers.alt) || input.modifiers.meta;
+        let shift = input.modifiers.shift;
         let (new_value, caret) = match &input.key {
-            Key::Character(typed) => inserted(typed),
-            Key::Space => inserted(" "),
-            Key::Enter if lines => inserted("\n"),
+            Key::Character(typed) if command => {
+                if typed.eq_ignore_ascii_case("a") {
+                    // Select all: the caret at the end, the anchor at the start.
+                    self.anchor = 0;
+                    self.caret = Some((field, value.len()));
+                    self.edited = true;
+                    return Some(Vec::new());
+                }
+                return None;
+            }
+            Key::Character(typed) => replaced(typed),
+            Key::Space => replaced(" "),
+            Key::Enter if lines => replaced("\n"),
+            Key::Backspace | Key::Delete if selected => replaced(""),
             Key::Backspace => {
                 let from = previous_grapheme(&value, at);
                 let mut edited = value.clone();
@@ -1125,6 +1169,9 @@ impl Page {
                 edited.replace_range(at..to, "");
                 (edited, at)
             }
+            // Without Shift an arrow across a selection goes to its edge.
+            Key::ArrowLeft if selected && !shift => (value.clone(), low),
+            Key::ArrowRight if selected && !shift => (value.clone(), high),
             Key::ArrowLeft => (value.clone(), previous_grapheme(&value, at)),
             Key::ArrowRight => (value.clone(), next_grapheme(&value, at)),
             Key::Home => (value.clone(), start),
@@ -1141,6 +1188,10 @@ impl Page {
         self.caret_since = self.now;
         self.reveal_caret = true;
         if new_value == value {
+            // Moved: with Shift the selection grows from its anchor.
+            if !shift {
+                self.anchor = caret;
+            }
             self.caret = Some((field, caret));
             return Some(Vec::new());
         }
@@ -1148,7 +1199,9 @@ impl Page {
         self.doc.set_typed_value(field, &new_value).ok()?;
         // An input's line breaks are dropped: the caret stays in the value.
         let typed = self.doc.value(field).ok()??;
-        self.caret = Some((field, floor_boundary(&typed, caret.min(typed.len()))));
+        let caret = floor_boundary(&typed, caret.min(typed.len()));
+        self.caret = Some((field, caret));
+        self.anchor = caret;
         if let Some((_, edited)) = self.focus_value.as_mut() {
             *edited = true;
         }
@@ -1158,6 +1211,75 @@ impl Page {
             (0.0, 0.0),
             input.modifiers,
         )])
+    }
+
+    /// The focused field's selection, painted over its text: a translucent
+    /// rectangle for each line it covers, kept inside the field's content
+    /// box.
+    fn selection_items(
+        &self,
+        layouts: &layout::Layouts,
+        scrolling: &Scrolling,
+    ) -> Vec<DisplayItem> {
+        let Some((field, at)) = self.caret else {
+            return Vec::new();
+        };
+        let (Some(kind), Some(value)) = (
+            crate::layout::text_field(&self.doc, field),
+            self.doc.value(field).ok().flatten(),
+        ) else {
+            return Vec::new();
+        };
+        let shown = |at: usize| {
+            let at = floor_boundary(&value, at.min(value.len()));
+            match kind {
+                crate::layout::TextField::Password => {
+                    value[..at].chars().count() * '\u{2022}'.len_utf8()
+                }
+                crate::layout::TextField::Line | crate::layout::TextField::Area => at,
+            }
+        };
+        let (anchor, focus) = (shown(self.anchor), shown(at));
+        if anchor == focus {
+            return Vec::new();
+        }
+        let (Some(text), Some(origin), Some(field_box)) = (
+            layouts.text(field),
+            text_origin(layouts, scrolling, field),
+            box_model(layouts, scrolling, field),
+        ) else {
+            return Vec::new();
+        };
+        let layout = &text.layout.layout;
+        let cursor = |index| {
+            parley::layout::Cursor::from_byte_index(
+                layout,
+                index,
+                parley::layout::Affinity::Downstream,
+            )
+        };
+        // The content box, in the viewport.
+        let left = field_box.x + field_box.border[3] + field_box.padding[3];
+        let top = field_box.y + field_box.border[0] + field_box.padding[0];
+        let right = field_box.x + field_box.width - field_box.border[1] - field_box.padding[1];
+        let bottom = field_box.y + field_box.height - field_box.border[2] - field_box.padding[2];
+        parley::layout::Selection::new(cursor(anchor), cursor(focus))
+            .geometry(layout)
+            .into_iter()
+            .filter_map(|(rect, _)| {
+                let x0 = (origin.0 + rect.x0 as f32).max(left);
+                let y0 = (origin.1 + rect.y0 as f32).max(top);
+                let x1 = (origin.0 + rect.x1 as f32).min(right);
+                let y1 = (origin.1 + rect.y1 as f32).min(bottom);
+                (x0 < x1 && y0 < y1).then_some(DisplayItem::Rect {
+                    x: x0,
+                    y: y0,
+                    width: x1 - x0,
+                    height: y1 - y0,
+                    color: SELECTION,
+                })
+            })
+            .collect()
     }
 
     /// Where in text field `field`'s value a press at `point` puts the
@@ -2034,6 +2156,10 @@ fn text_origin(
         y + layout.border.top + layout.padding.top,
     ))
 }
+
+/// The colour a field's selection is painted over its text with: a
+/// translucent blue, Erk's own (no `::selection` yet).
+const SELECTION: crate::color::Rgba = [0, 120, 215, 90];
 
 /// How long a caret shows, then hides, in nanoseconds: half a second, as
 /// browsers blink it on most systems.

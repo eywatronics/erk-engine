@@ -1889,6 +1889,215 @@ mod tests {
         assert_eq!(runs(&prepared.unwrap())[0].0, "Soyadınız");
     }
 
+    fn press_with(engine: &mut Engine, key: crate::messages::Key, modifiers: Modifiers) {
+        for state in [
+            crate::messages::KeyState::Down,
+            crate::messages::KeyState::Up,
+        ] {
+            let input = KeyInput {
+                key: key.clone(),
+                state,
+                modifiers,
+            };
+            engine.key(&input);
+            engine.key_default(&input);
+        }
+    }
+
+    const SHIFT: Modifiers = Modifiers {
+        shift: true,
+        control: false,
+        alt: false,
+        meta: false,
+    };
+    const CONTROL: Modifiers = Modifiers {
+        shift: false,
+        control: true,
+        alt: false,
+        meta: false,
+    };
+
+    /// The selection the frame paints: its rectangles, in the selection's
+    /// colour.
+    fn selection(prepared: &Prepared) -> Vec<(f32, f32, f32, f32)> {
+        prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color: [0, 120, 215, 90],
+                } => Some((*x, *y, *width, *height)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shift_and_an_arrow_select_and_what_is_typed_replaces_the_selection() {
+        use crate::messages::Key;
+        let mut engine = verifying("<input id=t value=abcdef><button>b</button>");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        // Two characters back from the end, selected.
+        press_with(&mut engine, Key::ArrowLeft, SHIFT);
+        press_with(&mut engine, Key::ArrowLeft, SHIFT);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(selection(&prepared.unwrap()).len(), 1, "one line selected");
+        type_text(&mut engine, "X");
+        assert_eq!(engine.value(t), Ok(Some("abcdX".to_owned())));
+        // Home with Shift selects back to the start; without Shift an arrow
+        // goes to the selection's edge.
+        press_with(&mut engine, Key::Home, SHIFT);
+        press(&mut engine, Key::ArrowRight);
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(t), Ok(Some("abcdX!".to_owned())));
+        press_with(&mut engine, Key::Home, SHIFT);
+        press(&mut engine, Key::ArrowLeft);
+        type_text(&mut engine, "<");
+        assert_eq!(engine.value(t), Ok(Some("<abcdX!".to_owned())));
+        // Selected forward, from the start: the left arrow goes back to the
+        // selection's start, not one step back from its end.
+        press(&mut engine, Key::Home);
+        press_with(&mut engine, Key::ArrowRight, SHIFT);
+        press_with(&mut engine, Key::ArrowRight, SHIFT);
+        press(&mut engine, Key::ArrowLeft);
+        type_text(&mut engine, "|");
+        assert_eq!(engine.value(t), Ok(Some("|<abcdX!".to_owned())));
+        // Nothing selected after typing: no selection painted.
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(selection(&prepared.unwrap()).is_empty());
+    }
+
+    #[test]
+    fn control_a_selects_all_and_control_with_a_letter_types_nothing() {
+        use crate::messages::Key;
+        let mut engine = verifying("<input id=t value=abc><button>b</button>");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        press_with(&mut engine, Key::Character("b".to_owned()), CONTROL);
+        assert_eq!(
+            engine.value(t),
+            Ok(Some("abc".to_owned())),
+            "a command, not typing"
+        );
+        press_with(&mut engine, Key::Character("a".to_owned()), CONTROL);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(selection(&prepared.unwrap()).len(), 1);
+        press(&mut engine, Key::Backspace);
+        assert_eq!(engine.value(t), Ok(Some(String::new())));
+        // A selection that runs past a scrolled field's edges is painted
+        // inside the field.
+        let mut wide = verifying(
+            "<body style='margin: 0'><input id=n value='bu değer dar alana hiç sığmayacak kadar uzun' \
+             style='font: 16px sans-serif; border: 0; padding: 0; width: 60px'><button>b</button>",
+        );
+        press(&mut wide, Key::Tab);
+        press_with(&mut wide, Key::Character("a".to_owned()), CONTROL);
+        let (prepared, _) = wide.prepare();
+        assert_eq!(wide.verify(), Ok(()));
+        let painted = selection(&prepared.unwrap());
+        assert_eq!(painted.len(), 1);
+        let (x, _, width, _) = painted[0];
+        assert!(
+            x >= 0.0 && x + width <= 60.5,
+            "{painted:?} inside the 60 px field"
+        );
+        // AltGr, Control and Alt on Windows, types: @ on a Turkish keyboard.
+        let altgr = Modifiers {
+            shift: false,
+            control: true,
+            alt: true,
+            meta: false,
+        };
+        press_with(&mut engine, Key::Character("@".to_owned()), altgr);
+        assert_eq!(engine.value(t), Ok(Some("@".to_owned())));
+    }
+
+    #[test]
+    fn a_drag_selects_and_shift_with_a_press_extends_the_selection() {
+        use crate::messages::Key;
+        const FIELD: &str = "style='font: 20px sans-serif; border: 0; padding: 0; width: 300px'";
+        let mut engine = verifying(&format!(
+            "<body style='margin: 0'><input id=t value=abcdef {FIELD}>"
+        ));
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        engine.set_value(t, "abcdef").unwrap();
+        let (prepared, _) = engine.prepare();
+        let xs: Vec<f32> = prepared
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) if run.text == "abcdef" => {
+                    Some(run.glyphs.iter().map(|glyph| glyph.x).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let pointer = |engine: &mut Engine, kind, x: f32, modifiers| {
+            engine.pointer(&PointerInput {
+                kind,
+                x,
+                y: 10.0,
+                button: if kind == PointerKind::Move {
+                    PointerButton::None
+                } else {
+                    PointerButton::Primary
+                },
+                modifiers,
+            });
+        };
+        // Pressed before "b", dragged to before "e": "bcd".
+        pointer(
+            &mut engine,
+            PointerKind::Down,
+            xs[1] - 1.0,
+            Modifiers::default(),
+        );
+        pointer(
+            &mut engine,
+            PointerKind::Move,
+            xs[4] - 1.0,
+            Modifiers::default(),
+        );
+        pointer(
+            &mut engine,
+            PointerKind::Up,
+            xs[4] - 1.0,
+            Modifiers::default(),
+        );
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let painted = selection(&prepared.unwrap());
+        assert_eq!(painted.len(), 1);
+        assert!(
+            (painted[0].0 - xs[1]).abs() < 1.5,
+            "{painted:?} from {}",
+            xs[1]
+        );
+        type_text(&mut engine, "-");
+        assert_eq!(engine.value(t), Ok(Some("a-ef".to_owned())));
+        // Shift with a press: from the caret, after "-", to the end.
+        pointer(&mut engine, PointerKind::Down, 290.0, SHIFT);
+        pointer(&mut engine, PointerKind::Up, 290.0, SHIFT);
+        press(&mut engine, Key::Delete);
+        assert_eq!(engine.value(t), Ok(Some("a-".to_owned())));
+        // A move with nothing pressed selects nothing.
+        pointer(&mut engine, PointerKind::Move, 2.0, Modifiers::default());
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(t), Ok(Some("a-!".to_owned())));
+    }
+
     #[test]
     fn leaving_a_field_the_user_changed_is_a_change_event() {
         use crate::messages::Key;

@@ -333,30 +333,23 @@ değerlendirildi; tahmini kazançları ölçülmeden alınmadı:
   kalıcı belleği `.github/memory-budget.txt`'teki tavanın altında,
   yükseltme `# raised:` gerekçesi ister. Bütçeyle aynı PR'da gelir.
 
-#### Sciter ve Slint Düzeyinde Hafiflik İçin Mimari Yol Haritası (2026-11-04)
+#### M5.13 Bellek Optimizasyonu Uygulama Sırası (2026-11-04)
 
-> [!NOTE]
-> **Uygulama ve Değerlendirme Notu:** Buradaki maddeler birer araştırma önerisi ve hipotezdir; DX12 backend'inin hemen değiştirilmesi gerekmez. 344 MB'lık farkın ne kadarının sürücüden, ne kadarının wgpu havuzlarından veya iç tamponlardan geldiği M5.13'ün ilk adımı olan bellek profilinde (`dhat` / B16) ölçülmeden kesin kabul edilmemelidir. Geliştirmeyi yapacak yapay zekâ / mühendis, önce ölçüm verilerini toplamalı, performansı (kare hızını) veya CSS uyumluluğunu riske atmadan kendi kararını vermelidir.
+Bellek tüketimini düşürürken Erk'in en önemli avantajı olan artımlı render hızını (60 FPS p95 hedefi) ve W3C standart uyumunu korumak esastır. Kanıtlanmamış varsayımlar veya erken backend değişiklikleri yerine şu 6 adımlı ampirik sıra izlenir:
 
-GPU açıkken ortaya çıkan 344 MB özel bellek (CPU RAM) ve 10 bin düğümlü sayfadaki 472 MB tüketimin Sciter (~10–15 MB) ve Slint (~15–25 MB) seviyelerine çekilebilmesi için belirlenen çözüm önerileri:
-
-1. **Grafik ve Sürücü Katmanı:**
-   - **Önce Profil ve Ölçüm:** 344 MB'ın sürücü, wgpu ve iç render verileri arasındaki gerçek dağılımı ölçülmeli. DX12'nin hemen terk edilmesi yerine, aynı donanımda DX12 ve Vulkan (`wgpu::Backends::VULKAN`) profilleri karşılaştırılmalı; ardından Linux Mesa altında ölçüm alınmalıdır.
-   - **wgpu Limitleri:** `DeviceDescriptor::default()` yerine 2D motoruna özel sıkılaştırılmış `wgpu::Limits` (ör. `downlevel_webgl2_defaults` veya özel kısıtlar) denenmeli; descriptor heap ve staging havuzlarının etkisi incelenmelidir.
-   - **CPU Rasterizer Önceliği:** Halihazırda 23,7 MB özel bellekle çalışan `vello_cpu` modu, masaüstü arayüzler için SIMD ve döşeme hasar takibiyle Slint benzeri ultra-hafif birincil seçenek olarak değerlendirilebilir.
-
-2. **CPU Fallback Temizliği ve Bellek Ayırıcısı (Allocator):**
-   - Soğuk başlangıçta CPU rasterizer'ın ayırdığı `cpu_frame` pikselleri ve döşemeleri GPU devreye girince bırakılsa da (`self.cpu_frame = None`), Windows varsayılan bellek ayırıcısı bu sayfaları işletim sistemine decommit etmez.
-   - GPU devraldığında agresif bellek iadesi yapılmalı; `mimalloc` veya `snmalloc` gibi decommit davranışı güçlü ayırıcıların kalıcı belleğe etkisi B16 ile ölçülmelidir.
-
-3. **Stylo ve CSS Paylaşımı (Stil Katmanı):**
-   - 10 bin kartlık stres sayfasında aynı stillere sahip elemanların `Arc<ComputedValues>`'u paylaşması (`StyleSharingCache` etkinliği) doğrulanmalı; eleman başına stil yükü asgariye indirilmelidir.
-
-4. **Metin ve Paragraf Tekilleştirmesi:**
-   - `ShapeCache` (kırılmamış saf düzen) ile `ShapedText` (kırılmış sonuç) arasındaki çift kopya tekilleştirilerek dilim (`slice`) modeline geçilmelidir.
-
-5. **DOM Düğüm Boyutu ve String Interning:**
-   - Düğümlerdeki öznitelik dizgileri atom/interning havuzuna alınmalı; eleman başına 15 KB maliyet hedeflenen 3–4 KB bandına çekilmelidir.
+1. **M5.13-A: B16 Bellek Profilini Çıkar (Temel Adım):**
+   - CPU ve GPU yollarında belleğin nereye gittiği aşamalara ayrılır: DOM, Stylo, Taffy, Parley, Display List, Raster, wgpu ve Sürücü.
+   - Private Bytes (taahhütlü sanal bellek) ile Working Set (fiziksel resident bellek) birbirine karıştırılmadan; açılış, kaydırma ve boşta bekleme durumları ayrı ayrı profillenir (`dhat`, ETW/VMMap).
+2. **M5.13-B: GPU Bellek Maliyetini İncele (Renderer Değiştirmeden):**
+   - Backend değiştirmeden önce 344 MB'ın kaynağı belirlenir: wgpu staging alanları, render kaynakları, CPU fallback tamponlarının (`self.cpu_frame`) bırakılma/decommit anı ve aynı Windows donanımında DX12 vs. Vulkan karşılaştırması.
+3. **M5.13-C: Parley Veri Tekilleştirmesi:**
+   - Gerçekten çift tutulan metin verileri (`ShapeCache` ve `ShapedText`) belirlenir. Performans (kare süresi) düşürülmeden tekilleştirme uygulanır.
+4. **M5.13-D: DOM ve Öznitelik Kompaktlaştırma:**
+   - Tekrarlanan string'ler için interning, `SmallVec` kullanımı ve gereksiz heap tahsislerinin azaltılması. 10.000 düğümlü sayfada düğüm başına maliyet optimize edilir.
+5. **M5.13-E: Stylo Denetimi:**
+   - Stylo'nun kendi `StyleSharingCache` mekanizmasının etkinliği doğrulanır. Yeni bir paylaşım katmanı yazılmadan önce mevcut önbellekleme davranışı ölçülür.
+6. **M5.13-F: CI Bütçesi ve Regresyon Muhafızı:**
+   - Her optimizasyonun bellek kazancı ve FPS üzerindeki etkisi ölçülür; p95 kare süresi veya doğruluk kâhini bozulmadan `.github/memory-budget.txt` tavanı kilitlenir.
 
 ### M5.14: Kabul
 
@@ -808,3 +801,24 @@ Dördüncü PR: imlecin yeri ve `placeholder`.
 | `placeholder` | Değer boşken alan `placeholder`'ını gösteriyor (`input`'ta satır sonları atılmış), gri (#757575, Erk'in kendi görünümü; `::placeholder` yok). Rengi yerleşim değil görüntü listesi seçiyor: belgeye bakıp (`layout::placeholder`) |
 | Testler | Basış imleci yerine koyuyor (aynı alanda yeniden, şifrede sonun ötesi ve iki nokta arası); uzun değerde imleç görünüyor, Home başa döndürüyor; `textarea` imlece kayıyor, kullanıcının kaydırmasından geri çekilmiyor; `placeholder` gri, yazınca gidiyor, silince dönüyor, değişince yeniden yerleşiyor |
 | Mutasyonlar | 14 mutasyondan 13'ü yakalandı, biri ölü koddu ve silindi (`placeholder` görünürken basışı başa koyan erken dönüş: değer boş, hesap zaten 0'a iniyor). İlk tur geçersizdi: önceki PR'ın tıklama testi alanın başına basıp imleci sonda bekliyordu, bu adımda kırıktı ve birkaç mutasyonu "yakalamış" görünüyordu. Test değerin ötesine basacak biçimde düzeltildi, bozma betiği artık önce tabanın yeşil olduğunu denetliyor. Sağlam tabanla kaçanlar için: şifrede iki nokta arasına basış; kullanıcının kaydırdığı `textarea`'nın yanıp sönme karelerinde de yerinde kalması (imlecin her karede ya da bayrak sıfırlanmadan görünür tutulması onu geri çekiyordu) |
+
+Beşinci PR: seçim (dördüncü adımın ilk yarısı; pano ikinci yarısı).
+
+| Konu | Not |
+|---|---|
+| Model | İmleç seçimin odak ucu, yanında bir çapa (`Page::anchor`); ikisi eşitse seçim yok. Odak alana gelince ikisi de sonda; basış ikisini de bastığı yere koyuyor, Shift'li basış yalnızca odağı. Odaklı alanda basılı sürükleme odağı işaretçinin altına taşıyor (`pressed` alanın kendisiyken) |
+| Tuşlar | Shift'le ok, Home ve End seçimi genişletiyor; Shift'siz sol ve sağ ok seçimin kenarına gidiyor. Yazılan, Geri Silme ve Delete seçimin yerini alıyor. Control+A hepsini seçiyor. Control (AltGr değil: Windows'ta AltGr Control ile Alt'tır, Türkçe klavyede `@`) ya da Meta ile bir harf komut, yazı değil: önceden Control+A alana "a" yazıyordu |
+| Çizim | Seçim, Parley'nin `Selection::geometry` dikdörtgenleriyle metnin üstüne yarı saydam mavi (Erk'in kendi rengi, `::selection` yok), alanın içerik kutusuna kırpılarak; liste kurulduktan sonra, imleçten önce. Kâhin aynı yoldan |
+| Sonraya kalan | Pano (Control+C/X/V, karar 5) bu adımın ikinci PR'ı. Çift ve üçlü basışla kelime ve satır seçimi, Control'lü okla kelime gezintisi, sarılan satırlarda görsel satır gezintisi (Parley'nin `next_line`'ı hazır) ve host'un seçimi okuyup yazacağı API (DOM'un `selectionStart`/`setSelectionRange`'i) IME adımıyla ya da M5.10'la |
+| Mutasyonlar | 16 mutasyondan 16'sı yakalandı (taban önce yeşil denetlendi); ilk turda kaçan ikisi için: ileri doğru seçimde sol okun seçimin başına gitmesi, kaymış dar alanda seçimin alanın içine kırpılması |
+
+M5.13 inceleme raporu (`docs/reviews/m5_13_memory_sciter_slint_architecture.md`,
+2026-11-04): değerlendirildi. Maddeleri M5.13'ün yürütme sırası olarak
+alınıyor: önce B16 profili (CPU ve GPU, özel bellek ile çalışma kümesi
+ayrı), sonra GPU belleği (wgpu sınırları, `cpu_frame`'in bırakılması,
+DX12 ile Vulkan aynı donanımda), Parley tekilleştirmesi, DOM ve
+öznitelik sıkıştırması, Stylo'nun stil paylaşımının ölçülmesi ve CI
+bellek bütçesi; hedefler ölçümden sonra kesinleşiyor. Raporun bir ara
+sürümündeki "Windows'ta D3D11 arka ucu" önerisi geçersiz: wgpu-hal 29'un
+arka uçları DX12, Vulkan, GLES ve Metal (D3D11 wgpu'dan çıkarıldı);
+raporun son hali de bunu söylüyor.
