@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_9() {
-    assert_eq!(erk_abi_version(), 9);
+fn the_abi_version_is_0_10() {
+    assert_eq!(erk_abi_version(), 10);
 }
 
 #[test]
@@ -381,6 +381,26 @@ fn a_key_event_names_its_key_and_what_it_typed() {
     assert_eq!(
         seen(),
         (ERK_EVENT_KEY_DOWN, ERK_KEY_BACKSPACE, String::new())
+    );
+    // The keys that edit text and move in it come back as they went in.
+    for code in [
+        ERK_KEY_DELETE,
+        ERK_KEY_ARROW_LEFT,
+        ERK_KEY_ARROW_RIGHT,
+        ERK_KEY_ARROW_UP,
+        ERK_KEY_ARROW_DOWN,
+        ERK_KEY_HOME,
+        ERK_KEY_END,
+    ] {
+        assert_eq!(
+            erk_app_input(app, &key(ERK_INPUT_KEY_DOWN, code, "")),
+            ERK_OK
+        );
+        assert_eq!(seen(), (ERK_EVENT_KEY_DOWN, code, String::new()), "{code}");
+    }
+    assert_eq!(
+        erk_app_input(app, &key(ERK_INPUT_KEY_DOWN, 14, "")),
+        ERK_ERR_INVALID_ARGUMENT
     );
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }

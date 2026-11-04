@@ -223,12 +223,25 @@ fn subscribe(app: &mut App, state: &mut State, bytes: &mut Bytes) {
 }
 
 fn key(bytes: &mut Bytes) -> Key {
-    match bytes.below(6) {
+    match bytes.below(14) {
         0 => Key::Tab,
         1 => Key::Enter,
         2 => Key::Space,
         3 => Key::Escape,
-        4 => Key::Character(bytes.pick(&["a", "ş", " ", "\n"]).to_owned()),
+        4 => Key::Character(
+            bytes
+                .pick(&["a", "ş", " ", "\n", "e\u{301}", "🇹🇷"])
+                .to_owned(),
+        ),
+        // The keys that edit a text field and move its caret (M5.8).
+        5 => Key::Backspace,
+        6 => Key::Delete,
+        7 => Key::ArrowLeft,
+        8 => Key::ArrowRight,
+        9 => Key::ArrowUp,
+        10 => Key::ArrowDown,
+        11 => Key::Home,
+        12 => Key::End,
         _ => Key::Other,
     }
 }

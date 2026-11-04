@@ -453,6 +453,14 @@ gerekçeli bir daraltma:
   radyo ve `option`'da `value` özniteliği. İşaretlenen bir radyo düğmesi
   grubundakileri (aynı `name`, aynı form) kaldırır. Değeri olmayan
   elemana yazmak `ERK_ERR_INVALID_ARGUMENT`.
+- **v0.10 (M5.8):** metin alanında düzenleme ve gezinme tuşları:
+  `ERK_KEY_DELETE`, `ERK_KEY_ARROW_LEFT`, `ERK_KEY_ARROW_RIGHT`,
+  `ERK_KEY_ARROW_UP`, `ERK_KEY_ARROW_DOWN`, `ERK_KEY_HOME`, `ERK_KEY_END`
+  (7–13). Önceden `ERK_KEY_OTHER` gelen tuşlar artık kendi değerleriyle
+  geliyor: sürüm 10, M4.5'teki Geri Silme gibi. Odaktaki bir metin
+  alanında tuşun varsayılan işi düzenleme; `keydown` iptal edilirse
+  yapılmaz. Kullanıcının düzenlemesi `ERK_EVENT_INPUT`, odak giderken
+  kullanıcı değeri değiştirdiyse `ERK_EVENT_CHANGE` (`blur`'dan önce).
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

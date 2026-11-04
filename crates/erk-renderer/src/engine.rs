@@ -201,7 +201,9 @@ impl Engine {
 
     /// Pointer input over the page; what happened that the host may answer.
     pub fn pointer(&mut self, input: &PointerInput) -> Vec<Event> {
-        self.restyled_by(|page| page.pointer(input))
+        let events = self.restyled_by(|page| page.pointer(input));
+        self.changed |= self.page.take_edited();
+        events
     }
 
     /// A key went down or up while the page has the keyboard: its key
@@ -215,7 +217,10 @@ impl Engine {
     /// What `input` does by default: Tab moves the focus, Enter and Space
     /// click the focused link or button. The events that follow from it.
     pub fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
-        self.restyled_by(|page| page.key_default(input))
+        let events = self.restyled_by(|page| page.key_default(input));
+        // A text field edited or its caret moved (M5.8).
+        self.changed |= self.page.take_edited();
+        events
     }
 
     /// The wheel scrolled by `dx`, `dy` CSS pixels at `x`, `y`.
@@ -625,7 +630,7 @@ fn compare(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Modifiers, PointerButton, PointerKind};
+    use crate::messages::{EventKind, Modifiers, PointerButton, PointerKind};
 
     /// The stack Windows gives a program's main thread, where a host's UI
     /// thread usually is.
@@ -1429,6 +1434,239 @@ mod tests {
         // One line: the field's box is the line's height, at its top.
         assert!((field.y - line.y).abs() < 1.0, "{field:?} in {line:?}");
         assert!(field.height <= line.height + 0.5, "{field:?} in {line:?}");
+    }
+
+    /// Press `key` (down and up) as a host does that prevents nothing: its
+    /// events, then what it does by default.
+    fn press(engine: &mut Engine, key: crate::messages::Key) -> Vec<EventKind> {
+        let mut kinds = Vec::new();
+        for state in [
+            crate::messages::KeyState::Down,
+            crate::messages::KeyState::Up,
+        ] {
+            let input = KeyInput {
+                key: key.clone(),
+                state,
+                modifiers: Modifiers::default(),
+            };
+            kinds.extend(engine.key(&input).map(|event| event.kind));
+            kinds.extend(
+                engine
+                    .key_default(&input)
+                    .into_iter()
+                    .map(|event| event.kind),
+            );
+        }
+        kinds
+    }
+
+    fn type_text(engine: &mut Engine, text: &str) {
+        for c in text.chars() {
+            press(engine, crate::messages::Key::Character(c.to_string()));
+        }
+    }
+
+    /// The caret the frame paints: a rectangle one pixel wide.
+    fn caret(prepared: &Prepared) -> Option<(f32, f32)> {
+        prepared.list.items.iter().find_map(|item| match item {
+            crate::list::DisplayItem::Rect { x, y, width, .. } if *width == 1.0 => Some((*x, *y)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn typing_in_a_focused_field_edits_its_value_at_the_caret() {
+        use crate::messages::Key;
+        let mut engine = verifying("<input id=t value=ab><button id=b>b</button>");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        // Tab focuses the field: its caret is at the end.
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let at_end = caret(&prepared.unwrap()).expect("a caret");
+        // Each character typed is an input event and a frame.
+        let kinds = press(&mut engine, Key::Character("ç".to_owned()));
+        assert_eq!(
+            kinds,
+            [EventKind::KeyDown, EventKind::Input, EventKind::KeyUp]
+        );
+        assert_eq!(engine.value(t), Ok(Some("abç".to_owned())));
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let moved = caret(&prepared.unwrap()).expect("a caret");
+        assert!(moved.0 > at_end.0, "{moved:?} after {at_end:?}");
+        // The caret moves without editing: a frame, no input event.
+        for key in [Key::ArrowLeft, Key::ArrowLeft] {
+            assert_eq!(
+                press(&mut engine, key),
+                [EventKind::KeyDown, EventKind::KeyUp]
+            );
+        }
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let back = caret(&prepared.unwrap()).expect("a caret");
+        assert!(back.0 < moved.0, "{back:?} before {moved:?}");
+        press(&mut engine, Key::Space);
+        type_text(&mut engine, "x");
+        assert_eq!(engine.value(t), Ok(Some("a xbç".to_owned())));
+        press(&mut engine, Key::Backspace);
+        press(&mut engine, Key::Delete);
+        assert_eq!(engine.value(t), Ok(Some("a ç".to_owned())));
+        press(&mut engine, Key::Home);
+        type_text(&mut engine, "[");
+        press(&mut engine, Key::End);
+        type_text(&mut engine, "]");
+        assert_eq!(engine.value(t), Ok(Some("[a ç]".to_owned())));
+        press(&mut engine, Key::Home);
+        press(&mut engine, Key::ArrowRight);
+        type_text(&mut engine, "-");
+        press(&mut engine, Key::End);
+        assert_eq!(engine.value(t), Ok(Some("[-a ç]".to_owned())));
+        // Enter types nothing into one line, and is no input event; up and
+        // down move nowhere.
+        assert_eq!(
+            press(&mut engine, Key::Enter),
+            [EventKind::KeyDown, EventKind::KeyUp]
+        );
+        press(&mut engine, Key::ArrowUp);
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(t), Ok(Some("[-a ç]!".to_owned())));
+        // Leaving the field: the caret goes with the focus.
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(caret(&prepared.unwrap()), None);
+    }
+
+    #[test]
+    fn the_caret_steps_over_a_grapheme_cluster_whole() {
+        use crate::messages::Key;
+        // "e" with a combining acute accent, and a flag of two regional
+        // indicators: one step each, one deletion each.
+        let mut engine = verifying("<input id=t value='ae\u{301}🇹🇷b'>");
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        press(&mut engine, Key::ArrowLeft);
+        press(&mut engine, Key::Backspace);
+        assert_eq!(engine.value(t), Ok(Some("ae\u{301}b".to_owned())));
+        press(&mut engine, Key::ArrowLeft);
+        press(&mut engine, Key::Delete);
+        assert_eq!(engine.value(t), Ok(Some("ab".to_owned())));
+    }
+
+    #[test]
+    fn a_textarea_takes_line_breaks_and_moves_between_its_lines() {
+        use crate::messages::Key;
+        let mut engine = verifying("<textarea id=a>bir\nikinci</textarea>");
+        let a = engine.query(None, "#a").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        // From the end of "ikinci", up: the first line is shorter.
+        press(&mut engine, Key::ArrowUp);
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(a), Ok(Some("bir!\nikinci".to_owned())));
+        // Down from the fourth column of the first line: after "ikin".
+        press(&mut engine, Key::ArrowDown);
+        press(&mut engine, Key::Enter);
+        assert_eq!(engine.value(a), Ok(Some("bir!\nikin\nci".to_owned())));
+        press(&mut engine, Key::Home);
+        type_text(&mut engine, ">");
+        assert_eq!(engine.value(a), Ok(Some("bir!\nikin\n>ci".to_owned())));
+        // End: the end of the line the caret is on, not of the text.
+        press(&mut engine, Key::ArrowUp);
+        press(&mut engine, Key::End);
+        type_text(&mut engine, "<");
+        assert_eq!(engine.value(a), Ok(Some("bir!\nikin<\n>ci".to_owned())));
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(caret(&prepared.unwrap()).is_some());
+    }
+
+    #[test]
+    fn a_field_clicked_into_shows_its_caret_after_its_value() {
+        // Focused by the pointer, the field shows its caret: at its end,
+        // a password's after its last bullet.
+        let mut engine = verifying(
+            "<body style='margin: 0'><input id=t type=password value=abc style='font: 20px sans-serif; border: 0; padding: 0'>",
+        );
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            engine.pointer(&PointerInput {
+                kind,
+                x: 5.0,
+                y: 5.0,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+        }
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let prepared = prepared.expect("the caret shows: a frame");
+        let (x, _) = caret(&prepared).expect("a caret");
+        let right = prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) => {
+                    run.glyphs.iter().map(|glyph| glyph.x).reduce(f32::max)
+                }
+                _ => None,
+            })
+            .reduce(f32::max)
+            .expect("bullets");
+        assert!(x > right, "the caret at {x}, the last bullet at {right}");
+    }
+
+    #[test]
+    fn leaving_a_field_the_user_changed_is_a_change_event() {
+        use crate::messages::Key;
+        let mut engine = verifying("<input id=t value=a><input id=u value=b>");
+        press(&mut engine, Key::Tab);
+        // Not changed: no change event.
+        assert_eq!(
+            press(&mut engine, Key::Tab),
+            [
+                EventKind::KeyDown,
+                EventKind::Blur,
+                EventKind::Focus,
+                EventKind::KeyUp
+            ]
+        );
+        type_text(&mut engine, "x");
+        assert_eq!(
+            press(&mut engine, Key::Tab),
+            [
+                EventKind::KeyDown,
+                EventKind::Change,
+                EventKind::Blur,
+                EventKind::Focus,
+                EventKind::KeyUp
+            ]
+        );
+        // Changed by the host, not the user: no change event.
+        let u = engine.query(None, "#u").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        engine.set_value(u, "host").unwrap();
+        assert_eq!(
+            press(&mut engine, Key::Tab),
+            [
+                EventKind::KeyDown,
+                EventKind::Blur,
+                EventKind::Focus,
+                EventKind::KeyUp
+            ]
+        );
+        // Changed and changed back: the value is as it was.
+        type_text(&mut engine, "y");
+        press(&mut engine, Key::Backspace);
+        assert_eq!(
+            press(&mut engine, Key::Tab),
+            [
+                EventKind::KeyDown,
+                EventKind::Blur,
+                EventKind::Focus,
+                EventKind::KeyUp
+            ]
+        );
     }
 
     #[test]

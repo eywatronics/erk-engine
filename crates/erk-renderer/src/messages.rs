@@ -136,6 +136,14 @@ pub enum Key {
     /// The key that deletes backwards: what a host entering text itself
     /// needs (M4 plan, decision 4).
     Backspace,
+    /// The keys that edit text and move in it (M5.8).
+    Delete,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowDown,
+    Home,
+    End,
     /// A key that types `text`.
     Character(String),
     Other,

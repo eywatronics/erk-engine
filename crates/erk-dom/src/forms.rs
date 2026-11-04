@@ -101,6 +101,24 @@ impl Document {
         Ok(())
     }
 
+    /// Set an `input`'s or a `textarea`'s value to what the user typed:
+    /// as it is, but for an `input`'s line breaks (HTML sanitizes a value
+    /// the user is still typing no further: an `email` keeps the space
+    /// typed last). `Err` for any other element.
+    pub fn set_typed_value(&mut self, id: NodeId, value: &str) -> Result<(), MutationError> {
+        let kind = self
+            .kind(id)
+            .map_err(|_| MutationError::Stale)?
+            .ok_or(MutationError::NotAControl)?;
+        let value = match kind {
+            Kind::Text | Kind::Trimmed => sanitize(Kind::Text, value),
+            Kind::TextArea => normalize_newlines(value),
+            Kind::Check | Kind::Select | Kind::Option => return Err(MutationError::NotAControl),
+        };
+        self.controls.insert(id, Control::Value(value));
+        Ok(())
+    }
+
     /// Whether element `id` is checked, as DOM's `checked` reads it, or
     /// for an `option` whether it is selected (DOM's `selected`): what was
     /// set, or else what the markup says. `None` for an element that is
@@ -433,6 +451,22 @@ mod tests {
         doc.set_attr(t, "value", "eski").unwrap();
         assert_eq!(doc.value(t), Ok(Some("yeni".to_owned())));
         assert_eq!(doc.checked(t), Ok(None));
+    }
+
+    #[test]
+    fn what_the_user_types_keeps_its_spaces_but_not_an_inputs_line_breaks() {
+        let mut doc =
+            Document::parse_html("<input id=e type=email><textarea id=a></textarea><p id=p>");
+        let (e, a, p) = (find(&doc, "e"), find(&doc, "a"), find(&doc, "p"));
+        // An email address being typed keeps its last space.
+        doc.set_typed_value(e, "a \n").unwrap();
+        assert_eq!(doc.value(e), Ok(Some("a ".to_owned())));
+        doc.set_typed_value(a, "b\r\n").unwrap();
+        assert_eq!(doc.value(a), Ok(Some("b\n".to_owned())));
+        assert_eq!(
+            doc.set_typed_value(p, "x"),
+            Err(crate::MutationError::NotAControl)
+        );
     }
 
     #[test]

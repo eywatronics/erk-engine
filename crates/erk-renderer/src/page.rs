@@ -52,6 +52,14 @@ pub(crate) struct Page {
     focus_visible: bool,
     /// The node the developer tools highlight.
     highlight: Option<NodeId>,
+    /// The focused text field's caret: a byte offset in its value (M5.8).
+    caret: Option<(NodeId, usize)>,
+    /// The focused text field's value when it took the focus, and whether
+    /// the user has edited it since: leaving it changed is a `change`.
+    focus_value: Option<(String, bool)>,
+    /// Whether input moved a caret or edited a field since the last look:
+    /// the next frame shows it, though nothing the pointer is on changed.
+    edited: bool,
     /// The last frame's viewport, in CSS pixels.
     viewport: (f32, f32),
     /// How far the user has scrolled each scroll container.
@@ -257,6 +265,9 @@ impl Page {
             focus: None,
             focus_visible: false,
             highlight: None,
+            caret: None,
+            focus_value: None,
+            edited: false,
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
@@ -645,6 +656,8 @@ impl Page {
             }
         };
         let mut list = content.scrolled(&scrolling, &bars);
+        list.items
+            .extend(self.caret_item(&layouts, &scrolling, &styles));
         let hits = hits(&list.items);
         if let Some(node) = self.highlight {
             list.items.extend(
@@ -942,6 +955,13 @@ impl Page {
     /// button click it, as browsers do. Keyboard clicks are at 0, 0.
     pub(crate) fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
         let focused = self.focus.filter(|node| self.doc.node(*node).is_some());
+        // In a text field, a key edits or moves the caret (M5.8).
+        if input.state == KeyState::Down
+            && let Some(field) = focused
+            && let Some(events) = self.edit(field, input)
+        {
+            return events;
+        }
         match (&input.key, input.state) {
             (Key::Tab, KeyState::Down) => {
                 let order = self.focus_order();
@@ -1012,13 +1032,143 @@ impl Page {
             .take()
             .filter(|node| self.doc.node(*node).is_some())
         {
+            // A field the user changed: `change` before `blur`, as
+            // browsers send them.
+            if let Some((before, true)) = self.focus_value.take()
+                && self
+                    .doc
+                    .value(old)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|now| now != before)
+            {
+                events.push(self.event(EventKind::Change, old, (0.0, 0.0), modifiers));
+            }
             events.push(self.event(EventKind::Blur, old, (0.0, 0.0), modifiers));
         }
         self.focus = focus;
+        // A text field taking the focus has its caret at the end.
+        let value = focus
+            .filter(|node| crate::layout::text_field(&self.doc, *node).is_some())
+            .and_then(|node| Some((node, self.doc.value(node).ok()??)));
+        self.caret = value.as_ref().map(|(node, value)| (*node, value.len()));
+        self.focus_value = value.map(|(_, value)| (value, false));
+        self.edited = true;
         if let Some(new) = focus {
             events.push(self.event(EventKind::Focus, new, (0.0, 0.0), modifiers));
         }
         events
+    }
+
+    /// What key `input` does in text field `field`: edit its value at the
+    /// caret, then an `input` event, or move the caret. `None` for a key
+    /// that does neither there (Tab, Escape, Enter in a one-line field).
+    fn edit(&mut self, field: NodeId, input: &KeyInput) -> Option<Vec<Event>> {
+        let kind = crate::layout::text_field(&self.doc, field)?;
+        let value = self.doc.value(field).ok()??;
+        let at = self
+            .caret
+            .filter(|(node, _)| *node == field)
+            .map_or(value.len(), |(_, at)| at);
+        let at = floor_boundary(&value, at.min(value.len()));
+        let lines = kind == crate::layout::TextField::Area;
+        let (start, end) = line_around(&value, at, lines);
+        let inserted = |typed: &str| {
+            let mut edited = value.clone();
+            edited.insert_str(at, typed);
+            (edited, at + typed.len())
+        };
+        let (new_value, caret) = match &input.key {
+            Key::Character(typed) => inserted(typed),
+            Key::Space => inserted(" "),
+            Key::Enter if lines => inserted("\n"),
+            Key::Backspace => {
+                let from = previous_grapheme(&value, at);
+                let mut edited = value.clone();
+                edited.replace_range(from..at, "");
+                (edited, from)
+            }
+            Key::Delete => {
+                let to = next_grapheme(&value, at);
+                let mut edited = value.clone();
+                edited.replace_range(at..to, "");
+                (edited, at)
+            }
+            Key::ArrowLeft => (value.clone(), previous_grapheme(&value, at)),
+            Key::ArrowRight => (value.clone(), next_grapheme(&value, at)),
+            Key::Home => (value.clone(), start),
+            Key::End => (value.clone(), end),
+            Key::ArrowUp if lines => (value.clone(), line_beside(&value, at, false)),
+            Key::ArrowDown if lines => (value.clone(), line_beside(&value, at, true)),
+            // A one-line field has no line above or below.
+            Key::ArrowUp | Key::ArrowDown => (value.clone(), at),
+            _ => return None,
+        };
+        self.edited = true;
+        if new_value == value {
+            self.caret = Some((field, caret));
+            return Some(Vec::new());
+        }
+        self.journal.touch(&self.doc, field);
+        self.doc.set_typed_value(field, &new_value).ok()?;
+        // An input's line breaks are dropped: the caret stays in the value.
+        let typed = self.doc.value(field).ok()??;
+        self.caret = Some((field, floor_boundary(&typed, caret.min(typed.len()))));
+        if let Some((_, edited)) = self.focus_value.as_mut() {
+            *edited = true;
+        }
+        Some(vec![self.event(
+            EventKind::Input,
+            field,
+            (0.0, 0.0),
+            input.modifiers,
+        )])
+    }
+
+    /// Whether input moved a caret or edited a field since the last call.
+    pub(crate) fn take_edited(&mut self) -> bool {
+        std::mem::take(&mut self.edited)
+    }
+
+    /// The focused text field's caret, painted: a line one pixel wide in
+    /// the field's colour, as tall as the line it is on, where the field's
+    /// text puts it.
+    fn caret_item(
+        &self,
+        layouts: &layout::Layouts,
+        scrolling: &Scrolling,
+        styles: &Styles,
+    ) -> Option<DisplayItem> {
+        // The caret goes with the focus: moving it sets or clears it.
+        let (field, at) = self.caret?;
+        let kind = crate::layout::text_field(&self.doc, field)?;
+        let value = self.doc.value(field).ok()??;
+        let at = floor_boundary(&value, at.min(value.len()));
+        // A password shows a bullet for each character.
+        let shown = match kind {
+            crate::layout::TextField::Password => {
+                value[..at].chars().count() * '\u{2022}'.len_utf8()
+            }
+            crate::layout::TextField::Line | crate::layout::TextField::Area => at,
+        };
+        let text = &layouts.text(field)?.layout;
+        let cursor = parley::layout::Cursor::from_byte_index(
+            &text.layout,
+            shown,
+            parley::layout::Affinity::Downstream,
+        );
+        let line = cursor.geometry(&text.layout, 1.0);
+        let field_box = box_model(layouts, scrolling, field)?;
+        let left = field_box.x + field_box.border[3] + field_box.padding[3];
+        let top = field_box.y + field_box.border[0] + field_box.padding[0];
+        let color = crate::color::srgb_bytes(styles.computed(field)?.clone_color());
+        Some(DisplayItem::Rect {
+            x: left + line.x0 as f32,
+            y: top + line.y0 as f32,
+            width: 1.0,
+            height: (line.y1 - line.y0) as f32,
+            color,
+        })
     }
 
     fn event(
@@ -1732,6 +1882,72 @@ fn tabindex(element: &ElementData) -> Option<i32> {
     let magnitude: i64 = digits[..end].parse().ok()?;
     let value = if negative { -magnitude } else { magnitude };
     Some(i32::try_from(value).unwrap_or(if negative { i32::MIN } else { i32::MAX }))
+}
+
+/// `at` or the nearest character boundary of `text` before it.
+fn floor_boundary(text: &str, mut at: usize) -> usize {
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// The grapheme cluster boundaries of `text`: where a caret may stand.
+fn graphemes(text: &str) -> Vec<usize> {
+    icu_segmenter::GraphemeClusterSegmenter::new()
+        .segment_str(text)
+        .collect()
+}
+
+/// Where the caret goes back to from `at`: one grapheme cluster back.
+fn previous_grapheme(text: &str, at: usize) -> usize {
+    graphemes(text)
+        .into_iter()
+        .rev()
+        .find(|boundary| *boundary < at)
+        .unwrap_or(0)
+}
+
+/// Where the caret goes on to from `at`: one grapheme cluster on.
+fn next_grapheme(text: &str, at: usize) -> usize {
+    graphemes(text)
+        .into_iter()
+        .find(|boundary| *boundary > at)
+        .unwrap_or(text.len())
+}
+
+/// The start and end of the line `at` is on: the whole value of a
+/// one-line field, a textarea's text between line breaks.
+fn line_around(text: &str, at: usize, lines: bool) -> (usize, usize) {
+    if !lines {
+        return (0, text.len());
+    }
+    let start = text[..at].rfind('\n').map_or(0, |found| found + 1);
+    let end = text[at..].find('\n').map_or(text.len(), |found| at + found);
+    (start, end)
+}
+
+/// Where the caret goes from `at` to the line below (or above): as many
+/// grapheme clusters in, or the line's end if it is shorter. The lines
+/// are the text's, between its line breaks.
+fn line_beside(text: &str, at: usize, below: bool) -> usize {
+    let (start, end) = line_around(text, at, true);
+    let column = graphemes(&text[start..at]).len().saturating_sub(1);
+    let (from, to) = if below {
+        if end == text.len() {
+            return text.len();
+        }
+        line_around(text, end + 1, true)
+    } else {
+        if start == 0 {
+            return 0;
+        }
+        line_around(text, start - 1, true)
+    };
+    graphemes(&text[from..to])
+        .into_iter()
+        .nth(column)
+        .map_or(to, |boundary| from + boundary)
 }
 
 #[cfg(test)]
