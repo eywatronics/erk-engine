@@ -1083,6 +1083,10 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
 }
 
 /// A paragraph whose content box starts at `origin`: the backgrounds of its
+/// The colour of a text field's placeholder: Erk's own grey (decision 4),
+/// which a page cannot restyle yet (no `::placeholder`).
+const PLACEHOLDER: crate::color::Rgba = [117, 117, 117, 255];
+
 /// inline elements, then its glyph runs. A background's edges follow the
 /// text and fall between pixels; they are snapped to whole pixels, as
 /// Chrome snaps them (found by the Chrome reference test: unsnapped, every
@@ -1104,7 +1108,12 @@ fn inline_content(
             .computed(element)
             .map(|style| srgb_bytes(style.clone_color()))
     };
-    let block_color = color_of(block).unwrap_or([0, 0, 0, 255]);
+    // A text field's placeholder is painted grey, as browsers paint it.
+    let block_color = if crate::layout::placeholder(doc, block).is_some() {
+        PLACEHOLDER
+    } else {
+        color_of(block).unwrap_or([0, 0, 0, 255])
+    };
     // A glyph run's text had one colour when it was laid out, its brush's:
     // the run is painted in the frame's colour of the element whose text
     // had it. Shaping can give a run the glyphs of a neighbour's joiner, so

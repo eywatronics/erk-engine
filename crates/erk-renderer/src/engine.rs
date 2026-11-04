@@ -1597,15 +1597,15 @@ mod tests {
 
     #[test]
     fn a_field_clicked_into_shows_its_caret_after_its_value() {
-        // Focused by the pointer, the field shows its caret: at its end,
-        // a password's after its last bullet.
+        // Focused by a press past its value, the field shows its caret at
+        // its end: a password's after its last bullet.
         let mut engine = verifying(
             "<body style='margin: 0'><input id=t type=password value=abc style='font: 20px sans-serif; border: 0; padding: 0'>",
         );
         for kind in [PointerKind::Down, PointerKind::Up] {
             engine.pointer(&PointerInput {
                 kind,
-                x: 5.0,
+                x: 150.0,
                 y: 5.0,
                 button: PointerButton::Primary,
                 modifiers: Modifiers::default(),
@@ -1669,6 +1669,224 @@ mod tests {
         assert!(engine.prepare().0.is_some(), "the caret goes");
         engine.set_time(1900 * MS);
         assert!(engine.prepare().0.is_none(), "no caret, no blink");
+    }
+
+    fn click(engine: &mut Engine, (x, y): (f32, f32)) {
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+        }
+    }
+
+    /// The painted glyphs' left and right edges.
+    fn glyph_span(prepared: &Prepared) -> (f32, f32) {
+        let xs: Vec<f32> = prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) => {
+                    Some(run.glyphs.iter().map(|glyph| glyph.x))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        (
+            xs.iter().copied().fold(f32::INFINITY, f32::min),
+            xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        )
+    }
+
+    #[test]
+    fn a_press_puts_the_caret_where_it_pressed() {
+        use crate::messages::Key;
+        const FIELD: &str = "style='font: 20px sans-serif; border: 0; padding: 0; width: 300px'";
+        let mut engine = verifying(&format!(
+            "<body style='margin: 0'><input id=t value=abcdef {FIELD}><br>\
+             <input id=s type=password value=gizli {FIELD}>"
+        ));
+        let (t, s) = (
+            engine.query(None, "#t").unwrap().unwrap(),
+            engine.query(None, "#s").unwrap().unwrap(),
+        );
+        // Where the third letter ends: a third of the way along "abcdef"
+        // is near enough for even-width letters.
+        engine.set_value(t, "abcdef").unwrap();
+        let (prepared, _) = engine.prepare();
+        let xs: Vec<f32> = prepared
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) if run.text == "abcdef" => {
+                    Some(run.glyphs.iter().map(|glyph| glyph.x).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        // Just before the fourth letter: after the third.
+        click(&mut engine, (xs[3] - 1.0, 10.0));
+        type_text(&mut engine, "X");
+        assert_eq!(engine.value(t), Ok(Some("abcXdef".to_owned())));
+        // Pressed again further on, in the same field.
+        click(&mut engine, (2.0, 10.0));
+        type_text(&mut engine, "<");
+        assert_eq!(engine.value(t), Ok(Some("<abcXdef".to_owned())));
+        // A password counts its bullets: pressed past the end, at the end;
+        // pressed after the second bullet, after the second letter.
+        let line = engine.node_box(s).unwrap().unwrap().y + 10.0;
+        click(&mut engine, (290.0, line));
+        press(&mut engine, Key::Backspace);
+        assert_eq!(engine.value(s), Ok(Some("gizl".to_owned())));
+        let (prepared, _) = engine.prepare();
+        let bullets: Vec<f32> = prepared
+            .unwrap()
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) if run.text.starts_with('•') => {
+                    Some(run.glyphs.iter().map(|glyph| glyph.x).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        click(&mut engine, (bullets[2] - 1.0, line));
+        press(&mut engine, Key::Backspace);
+        assert_eq!(engine.value(s), Ok(Some("gzl".to_owned())));
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(caret(&prepared.unwrap()).is_some());
+    }
+
+    #[test]
+    fn a_caret_out_of_view_scrolls_its_field_to_show_it() {
+        use crate::messages::Key;
+        let mut engine = verifying(
+            "<body style='margin: 0'><input id=t value='bu değer dar alana hiç sığmayacak kadar uzun' \
+             style='font: 16px sans-serif; border: 0; padding: 0; width: 60px'><button>b</button>",
+        );
+        // Focused, the caret is at the end: the field shows the end.
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let prepared = prepared.unwrap();
+        let (x, _) = caret(&prepared).expect("a caret");
+        assert!((0.0..60.0).contains(&x), "the caret at {x}, in view");
+        let (left, _) = glyph_span(&prepared);
+        assert!(left < -100.0, "the start scrolled out, at {left}");
+        // Home: back to the start.
+        press(&mut engine, Key::Home);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let (left, _) = glyph_span(&prepared.unwrap());
+        assert!((0.0..2.0).contains(&left), "the start shows, at {left}");
+    }
+
+    #[test]
+    fn a_textarea_scrolls_to_its_caret_but_not_back_from_the_users_scroll() {
+        use crate::messages::Key;
+        let lines: Vec<String> = (1..=12).map(|n| format!("satır {n}")).collect();
+        let mut engine = verifying(&format!(
+            "<body style='margin: 0'><textarea id=a style='font: 16px sans-serif; border: 0; padding: 0; \
+             width: 200px; height: 40px; overflow: auto'>{}</textarea>",
+            lines.join("\n")
+        ));
+        let a = engine.query(None, "#a").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let (_, y) = caret(&prepared.unwrap()).expect("a caret");
+        assert!(
+            (0.0..40.0).contains(&y),
+            "the last line's caret at {y}, in view"
+        );
+        // The user scrolls the field up: its first line shows.
+        let first_line = |prepared: &Prepared| {
+            prepared.list.items.iter().find_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run)
+                    if run.text.starts_with("satır 1\n") || run.text == "satır 1" =>
+                {
+                    run.glyphs.first().map(|glyph| glyph.y)
+                }
+                _ => None,
+            })
+        };
+        engine.wheel((0.0, -1000.0), (10.0, 10.0));
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let top = first_line(&prepared.unwrap()).expect("the first line shows");
+        // Frames that do not move the caret (its blink) leave the field
+        // where the user scrolled it.
+        for blink in 1..=3 {
+            engine.set_time(blink * 500_000_000);
+            let (prepared, _) = engine.prepare();
+            assert_eq!(engine.verify(), Ok(()));
+            assert_eq!(
+                first_line(&prepared.expect("a blink is a frame")),
+                Some(top),
+                "blink {blink}"
+            );
+        }
+        assert!(engine.value(a).is_ok());
+    }
+
+    #[test]
+    fn an_empty_field_shows_its_placeholder_in_grey() {
+        use crate::messages::Key;
+        let mut engine = verifying(
+            "<input id=t placeholder='Adınız' style='color: rgb(0, 0, 255)'><button>b</button>",
+        );
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        let runs = |prepared: &Prepared| -> Vec<(String, [u8; 4])> {
+            prepared
+                .list
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    // The field's, not the button's.
+                    crate::list::DisplayItem::Glyphs(run) if run.text != "b" => {
+                        Some((run.text.clone(), run.color))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let prepared = prepared.unwrap();
+        assert_eq!(
+            runs(&prepared),
+            [("Adınız".to_owned(), [117, 117, 117, 255])]
+        );
+        // The value is still empty, and the caret at its start.
+        assert_eq!(engine.value(t), Ok(Some(String::new())));
+        type_text(&mut engine, "a");
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(
+            runs(&prepared.unwrap()),
+            [("a".to_owned(), [0, 0, 255, 255])]
+        );
+        press(&mut engine, Key::Backspace);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(runs(&prepared.unwrap())[0].0, "Adınız");
+        // Its placeholder changed is laid out again.
+        engine.set_attr(t, "placeholder", "Soyadınız").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(runs(&prepared.unwrap())[0].0, "Soyadınız");
     }
 
     #[test]

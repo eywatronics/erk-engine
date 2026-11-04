@@ -65,6 +65,10 @@ pub(crate) struct Page {
     /// for a blink from then, hides for one, and so on.
     now: u64,
     caret_since: u64,
+    /// Whether the caret moved since the last frame: that frame scrolls its
+    /// field to show it. Only then, so that a field the user scrolled
+    /// stays where they left it.
+    reveal_caret: bool,
     /// The last frame's viewport, in CSS pixels.
     viewport: (f32, f32),
     /// How far the user has scrolled each scroll container.
@@ -122,9 +126,9 @@ struct KeptLayout {
 
 /// The attributes layout reads besides those styles see: an image's
 /// source, the language that picks fonts and case mapping, and what a
-/// text field shows: its value until one is set, and its type (a
-/// password's bullets).
-const LAYOUT_ATTRIBUTES: [&str; 4] = ["src", "lang", "value", "type"];
+/// text field shows: its value until one is set, its type (a password's
+/// bullets) and its placeholder.
+const LAYOUT_ATTRIBUTES: [&str; 5] = ["src", "lang", "value", "type", "placeholder"];
 
 /// Whether an element with `style` puts a decoration (a background or a
 /// border) in its paragraph: an inline element that paints one.
@@ -275,6 +279,7 @@ impl Page {
             edited: false,
             now: 0,
             caret_since: 0,
+            reveal_caret: false,
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
@@ -403,6 +408,7 @@ impl Page {
         self.viewport = viewport;
         self.list = Some(kept_list);
         self.offsets = offsets;
+        self.reveal_caret = false;
         self.scrollers = scrollers;
         self.hits = hits;
         self.styles = styles;
@@ -609,13 +615,19 @@ impl Page {
             width: w,
             height: h,
         };
-        let inner: Offsets = self
-            .offsets
+        // A caret that moved scrolls its field to show it.
+        let mut offsets = self.offsets.clone();
+        if let Some((field, offset)) = self.caret_scroll(&layouts)
+            && offsets.get(&field).copied().unwrap_or_default() != offset
+        {
+            offsets.insert(field, offset);
+        }
+        let inner: Offsets = offsets
             .iter()
             .filter(|(node, _)| **node != doc.root())
             .map(|(node, offset)| (*node, *offset))
             .collect();
-        let document = self.offsets.get(&doc.root()).copied().unwrap_or_default();
+        let document = offsets.get(&doc.root()).copied().unwrap_or_default();
         // The last frame's boxes, if only the document scrolled.
         let (scrolling, extents, kept_content) = match last_list.filter(|kept| kept.inner == inner)
         {
@@ -628,7 +640,7 @@ impl Page {
                 )
             }
             None => {
-                let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &self.offsets);
+                let scrolling = Scrolling::new(doc, &styles, &layouts, (w, h), &offsets);
                 let extents = Extents::new(doc, &styles, &layouts, &scrolling);
                 (scrolling, extents, None)
             }
@@ -902,7 +914,17 @@ impl Page {
                         .into_iter()
                         .find(|node| self.focusable(*node))
                 });
-                self.move_focus(focus, input.modifiers, false)
+                let events = self.move_focus(focus, input.modifiers, false);
+                // A press in a text field puts its caret where it pressed.
+                if let Some(field) = focus
+                    && let Some(at) = self.caret_at_point(field, (input.x, input.y))
+                {
+                    self.caret = Some((field, at));
+                    self.caret_since = self.now;
+                    self.reveal_caret = true;
+                    self.edited = true;
+                }
+                events
             }
             (PointerKind::Up, PointerButton::Primary) => {
                 let (Some(down), Some(up)) = (self.pressed.take(), target) else {
@@ -1062,6 +1084,7 @@ impl Page {
         self.focus_value = value.map(|(_, value)| (value, false));
         self.edited = true;
         self.caret_since = self.now;
+        self.reveal_caret = true;
         if let Some(new) = focus {
             events.push(self.event(EventKind::Focus, new, (0.0, 0.0), modifiers));
         }
@@ -1113,8 +1136,10 @@ impl Page {
             _ => return None,
         };
         self.edited = true;
-        // A caret that moves shows at once, as it does while typing.
+        // A caret that moves shows at once, as it does while typing, and
+        // in view.
         self.caret_since = self.now;
+        self.reveal_caret = true;
         if new_value == value {
             self.caret = Some((field, caret));
             return Some(Vec::new());
@@ -1133,6 +1158,83 @@ impl Page {
             (0.0, 0.0),
             input.modifiers,
         )])
+    }
+
+    /// Where in text field `field`'s value a press at `point` puts the
+    /// caret: the boundary nearest it in the last frame's text, a
+    /// password's counted in its bullets. A placeholder's text is no
+    /// value: the empty value has its one boundary.
+    fn caret_at_point(&self, field: NodeId, (x, y): (f32, f32)) -> Option<usize> {
+        let kind = crate::layout::text_field(&self.doc, field)?;
+        let value = self.doc.value(field).ok()??;
+        let layouts = &self.layout.as_ref()?.layouts;
+        let scrolling = &self.list.as_ref()?.scrolling;
+        let (left, top) = text_origin(layouts, scrolling, field)?;
+        let text = &layouts.text(field)?.layout;
+        let shown = parley::layout::Cursor::from_point(&text.layout, x - left, y - top).index();
+        Some(match kind {
+            crate::layout::TextField::Password => {
+                let chars = shown / '\u{2022}'.len_utf8();
+                value
+                    .char_indices()
+                    .nth(chars)
+                    .map_or(value.len(), |(at, _)| at)
+            }
+            crate::layout::TextField::Line | crate::layout::TextField::Area => {
+                floor_boundary(&value, shown.min(value.len()))
+            }
+        })
+    }
+
+    /// If the caret moved since the last frame and is out of its field's
+    /// view, the field's scroll offset that shows it: a one-line field
+    /// scrolls across, a textarea down or up, by no more than it takes.
+    fn caret_scroll(&self, layouts: &layout::Layouts) -> Option<(NodeId, (f32, f32))> {
+        let (field, at) = self.caret.filter(|_| self.reveal_caret)?;
+        let kind = crate::layout::text_field(&self.doc, field)?;
+        let value = self.doc.value(field).ok()??;
+        let at = floor_boundary(&value, at.min(value.len()));
+        let shown = match kind {
+            crate::layout::TextField::Password => {
+                value[..at].chars().count() * '\u{2022}'.len_utf8()
+            }
+            crate::layout::TextField::Line | crate::layout::TextField::Area => at,
+        };
+        let text = &layouts.text(field)?.layout;
+        let line = parley::layout::Cursor::from_byte_index(
+            &text.layout,
+            shown,
+            parley::layout::Affinity::Downstream,
+        )
+        .geometry(&text.layout, 1.0);
+        let layout = layouts.get(field)?;
+        let width = layout.size.width
+            - layout.border.left
+            - layout.border.right
+            - layout.padding.left
+            - layout.padding.right;
+        let height = layout.size.height
+            - layout.border.top
+            - layout.border.bottom
+            - layout.padding.top
+            - layout.padding.bottom;
+        let (mut x, mut y) = self.offsets.get(&field).copied().unwrap_or_default();
+        let reveal = |offset: &mut f32, start: f32, end: f32, room: f32| {
+            if end - *offset > room {
+                *offset = end - room;
+            }
+            if start < *offset {
+                *offset = start;
+            }
+            *offset = offset.max(0.0);
+        };
+        if kind == crate::layout::TextField::Area {
+            reveal(&mut y, line.y0 as f32, line.y1 as f32, height);
+        } else {
+            // The caret is a pixel wide.
+            reveal(&mut x, line.x0 as f32, line.x0 as f32 + 1.0, width);
+        }
+        Some((field, (x, y)))
     }
 
     /// Whether input moved a caret or edited a field since the last call.
@@ -1190,9 +1292,7 @@ impl Page {
             parley::layout::Affinity::Downstream,
         );
         let line = cursor.geometry(&text.layout, 1.0);
-        let field_box = box_model(layouts, scrolling, field)?;
-        let left = field_box.x + field_box.border[3] + field_box.padding[3];
-        let top = field_box.y + field_box.border[0] + field_box.padding[0];
+        let (left, top) = text_origin(layouts, scrolling, field)?;
         let color = crate::color::srgb_bytes(styles.computed(field)?.clone_color());
         Some(DisplayItem::Rect {
             x: left + line.x0 as f32,
@@ -1914,6 +2014,25 @@ fn tabindex(element: &ElementData) -> Option<i32> {
     let magnitude: i64 = digits[..end].parse().ok()?;
     let value = if negative { -magnitude } else { magnitude };
     Some(i32::try_from(value).unwrap_or(if negative { i32::MIN } else { i32::MAX }))
+}
+
+/// Where text field `field`'s text is measured from, in the viewport as
+/// painted: its content box's corner, moved by the field's own scroll.
+fn text_origin(
+    layouts: &layout::Layouts,
+    scrolling: &Scrolling,
+    field: NodeId,
+) -> Option<(f32, f32)> {
+    let layout = layouts.get(field)?;
+    let (mut x, mut y) = scrolling.content_origin(field)?;
+    if scrolling.moves(scrolling.scope(field)) {
+        let (dx, dy) = scrolling.document_offset();
+        (x, y) = (x - dx, y - dy);
+    }
+    Some((
+        x + layout.border.left + layout.padding.left,
+        y + layout.border.top + layout.padding.top,
+    ))
 }
 
 /// How long a caret shows, then hides, in nanoseconds: half a second, as

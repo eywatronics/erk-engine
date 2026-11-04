@@ -333,6 +333,31 @@ değerlendirildi; tahmini kazançları ölçülmeden alınmadı:
   kalıcı belleği `.github/memory-budget.txt`'teki tavanın altında,
   yükseltme `# raised:` gerekçesi ister. Bütçeyle aynı PR'da gelir.
 
+#### Sciter ve Slint Düzeyinde Hafiflik İçin Mimari Yol Haritası (2026-11-04)
+
+> [!NOTE]
+> **Uygulama ve Değerlendirme Notu:** Buradaki maddeler birer araştırma önerisi ve hipotezdir; DX12 backend'inin hemen değiştirilmesi gerekmez. 344 MB'lık farkın ne kadarının sürücüden, ne kadarının wgpu havuzlarından veya iç tamponlardan geldiği M5.13'ün ilk adımı olan bellek profilinde (`dhat` / B16) ölçülmeden kesin kabul edilmemelidir. Geliştirmeyi yapacak yapay zekâ / mühendis, önce ölçüm verilerini toplamalı, performansı (kare hızını) veya CSS uyumluluğunu riske atmadan kendi kararını vermelidir.
+
+GPU açıkken ortaya çıkan 344 MB özel bellek (CPU RAM) ve 10 bin düğümlü sayfadaki 472 MB tüketimin Sciter (~10–15 MB) ve Slint (~15–25 MB) seviyelerine çekilebilmesi için belirlenen çözüm önerileri:
+
+1. **Grafik ve Sürücü Katmanı:**
+   - **Önce Profil ve Ölçüm:** 344 MB'ın sürücü, wgpu ve iç render verileri arasındaki gerçek dağılımı ölçülmeli. DX12'nin hemen terk edilmesi yerine, aynı donanımda DX12 ve Vulkan (`wgpu::Backends::VULKAN`) profilleri karşılaştırılmalı; ardından Linux Mesa altında ölçüm alınmalıdır.
+   - **wgpu Limitleri:** `DeviceDescriptor::default()` yerine 2D motoruna özel sıkılaştırılmış `wgpu::Limits` (ör. `downlevel_webgl2_defaults` veya özel kısıtlar) denenmeli; descriptor heap ve staging havuzlarının etkisi incelenmelidir.
+   - **CPU Rasterizer Önceliği:** Halihazırda 23,7 MB özel bellekle çalışan `vello_cpu` modu, masaüstü arayüzler için SIMD ve döşeme hasar takibiyle Slint benzeri ultra-hafif birincil seçenek olarak değerlendirilebilir.
+
+2. **CPU Fallback Temizliği ve Bellek Ayırıcısı (Allocator):**
+   - Soğuk başlangıçta CPU rasterizer'ın ayırdığı `cpu_frame` pikselleri ve döşemeleri GPU devreye girince bırakılsa da (`self.cpu_frame = None`), Windows varsayılan bellek ayırıcısı bu sayfaları işletim sistemine decommit etmez.
+   - GPU devraldığında agresif bellek iadesi yapılmalı; `mimalloc` veya `snmalloc` gibi decommit davranışı güçlü ayırıcıların kalıcı belleğe etkisi B16 ile ölçülmelidir.
+
+3. **Stylo ve CSS Paylaşımı (Stil Katmanı):**
+   - 10 bin kartlık stres sayfasında aynı stillere sahip elemanların `Arc<ComputedValues>`'u paylaşması (`StyleSharingCache` etkinliği) doğrulanmalı; eleman başına stil yükü asgariye indirilmelidir.
+
+4. **Metin ve Paragraf Tekilleştirmesi:**
+   - `ShapeCache` (kırılmamış saf düzen) ile `ShapedText` (kırılmış sonuç) arasındaki çift kopya tekilleştirilerek dilim (`slice`) modeline geçilmelidir.
+
+5. **DOM Düğüm Boyutu ve String Interning:**
+   - Düğümlerdeki öznitelik dizgileri atom/interning havuzuna alınmalı; eleman başına 15 KB maliyet hedeflenen 3–4 KB bandına çekilmelidir.
+
 ### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
@@ -771,3 +796,15 @@ değil, gömülü bir UI motoru (proje kuralları, "Ürün").
 | Ölçüm | B17 (yeni): B6'nın 5000 elemanlı sayfasında gerçek bir alanın imleci yanıp sönüyor, başka hiçbir şey değişmiyor. Yayın derlemesinde ortanca 3,84 ms, p95 4,73 ms; stil 0,06 ms, yerleşim 0, liste yeniden kurulmuyor (listed 0), süre raster'ın (3,4 ms). B6 (taklit imleç: bir `span`'in `visibility`'si) aynı oturumda 21,5 / 30,0 ms: gerçek imleç belgeye dokunmuyor. Makine bu oturumda gürültülüydü (B1 26,9 ms, geçmişte ~18); ilk B17 turu 7,60 / 10,86 ms. Ölçüm aracı turları yarım saniye arayla saatliyor; saate bağlı başka bir şey olmadığı için öteki senaryolar değişmiyor |
 | Testler | Motor: imlecin yanıp sönmesi, yazarken görünmesi, alandan çıkınca durması, imleç yokken kare istememesi, geri giden saat (`the_caret_blinks_on_the_hosts_clock_and_shows_while_typing`). `erk`: `next_tick` odakla geliyor, odakla gidiyor. C-ABI: `erk_app_next_tick` ve boş çıkış işaretçisi |
 | Mutasyonlar | 12 mutasyondan 12'si yakalandı; ilk turda kaçan (imleç yokken de yanıp sönme anında kare) için alandan çıktıktan sonraki bir an eklendi |
+
+Dördüncü PR: imlecin yeri ve `placeholder`.
+
+| Konu | Not |
+|---|---|
+| Tıklama | Bir metin alanına basış imleci bastığı yere koyuyor: son karenin metninde Parley'nin `Cursor::from_point`'i, şifrede nokta sayısından karaktere. Odaklı alana yeniden basmak da imleci taşıyor. `placeholder` görünürken imleç başta |
+| Görünür tutma | İmleç oynadığı karede (odak, düzenleme, ok, basış) görünmüyorsa alan onu gösterecek kadar kayıyor: tek satır yatay, `textarea` dikey, gerektiğinden fazla değil. Pay `build` içinde, yerleşimden sonra ve kaydırma kapsamları kurulmadan önce hesaplanıyor; sayfanın kaydırma tablosuna oradan giriyor, kâhin de aynı payı görüyor. Yalnızca imleç oynayınca: kullanıcının tekerlekle kaydırdığı bir `textarea` imleç yerinde durdukça orada kalıyor (tarayıcılar gibi) |
+| İmleç payı | Tek satırlı alanın kaydırılabileceği yer metninden bir piksel fazla: sondaki imleç kenarın içinde görünüyor (Chrome da imlecin genişliğini katıyor). Bu pay olmadan kaydırma metinde durdu, imleç tam kenarda görünmez kaldı (testin ilk koşusu) |
+| İmlecin çizimi | İmleç alanın kendi kaydırmasıyla çiziliyor (`text_origin`: içerik kutusunun köşesi, alanın payı ve belgenin kaydırması); tıklamayla aynı başlangıç |
+| `placeholder` | Değer boşken alan `placeholder`'ını gösteriyor (`input`'ta satır sonları atılmış), gri (#757575, Erk'in kendi görünümü; `::placeholder` yok). Rengi yerleşim değil görüntü listesi seçiyor: belgeye bakıp (`layout::placeholder`) |
+| Testler | Basış imleci yerine koyuyor (aynı alanda yeniden, şifrede sonun ötesi ve iki nokta arası); uzun değerde imleç görünüyor, Home başa döndürüyor; `textarea` imlece kayıyor, kullanıcının kaydırmasından geri çekilmiyor; `placeholder` gri, yazınca gidiyor, silince dönüyor, değişince yeniden yerleşiyor |
+| Mutasyonlar | 14 mutasyondan 13'ü yakalandı, biri ölü koddu ve silindi (`placeholder` görünürken basışı başa koyan erken dönüş: değer boş, hesap zaten 0'a iniyor). İlk tur geçersizdi: önceki PR'ın tıklama testi alanın başına basıp imleci sonda bekliyordu, bu adımda kırıktı ve birkaç mutasyonu "yakalamış" görünüyordu. Test değerin ötesine basacak biçimde düzeltildi, bozma betiği artık önce tabanın yeşil olduğunu denetliyor. Sağlam tabanla kaçanlar için: şifrede iki nokta arasına basış; kullanıcının kaydırdığı `textarea`'nın yanıp sönme karelerinde de yerinde kalması (imlecin her karede ya da bayrak sıfırlanmadan görünür tutulması onu geri çekiyordu) |
