@@ -22,14 +22,17 @@ space Sciter has proven, as an open-source engine built on standard CSS.
 > (pointer, wheel, keys), and can be embedded from Rust or C: load a page,
 > find nodes, build and change the document (one call at a time or in
 > batches), subscribe to events. A TodoMVC with its host in Rust runs on it
-> (`cargo run -p erk --example todomvc`). It cannot yet show form controls
-> or render incrementally (M5). See [current limitations](#current-limitations).
+> (`cargo run -p erk --example todomvc`). It renders incrementally: a change
+> restyles, lays out and repaints only what it touches. Text fields
+> (`input`, `textarea`) are drawn and editable, with a blinking caret;
+> selection, the clipboard, IME and the other form controls are still to
+> come (M5). See [current limitations](#current-limitations).
 
 ## The Vision: Built for Embedded Systems & the AI Era
 
 Modern UI frameworks often bundle an entire web browser just to draw a simple interface. This bloat is incompatible with the next generation of hardware and software development. Erk Engine is built with a clear vision for the future:
 
-- **Targeting Embedded and Low-RAM Devices:** Industrial panels, medical devices, kiosks, and Raspberry Pis are short on memory, and a WebView or a JavaScript engine brings a browser's worth of it. Erk's idle window takes 12.8 MB of private memory (14.2 MB with 1000 elements). By leaving JavaScript out and rendering standard HTML/CSS directly from Rust, Erk aims at smooth, native-speed UIs on constrained hardware. Measured today on a desktop CPU: a settings screen takes about 10 ms a frame, a 1000-element page about 66 ms, because every change still restyles and lays out the whole page; incremental rendering (M5) is the work that brings large pages to 60 fps. Erk has not been measured on embedded hardware yet (see [Measurements](#measurements)). It is an alternative to expensive or complex C++ GUI libraries, with its own API (Rust and a C ABI), not a drop-in replacement.
+- **Targeting Embedded and Low-RAM Devices:** Industrial panels, medical devices, kiosks, and Raspberry Pis are short on memory, and a WebView or a JavaScript engine brings a browser's worth of it. By leaving JavaScript out and rendering standard HTML/CSS directly from Rust, Erk aims at smooth, native-speed UIs on constrained hardware. Measured today on a desktop CPU: scrolling a 10,000-card page takes at most 7.3 ms a frame (p95), one changed text among 10,000 elements about 19 ms, and a text field's blinking caret about 4 ms, because a change restyles, lays out and repaints only what it touches. Memory is the open front: a small page takes 23.7 MB of private memory and a 10,000-element page about 470 MB, so a memory diet (M5.13) comes before M5 is done. Erk has not been measured on embedded hardware yet (see [Measurements](#measurements)). It is an alternative to expensive or complex C++ GUI libraries, with its own API (Rust and a C ABI), not a drop-in replacement.
 - **The Perfect Architecture for AI-Assisted Coding:** As LLMs write more of our code, they often hallucinate or fail when tangled in npm packages, bundler configs, and complex JavaScript framework lifecycles. However, AI is exceptionally good at writing standard HTML/CSS and pure system code (Rust/C/Go). Erk's zero-boilerplate architecture—separating a "dumb" HTML/CSS UI from a compiled, native backend—provides the most deterministic, AI-friendly environment for rapid app generation.
 - **A Return to Sanity (Dumb UI, Smart Core):** We reject the trend of forcing system logic, state, and routing into the view layer. In Erk, the interface is just markup and styling. The intelligence lives where it belongs: in your compiled, I/O-capable system code, running without IPC bridges or garbage collection pauses.
 
@@ -147,14 +150,16 @@ cargo run -p erk-shell -- examples/m2-demo.html
 
 Today Erk does **not**:
 
-- show form controls (`input`, `textarea`, `select`), or style `button` as
-  a native control (M5);
+- show form controls other than text fields (`select`, checkboxes, radio
+  buttons, `button` as a native control), select text in a field, copy and
+  paste, or take IME input (M5);
 - decode images other than PNG and JPEG, or load stylesheets and fonts
   from the host (later);
 - draw dotted, dashed or double borders (drawn solid), or inset shadows;
 - take a paragraph's direction from CSS `direction`: right-to-left text
   is drawn, but a paragraph's direction comes from its first letter;
-- render incrementally: every change redraws the whole page (M5).
+- keep its memory small on large pages: about 15 KB an element today
+  (M5.13 measures where it goes and cuts it).
 
 Never planned: floats, table layout, multi-column, print, `<script>` and
 any browser-compatible JavaScript environment. The full list is in
@@ -162,28 +167,33 @@ any browser-compatible JavaScript environment. The full list is in
 
 ## Measurements
 
-Measured, not claimed. Windows 11, Intel i7-10750H, CPU rendering
-(`vello_cpu`), every frame a full recompute (incremental rendering is M5):
+Measured, not claimed. Windows 11, Intel i7-10750H, release build, CPU
+rendering (`vello_cpu`) at 800 × 600 unless the row says otherwise; frame
+times are from the benchmark (`cargo run --release -p erk --example bench`),
+every frame checked against a full recompute in the tests:
 
 | What | Result |
 |---|---|
-| Release binary, default profile (Windows) | 16.2 MB (14.9 MB at M1.0, 9.5 MB with `opt-level = "s"` then) |
-| Idle window, private memory | 12.8 MB (small page), 14.2 MB (1000 elements) |
-| Full frame (style, layout, display list, CPU paint), median of 30 at 800 × 600 | settings screen 9.8 ms, 1000-element page 66.5 ms (M3) |
-| Painting alone, 1000-element page | 15.6 ms on the CPU, 7.8 ms on the GPU (GTX 1650) |
+| Scrolling a 10,000-card page (B15) | 7.3 ms a frame at p95, within 120 Hz; 709 ms before incremental rendering. On the GPU (GTX 1650) the raster takes 1.5–4.6 ms |
+| One text changes among 10,000 elements (B1) | 18.6 ms median a frame; 454 ms at p95 before M5 |
+| A text field's caret blinks on a 5000-element page (B17) | 3.8 ms median, 4.7 ms p95: no styling, no layout, only the changed tiles repainted |
+| Repaint after a change | only the 32 px tiles that changed: about 2 ms of raster for one changed text |
+| Private memory | 23.7 MB for a small page (`examples/m2-demo.html`), 472 MB for 10,000 elements (about 15 KB an element); the GPU path takes more. M5.13 cuts it |
+| Release binary, default profile (Windows) | 16.2 MB (measured at M3; the Linux binary is held under a 34.2 MB budget in CI) |
 
 The [Web Platform Tests](https://web-platform-tests.org/) reftests run in
-CI against a recorded baseline: 68.1 % of `css/CSS2/normal-flow` (508 of
-746), 56.2 % of `css/css-flexbox` (569 of 1012), 40.8 % of `css/css-text`
-(608 of 1489) and 19.1 % of `css/css-position` (48 of 251) pass today. Most
+CI against a recorded baseline: 69.4 % of `css/CSS2/normal-flow` (518 of
+746), 59.5 % of `css/css-flexbox` (602 of 1012), 24.3 % of `css/css-text`
+(362 of 1489) and 20.3 % of `css/css-position` (51 of 251) pass today. Most
 failing tests use something Erk does not support yet (external stylesheets,
-web fonts, `white-space: pre`, block-in-inline) or never will (tables,
-floats, script). A fuzz job feeds the renderer random input on every
-change.
+web fonts, block-in-inline) or never will (tables, floats, script). A result
+that falls needs a written reason. Fuzz jobs feed the renderer random pages
+and the API random sequences of host calls on every change, and check every
+frame against the page recomputed from nothing.
 
 The Linux release binary is held under a size budget in CI. Similarity to
-Chrome 154 on the reference pages: every element box matches within 1 CSS
-pixel on all seventeen pages, and pixel scores range from 48 % on text-heavy
+Chrome 155 on the reference pages: every element box matches within 1 CSS
+pixel on all 24 pages, and pixel scores range from 48 % on text-heavy
 pages (glyph antialiasing differs) to 100 % on boxes; the scores are in
 [expectations.txt](crates/erk-renderer/tests/reference/expectations.txt)
 and may only rise unless a written reason says otherwise.
@@ -198,7 +208,7 @@ and may only rise unless a written reason says otherwise.
 | M2 | Input, hit testing, scrolling, GPU rendering; the counter demo | Done |
 | M3 | Rust API and C ABI | Done |
 | M4 | Mutable DOM and events, gradients, 2D transforms; TodoMVC | Done |
-| M5 | Incremental rendering, forms, IME, accessibility | Planned |
+| M5 | Incremental rendering, forms, IME, accessibility | In progress: incremental rendering done (M5.0–M5.6); focus, cancellable defaults and form values (M5.7); text fields underway (M5.8: drawn, editable, blinking caret); then selection and IME, the other controls, accessibility, transitions and a memory diet |
 | M6 | Bindings: Python, Go, JavaScript/TypeScript (Node.js, Bun) | Planned |
 | M7 | Developer tools, written with Erk | Planned |
 | M8 | Packaging, ABI 1.0 | Planned |
@@ -251,11 +261,13 @@ golden images and the reference tests always use vello_cpu.
 ```
 crates/
   erk/           the Rust API: an app, its document, its raster (M3)
+  erk-ffi/       the C ABI (include/erk.h), which every other language binds
   erk-shell/     window, event loop, the demo host
   erk-renderer/  the engine (layout, display list) and the raster
   erk-style/     CSS styling with Stylo
   erk-invalidation/ what changed since the last frame, and what it makes dirty
   erk-dom/       arena DOM and HTML parsing
+  erk-wpt/       runs the Web Platform Tests reftests against the baseline
 docs/
   design/        architecture decisions (Turkish)
   plans/         roadmap and milestone plans (Turkish)
