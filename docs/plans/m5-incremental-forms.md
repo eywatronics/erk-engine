@@ -801,3 +801,24 @@ Dördüncü PR: imlecin yeri ve `placeholder`.
 | `placeholder` | Değer boşken alan `placeholder`'ını gösteriyor (`input`'ta satır sonları atılmış), gri (#757575, Erk'in kendi görünümü; `::placeholder` yok). Rengi yerleşim değil görüntü listesi seçiyor: belgeye bakıp (`layout::placeholder`) |
 | Testler | Basış imleci yerine koyuyor (aynı alanda yeniden, şifrede sonun ötesi ve iki nokta arası); uzun değerde imleç görünüyor, Home başa döndürüyor; `textarea` imlece kayıyor, kullanıcının kaydırmasından geri çekilmiyor; `placeholder` gri, yazınca gidiyor, silince dönüyor, değişince yeniden yerleşiyor |
 | Mutasyonlar | 14 mutasyondan 13'ü yakalandı, biri ölü koddu ve silindi (`placeholder` görünürken basışı başa koyan erken dönüş: değer boş, hesap zaten 0'a iniyor). İlk tur geçersizdi: önceki PR'ın tıklama testi alanın başına basıp imleci sonda bekliyordu, bu adımda kırıktı ve birkaç mutasyonu "yakalamış" görünüyordu. Test değerin ötesine basacak biçimde düzeltildi, bozma betiği artık önce tabanın yeşil olduğunu denetliyor. Sağlam tabanla kaçanlar için: şifrede iki nokta arasına basış; kullanıcının kaydırdığı `textarea`'nın yanıp sönme karelerinde de yerinde kalması (imlecin her karede ya da bayrak sıfırlanmadan görünür tutulması onu geri çekiyordu) |
+
+Beşinci PR: seçim (dördüncü adımın ilk yarısı; pano ikinci yarısı).
+
+| Konu | Not |
+|---|---|
+| Model | İmleç seçimin odak ucu, yanında bir çapa (`Page::anchor`); ikisi eşitse seçim yok. Odak alana gelince ikisi de sonda; basış ikisini de bastığı yere koyuyor, Shift'li basış yalnızca odağı. Odaklı alanda basılı sürükleme odağı işaretçinin altına taşıyor (`pressed` alanın kendisiyken) |
+| Tuşlar | Shift'le ok, Home ve End seçimi genişletiyor; Shift'siz sol ve sağ ok seçimin kenarına gidiyor. Yazılan, Geri Silme ve Delete seçimin yerini alıyor. Control+A hepsini seçiyor. Control (AltGr değil: Windows'ta AltGr Control ile Alt'tır, Türkçe klavyede `@`) ya da Meta ile bir harf komut, yazı değil: önceden Control+A alana "a" yazıyordu |
+| Çizim | Seçim, Parley'nin `Selection::geometry` dikdörtgenleriyle metnin üstüne yarı saydam mavi (Erk'in kendi rengi, `::selection` yok), alanın içerik kutusuna kırpılarak; liste kurulduktan sonra, imleçten önce. Kâhin aynı yoldan |
+| Sonraya kalan | Pano (Control+C/X/V, karar 5) bu adımın ikinci PR'ı. Çift ve üçlü basışla kelime ve satır seçimi, Control'lü okla kelime gezintisi, sarılan satırlarda görsel satır gezintisi (Parley'nin `next_line`'ı hazır) ve host'un seçimi okuyup yazacağı API (DOM'un `selectionStart`/`setSelectionRange`'i) IME adımıyla ya da M5.10'la |
+| Mutasyonlar | 16 mutasyondan 16'sı yakalandı (taban önce yeşil denetlendi); ilk turda kaçan ikisi için: ileri doğru seçimde sol okun seçimin başına gitmesi, kaymış dar alanda seçimin alanın içine kırpılması |
+
+M5.13 inceleme raporu (`docs/reviews/m5_13_memory_sciter_slint_architecture.md`,
+2026-11-04): değerlendirildi. Maddeleri M5.13'ün yürütme sırası olarak
+alınıyor: önce B16 profili (CPU ve GPU, özel bellek ile çalışma kümesi
+ayrı), sonra GPU belleği (wgpu sınırları, `cpu_frame`'in bırakılması,
+DX12 ile Vulkan aynı donanımda), Parley tekilleştirmesi, DOM ve
+öznitelik sıkıştırması, Stylo'nun stil paylaşımının ölçülmesi ve CI
+bellek bütçesi; hedefler ölçümden sonra kesinleşiyor. Raporun bir ara
+sürümündeki "Windows'ta D3D11 arka ucu" önerisi geçersiz: wgpu-hal 29'un
+arka uçları DX12, Vulkan, GLES ve Metal (D3D11 wgpu'dan çıkarıldı);
+raporun son hali de bunu söylüyor.
