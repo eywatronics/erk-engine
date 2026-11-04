@@ -11,14 +11,14 @@
 use std::num::NonZeroU32;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use erk_renderer::{Cursor, Frame, Painted, Raster, RasterThread};
 use softbuffer::{Context as SoftContext, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
@@ -333,6 +333,11 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
         let now = u64::try_from(self.started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.guarded(event_loop, |app| app.tick(now));
         self.show_cursor();
+        // Wake for what moves by itself (the caret's blink), else for input.
+        event_loop.set_control_flow(match self.app.next_tick() {
+            Some(at) => ControlFlow::WaitUntil(self.started + Duration::from_nanos(at)),
+            None => ControlFlow::Wait,
+        });
     }
 }
 

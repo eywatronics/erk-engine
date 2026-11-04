@@ -223,6 +223,20 @@ impl Engine {
         events
     }
 
+    /// The host's clock is at `now_ns` (p1-contract §7): what depends on
+    /// time, the caret's blink, catches up, and a frame is due if it looks
+    /// different.
+    pub fn set_time(&mut self, now_ns: u64) {
+        self.changed |= self.page.set_time(now_ns);
+    }
+
+    /// When the page next looks different with nothing done to it, on the
+    /// host's clock: the caret's next blink. `None` while nothing on the
+    /// page moves by itself.
+    pub fn next_tick(&self) -> Option<u64> {
+        self.page.next_tick()
+    }
+
     /// The wheel scrolled by `dx`, `dy` CSS pixels at `x`, `y`.
     pub fn wheel(&mut self, (dx, dy): (f32, f32), (x, y): (f32, f32)) {
         let moved = self.restyled_by(|page| page.wheel((dx, dy), (x, y)));
@@ -1614,6 +1628,47 @@ mod tests {
             .reduce(f32::max)
             .expect("bullets");
         assert!(x > right, "the caret at {x}, the last bullet at {right}");
+    }
+
+    #[test]
+    fn the_caret_blinks_on_the_hosts_clock_and_shows_while_typing() {
+        use crate::messages::Key;
+        const MS: u64 = 1_000_000;
+        let mut engine = verifying("<input id=t value=a><p>metin</p><button>b</button>");
+        // No field focused: nothing moves by itself.
+        assert_eq!(engine.next_tick(), None);
+        engine.set_time(100 * MS);
+        assert!(engine.prepare().0.is_none(), "no caret, no frame");
+        press(&mut engine, Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert!(caret(&prepared.unwrap()).is_some(), "shows at once");
+        // Half a second after it last moved, the caret hides.
+        assert_eq!(engine.next_tick(), Some(600 * MS));
+        engine.set_time(599 * MS);
+        assert!(engine.prepare().0.is_none(), "not yet");
+        engine.set_time(600 * MS);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(caret(&prepared.unwrap()), None, "hidden");
+        assert_eq!(engine.next_tick(), Some(1100 * MS));
+        // Typing shows it at once, and the blink starts again from there.
+        engine.set_time(800 * MS);
+        type_text(&mut engine, "b");
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(caret(&prepared.unwrap()).is_some(), "shows while typing");
+        assert_eq!(engine.next_tick(), Some(1300 * MS));
+        engine.set_time(1300 * MS);
+        assert_eq!(caret(&engine.prepare().0.unwrap()), None);
+        // A clock that goes back is taken as standing still.
+        engine.set_time(200 * MS);
+        assert_eq!(engine.next_tick(), Some(1800 * MS));
+        // Leaving the field stops the blink.
+        press(&mut engine, Key::Tab);
+        assert_eq!(engine.next_tick(), None);
+        assert!(engine.prepare().0.is_some(), "the caret goes");
+        engine.set_time(1900 * MS);
+        assert!(engine.prepare().0.is_none(), "no caret, no blink");
     }
 
     #[test]

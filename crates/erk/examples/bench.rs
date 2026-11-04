@@ -19,7 +19,10 @@
 
 use std::time::{Duration, Instant};
 
-use erk::{App, Config, FrameStats, FrameTimings, Input, Mutation, Node, Ref};
+use erk::{
+    App, Config, FrameStats, FrameTimings, Input, Key, KeyInput, KeyState, Modifiers, Mutation,
+    Node, Ref,
+};
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
@@ -73,17 +76,20 @@ fn measure(
     what: &'static str,
     mut change: impl FnMut(&mut App, usize),
 ) -> Result {
+    // Each turn half a second after the last on the host's clock: what
+    // moves by itself (a caret's blink) moves once a turn.
+    let at = |run: usize| run as u64 * 500_000_000;
     // Warm up: caches and the frame thread.
     for run in 0..3 {
         change(app, run);
-        app.tick(0);
+        app.tick(at(run));
     }
     let mut times = Vec::with_capacity(runs);
     let mut stages = Vec::with_capacity(runs);
     for run in 0..runs {
         change(app, run + 3);
         let start = Instant::now();
-        app.tick(0);
+        app.tick(at(run + 3));
         times.push(start.elapsed());
         stages.extend(app.last_frame_timings());
     }
@@ -229,6 +235,26 @@ fn b6() -> Result {
         )
         .unwrap();
         },
+    )
+}
+
+fn b17() -> Result {
+    // A real caret (M5.8): a focused field's caret blinks on the host's
+    // clock on a 5000-element page, nothing else changing (B6's page).
+    let mut html = String::from("<input id=field value=yazı>");
+    html.push_str(&rows(1000));
+    let mut app = app(&html);
+    app.input(Input::Key(KeyInput {
+        key: Key::Tab,
+        state: KeyState::Down,
+        modifiers: Modifiers::default(),
+    }));
+    measure(
+        &mut app,
+        30,
+        "B17",
+        "a field's caret blinks on 5000 elements",
+        |_, _| {},
     )
 }
 
@@ -415,7 +441,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 13] = [
+    let all: [Scenario; 14] = [
         ("B1", b1),
         ("B2", b2),
         ("B2b", b2b),
@@ -429,6 +455,7 @@ fn main() {
         ("B13", b13),
         ("B14", b14),
         ("B15", b15),
+        ("B17", b17),
     ];
     println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");
     println!(

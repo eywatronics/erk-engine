@@ -60,6 +60,11 @@ pub(crate) struct Page {
     /// Whether input moved a caret or edited a field since the last look:
     /// the next frame shows it, though nothing the pointer is on changed.
     edited: bool,
+    /// The host's clock at its last tick, in nanoseconds (p1-contract §7:
+    /// the core reads no clock), and when the caret last moved: it shows
+    /// for a blink from then, hides for one, and so on.
+    now: u64,
+    caret_since: u64,
     /// The last frame's viewport, in CSS pixels.
     viewport: (f32, f32),
     /// How far the user has scrolled each scroll container.
@@ -268,6 +273,8 @@ impl Page {
             caret: None,
             focus_value: None,
             edited: false,
+            now: 0,
+            caret_since: 0,
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
@@ -1054,6 +1061,7 @@ impl Page {
         self.caret = value.as_ref().map(|(node, value)| (*node, value.len()));
         self.focus_value = value.map(|(_, value)| (value, false));
         self.edited = true;
+        self.caret_since = self.now;
         if let Some(new) = focus {
             events.push(self.event(EventKind::Focus, new, (0.0, 0.0), modifiers));
         }
@@ -1105,6 +1113,8 @@ impl Page {
             _ => return None,
         };
         self.edited = true;
+        // A caret that moves shows at once, as it does while typing.
+        self.caret_since = self.now;
         if new_value == value {
             self.caret = Some((field, caret));
             return Some(Vec::new());
@@ -1130,6 +1140,28 @@ impl Page {
         std::mem::take(&mut self.edited)
     }
 
+    /// The host's clock is at `now`. Whether the caret shows or hides
+    /// otherwise than before: a frame is due.
+    pub(crate) fn set_time(&mut self, now: u64) -> bool {
+        let before = self.caret_shown();
+        self.now = now.max(self.now);
+        self.caret.is_some() && before != self.caret_shown()
+    }
+
+    /// When the page next looks different with nothing done to it: the
+    /// caret's next blink, if there is a caret.
+    pub(crate) fn next_tick(&self) -> Option<u64> {
+        self.caret?;
+        let blinks = (self.now - self.caret_since) / CARET_BLINK;
+        Some(self.caret_since + (blinks + 1) * CARET_BLINK)
+    }
+
+    /// Whether the caret shows now: in the first half of each blink since
+    /// it last moved.
+    fn caret_shown(&self) -> bool {
+        (self.now.saturating_sub(self.caret_since) / CARET_BLINK).is_multiple_of(2)
+    }
+
     /// The focused text field's caret, painted: a line one pixel wide in
     /// the field's colour, as tall as the line it is on, where the field's
     /// text puts it.
@@ -1140,7 +1172,7 @@ impl Page {
         styles: &Styles,
     ) -> Option<DisplayItem> {
         // The caret goes with the focus: moving it sets or clears it.
-        let (field, at) = self.caret?;
+        let (field, at) = self.caret.filter(|_| self.caret_shown())?;
         let kind = crate::layout::text_field(&self.doc, field)?;
         let value = self.doc.value(field).ok()??;
         let at = floor_boundary(&value, at.min(value.len()));
@@ -1883,6 +1915,10 @@ fn tabindex(element: &ElementData) -> Option<i32> {
     let value = if negative { -magnitude } else { magnitude };
     Some(i32::try_from(value).unwrap_or(if negative { i32::MIN } else { i32::MAX }))
 }
+
+/// How long a caret shows, then hides, in nanoseconds: half a second, as
+/// browsers blink it on most systems.
+const CARET_BLINK: u64 = 500_000_000;
 
 /// `at` or the nearest character boundary of `text` before it.
 fn floor_boundary(text: &str, mut at: usize) -> usize {

@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 10;
+pub const ERK_ABI_VERSION: u32 = 11;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -864,6 +864,19 @@ pub extern "C" fn erk_app_tick(app: *mut ErkApp, now_ns: u64) -> ErkStatus {
     guard(app, Calls::Loop, |app| {
         app.app().tick(now_ns);
         Ok(())
+    })
+}
+
+/// When the app's page next looks different with nothing done to it, on
+/// the clock `erk_app_tick` is given (§7): the caret's next blink. A host
+/// running its own loop ticks then. `ERK_ERR_NOT_FOUND` while nothing on
+/// the page moves by itself.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_app_next_tick(app: *mut ErkApp, out_ns: *mut u64) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let next = app.app().next_tick().ok_or(ERK_ERR_NOT_FOUND)?;
+        put(out_ns, next)
     })
 }
 
