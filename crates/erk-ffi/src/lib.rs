@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 11;
+pub const ERK_ABI_VERSION: u32 = 12;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -131,6 +131,14 @@ pub type ErkResourceFn = Option<
 >;
 pub type ErkLogFn =
     Option<unsafe extern "C" fn(user_data: *mut c_void, level: u32, message: ErkStr)>;
+/// The host's clipboard, read for a paste: point `*text` at its text (in
+/// the host's memory, copied before the call returns) and return `ERK_OK`,
+/// or return `ERK_ERR_NOT_FOUND` when it holds no text. It must not call Erk.
+pub type ErkClipboardReadFn =
+    Option<unsafe extern "C" fn(user_data: *mut c_void, text: *mut ErkStr) -> ErkStatus>;
+/// The host's clipboard, written by a copy or a cut: `text` is lent for the
+/// call. It must not call Erk.
+pub type ErkClipboardWriteFn = Option<unsafe extern "C" fn(user_data: *mut c_void, text: ErkStr)>;
 pub type ErkEventFn =
     Option<unsafe extern "C" fn(user_data: *mut c_void, app: *mut ErkApp, event: *const ErkEvent)>;
 
@@ -878,6 +886,65 @@ pub extern "C" fn erk_app_next_tick(app: *mut ErkApp, out_ns: *mut u64) -> ErkSt
         let next = app.app().next_tick().ok_or(ERK_ERR_NOT_FOUND)?;
         put(out_ns, next)
     })
+}
+
+/// Where the app's copied text goes and pasted text comes from (M5 plan,
+/// decision 5): the host's clipboard, through `read` and `write`, both
+/// required. The app owns `user_data` from here: `destroy` runs once, when
+/// another clipboard is set or the app is destroyed. Until a clipboard is
+/// set the app has its own, which copies and pastes within it. Not from
+/// inside a callback.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_app_set_clipboard(
+    app: *mut ErkApp,
+    read: ErkClipboardReadFn,
+    write: ErkClipboardWriteFn,
+    user_data: *mut c_void,
+    destroy: ErkDestroyFn,
+) -> ErkStatus {
+    guard(app, Calls::Loop, move |shared| {
+        let (Some(read), Some(write)) = (read, write) else {
+            // A call that fails leaves user_data, and its destroy, with the
+            // host.
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        };
+        shared.app().set_clipboard(HostClipboard {
+            read,
+            write,
+            user_data,
+            _destroy: Destroy(destroy, user_data),
+        });
+        Ok(())
+    })
+}
+
+/// The host's clipboard, through its two functions.
+struct HostClipboard {
+    read: unsafe extern "C" fn(*mut c_void, *mut ErkStr) -> ErkStatus,
+    write: unsafe extern "C" fn(*mut c_void, ErkStr),
+    user_data: *mut c_void,
+    _destroy: Destroy,
+}
+
+impl erk::Clipboard for HostClipboard {
+    fn read(&mut self) -> Option<String> {
+        let mut out = ErkStr {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
+        #[allow(unsafe_code)] // SAFETY: the host gave the function and its user_data.
+        let status = unsafe { (self.read)(self.user_data, &mut out) };
+        // Copied before the host's memory can go.
+        (status == ERK_OK).then(|| text(out).ok()).flatten()
+    }
+
+    fn write(&mut self, copied: &str) {
+        #[allow(unsafe_code)] // SAFETY: the host gave the function and its user_data.
+        unsafe {
+            (self.write)(self.user_data, lent(copied))
+        };
+    }
 }
 
 /// Give a headless app input, as a window would.

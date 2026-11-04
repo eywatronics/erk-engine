@@ -125,6 +125,69 @@ fn a_focused_field_asks_for_the_next_tick_at_its_caret_blink() {
     assert_eq!(app.next_tick(), None);
 }
 
+/// Press Control with `letter`.
+fn command(app: &mut App, letter: &str) {
+    for state in [KeyState::Down, KeyState::Up] {
+        app.input(Input::Key(KeyInput {
+            key: Key::Character(letter.to_owned()),
+            state,
+            modifiers: Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        }));
+    }
+}
+
+#[test]
+fn what_is_copied_in_one_field_pastes_in_another() {
+    let mut app = app("<input id=a value=bir><input id=b value=iki>");
+    let b = node(&app, "#b");
+    let inputs = Rc::new(Cell::new(0));
+    {
+        let inputs = inputs.clone();
+        app.on(b, EventKind::Input, move |_, _| {
+            inputs.set(inputs.get() + 1)
+        })
+        .unwrap();
+    }
+    press(&mut app, Key::Tab);
+    command(&mut app, "a");
+    command(&mut app, "c");
+    press(&mut app, Key::Tab);
+    command(&mut app, "v");
+    // The app's own clipboard: pasted at the end of "iki".
+    assert_eq!(app.value(b), Ok(Some("ikibir".to_owned())));
+    assert_eq!(inputs.get(), 1);
+}
+
+#[test]
+fn the_hosts_clipboard_is_written_and_read() {
+    use std::cell::RefCell;
+
+    struct Shared(Rc<RefCell<Vec<String>>>);
+    impl erk::Clipboard for Shared {
+        fn read(&mut self) -> Option<String> {
+            Some("dış".to_owned())
+        }
+        fn write(&mut self, text: &str) {
+            self.0.borrow_mut().push(text.to_owned());
+        }
+    }
+
+    let mut app = app("<input id=a value=metin>");
+    let a = node(&app, "#a");
+    let written = Rc::new(RefCell::new(Vec::new()));
+    app.set_clipboard(Shared(written.clone()));
+    press(&mut app, Key::Tab);
+    command(&mut app, "a");
+    command(&mut app, "x");
+    assert_eq!(*written.borrow(), ["metin"]);
+    assert_eq!(app.value(a), Ok(Some(String::new())));
+    command(&mut app, "v");
+    assert_eq!(app.value(a), Ok(Some("dış".to_owned())));
+}
+
 #[test]
 fn a_prevented_key_types_nothing() {
     let mut app = app("<input id=t value=a>");

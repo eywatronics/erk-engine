@@ -822,3 +822,13 @@ bellek bütçesi; hedefler ölçümden sonra kesinleşiyor. Raporun bir ara
 sürümündeki "Windows'ta D3D11 arka ucu" önerisi geçersiz: wgpu-hal 29'un
 arka uçları DX12, Vulkan, GLES ve Metal (D3D11 wgpu'dan çıkarıldı);
 raporun son hali de bunu söylüyor.
+
+Altıncı PR: pano (dördüncü adımın ikinci yarısının ilk parçası).
+
+| Konu | Not |
+|---|---|
+| Model | Pano bir G/Ç (karar 5): çekirdek ona erişmez. Metin alanında Control+C ve Control+X tuşun varsayılan işi olarak bir istek bırakıyor (`ClipboardRequest::Write`, seçili metin; kes ayrıca seçimi siliyor ve bir `input` olayı); Control+V okuma istiyor (`ClipboardRequest::Read`). İsteği `erk` karşılıyor: yazıyor, ya da okuyup `Engine::paste` ile seçimin yerine yazdırıyor (yazmayla aynı yol: `input`'ta satır sonları atılıyor). Şifre hiçbir zaman kopyalanmıyor ya da kesilmiyor, tarayıcılar gibi. Tür `messages.rs`'te düz veri; yüzey muhafızının listesi aynı PR'da |
+| Host'un panosu | Rust'ta `Clipboard` trait'i ve `App::set_clipboard`; C-ABI'de `erk_app_set_clipboard` (ABI 12, ekleme ama yeni bir sahiplik yolu): `read` metni ödünç veriyor, Erk hemen kopyalıyor; `destroy` başka pano kurulunca ya da uygulama yok edilince bir kez. Kurulmadan uygulamanın kendi panosu: uygulama içinde kopyalayıp yapıştırıyor, testler de onunla |
+| Sonraki | Pencere kipinde sistem panosu: yeni bir bağımlılık (`arboard` ya da eşdeğeri), lisans ve boyut bütçesi denetimiyle ayrı PR |
+| Fuzz | Yorumlayıcının tuşlarına Shift ve Control, harflere `c`, `x`, `v` girdi: seçim, kopyala, kes ve yapıştır kâhinle her karede |
+| Mutasyonlar | 12 mutasyondan 11'i yakalandı, biri ölü koddu ve silindi (yapıştırmada imlecin odakla süzülmesi: imleç odakla gidip geliyor); "pano için okuma yeter" mutasyonu ilk turda derlenmemişti, derlenince yakalandı |

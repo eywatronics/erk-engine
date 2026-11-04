@@ -22,8 +22,9 @@ use erk_style::{ComputedValues, Interaction, Invalidation, Restyler, StyleEngine
 use crate::display::{Content, Cull, DisplayItem, DisplayList, Extents, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    BoxModel, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput, KeyState, Modifiers,
-    NodeKind, PointerButton, PointerInput, PointerKind, ResourceRequest, Stage, Status,
+    BoxModel, ClipboardRequest, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput,
+    KeyState, Modifiers, NodeKind, PointerButton, PointerInput, PointerKind, ResourceRequest,
+    Stage, Status,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -57,6 +58,8 @@ pub(crate) struct Page {
     /// Where the focused field's selection starts: the caret is its other
     /// end, and with nothing selected the two are one.
     anchor: usize,
+    /// What the last key asked of the clipboard, for the embedding layer.
+    clipboard: Option<ClipboardRequest>,
     /// The focused text field's value when it took the focus, and whether
     /// the user has edited it since: leaving it changed is a `change`.
     focus_value: Option<(String, bool)>,
@@ -279,6 +282,7 @@ impl Page {
             highlight: None,
             caret: None,
             anchor: 0,
+            clipboard: None,
             focus_value: None,
             edited: false,
             now: 0,
@@ -1143,16 +1147,29 @@ impl Page {
         let command = (input.modifiers.control && !input.modifiers.alt) || input.modifiers.meta;
         let shift = input.modifiers.shift;
         let (new_value, caret) = match &input.key {
-            Key::Character(typed) if command => {
-                if typed.eq_ignore_ascii_case("a") {
+            Key::Character(typed) if command => match typed.to_lowercase().as_str() {
+                "a" => {
                     // Select all: the caret at the end, the anchor at the start.
                     self.anchor = 0;
                     self.caret = Some((field, value.len()));
                     self.edited = true;
                     return Some(Vec::new());
                 }
-                return None;
-            }
+                // Copy and cut the selection, but never a password's, as
+                // browsers keep it.
+                "c" | "x" if selected && kind != crate::layout::TextField::Password => {
+                    self.clipboard = Some(ClipboardRequest::Write(value[low..high].to_owned()));
+                    if typed.eq_ignore_ascii_case("c") {
+                        return Some(Vec::new());
+                    }
+                    replaced("")
+                }
+                "v" => {
+                    self.clipboard = Some(ClipboardRequest::Read);
+                    return Some(Vec::new());
+                }
+                _ => return None,
+            },
             Key::Character(typed) => replaced(typed),
             Key::Space => replaced(" "),
             Key::Enter if lines => replaced("\n"),
@@ -1357,6 +1374,26 @@ impl Page {
             reveal(&mut x, line.x0 as f32, line.x0 as f32 + 1.0, width);
         }
         Some((field, (x, y)))
+    }
+
+    /// What the last key asked of the clipboard, once.
+    pub(crate) fn take_clipboard(&mut self) -> Option<ClipboardRequest> {
+        self.clipboard.take()
+    }
+
+    /// `text`, from the clipboard, pasted in the focused text field: typed
+    /// in at the selection, then an `input` event. Nothing without one.
+    pub(crate) fn paste(&mut self, text: &str) -> Vec<Event> {
+        // The caret goes with the focus: there is one only in a focused field.
+        let Some((field, _)) = self.caret else {
+            return Vec::new();
+        };
+        let typed = KeyInput {
+            key: Key::Character(text.to_owned()),
+            state: KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        self.edit(field, &typed).unwrap_or_default()
     }
 
     /// Whether input moved a caret or edited a field since the last call.
