@@ -114,6 +114,18 @@ fn what_the_user_types_is_an_input_event_with_the_new_value() {
 }
 
 #[test]
+fn a_focused_field_asks_for_the_next_tick_at_its_caret_blink() {
+    let mut app = app("<input id=t value=a><button>b</button>");
+    assert_eq!(app.next_tick(), None);
+    app.tick(1_000);
+    press(&mut app, Key::Tab);
+    // Ticked at 1000 ns, the caret hides half a second later.
+    assert_eq!(app.next_tick(), Some(1_000 + 500_000_000));
+    press(&mut app, Key::Tab);
+    assert_eq!(app.next_tick(), None);
+}
+
+#[test]
 fn a_prevented_key_types_nothing() {
     let mut app = app("<input id=t value=a>");
     let t = node(&app, "#t");

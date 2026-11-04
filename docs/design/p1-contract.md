@@ -282,6 +282,12 @@ olurdu ve fontconfig ayarları ile platformun yedek kuralları yok sayılırdı.
 - Çekirdek saati hiç okumaz. İmleç yanıp sönmesi (M5), geçişler ve
   animasyonlar (M9) yalnızca `now_ns`'e bağlıdır; testler zamanı kendileri
   sürer.
+- **Bir sonraki tur** (M5.8): sayfa kendiliğinden değişecekse (imlecin
+  yanıp sönmesi) motor bunun zamanını aynı saatte söyler: Rust'ta
+  `App::next_tick`, C-ABI'de `erk_app_next_tick`. Erk'in döngüsü o zamana
+  kadar bekler (`WaitUntil`); kendi döngüsünü süren host o zaman ya da bir
+  sonraki girdide `erk_app_tick` çağırır. Kendiliğinden değişen bir şey
+  yoksa zaman yoktur, döngü yalnızca girdiyi bekler.
 
 ## 8. Hata modeli
 
@@ -461,6 +467,11 @@ gerekçeli bir daraltma:
   alanında tuşun varsayılan işi düzenleme; `keydown` iptal edilirse
   yapılmaz. Kullanıcının düzenlemesi `ERK_EVENT_INPUT`, odak giderken
   kullanıcı değeri değiştirdiyse `ERK_EVENT_CHANGE` (`blur`'dan önce).
+- **v0.11 (M5.8):** `erk_app_next_tick(app, *out_ns)` (§7): sayfanın
+  kendiliğinden değişeceği bir sonraki an, `erk_app_tick`'e verilen
+  saatte; yoksa `ERK_ERR_NOT_FOUND`. Odaktaki metin alanının imleci
+  host'un saatiyle yanıp söner (yarım saniye görünür, yarım saniye
+  görünmez; imleç oynayınca baştan, görünür).
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

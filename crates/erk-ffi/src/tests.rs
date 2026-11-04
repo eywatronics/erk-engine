@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_10() {
-    assert_eq!(erk_abi_version(), 10);
+fn the_abi_version_is_0_11() {
+    assert_eq!(erk_abi_version(), 11);
 }
 
 #[test]
@@ -400,6 +400,34 @@ fn a_key_event_names_its_key_and_what_it_typed() {
     }
     assert_eq!(
         erk_app_input(app, &key(ERK_INPUT_KEY_DOWN, 14, "")),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn the_next_tick_is_the_carets_blink() {
+    let app = app_with("<input id=t value=a>");
+    let mut next = 0;
+    assert_eq!(erk_app_next_tick(app, &mut next), ERK_ERR_NOT_FOUND);
+    assert_eq!(erk_app_tick(app, 7), ERK_OK);
+    let tab = ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind: ERK_INPUT_KEY_DOWN,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key: ERK_KEY_TAB,
+        text: s(""),
+        modifiers: 0,
+    };
+    assert_eq!(erk_app_input(app, &tab), ERK_OK);
+    assert_eq!(erk_app_next_tick(app, &mut next), ERK_OK);
+    assert_eq!(next, 7 + 500_000_000);
+    assert_eq!(
+        erk_app_next_tick(app, std::ptr::null_mut()),
         ERK_ERR_INVALID_ARGUMENT
     );
     assert_eq!(erk_app_destroy(app), ERK_OK);

@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 10
+#define ERK_ABI_VERSION 11
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -500,6 +500,14 @@ ErkStatus erk_resource_complete(ErkApp *app,
  frame painted if something that shows has changed.
  */
 ErkStatus erk_app_tick(ErkApp *app, uint64_t now_ns);
+
+/*
+ When the app's page next looks different with nothing done to it, on
+ the clock `erk_app_tick` is given (§7): the caret's next blink. A host
+ running its own loop ticks then. `ERK_ERR_NOT_FOUND` while nothing on
+ the page moves by itself.
+ */
+ErkStatus erk_app_next_tick(ErkApp *app, uint64_t *out_ns);
 
 /*
  Give a headless app input, as a window would.
