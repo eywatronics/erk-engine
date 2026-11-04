@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use erk::{App, Config, EventKind, Node, Status};
+use erk::{App, Config, EventKind, Input, Key, KeyInput, KeyState, Modifiers, Node, Status};
 
 fn app(html: &str) -> App {
     let mut app = App::headless(Config {
@@ -76,4 +76,57 @@ fn a_value_the_host_sets_raises_no_event() {
     app.set_checked(k, true).unwrap();
     app.tick(1);
     assert_eq!(raised.get(), 0);
+}
+
+/// Press `key`, down then up, as the window would deliver it.
+fn press(app: &mut App, key: Key) {
+    for state in [KeyState::Down, KeyState::Up] {
+        app.input(Input::Key(KeyInput {
+            key: key.clone(),
+            state,
+            modifiers: Modifiers::default(),
+        }));
+    }
+}
+
+#[test]
+fn what_the_user_types_is_an_input_event_with_the_new_value() {
+    let mut app = app("<input id=t value=a><button id=b>b</button>");
+    let t = node(&app, "#t");
+    let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+    for kind in [EventKind::Input, EventKind::Change] {
+        let seen = seen.clone();
+        app.on(t, kind, move |cx, event| {
+            let value = cx.value(event.target).unwrap().unwrap();
+            seen.borrow_mut().push(format!("{:?} {value}", event.kind));
+        })
+        .unwrap();
+    }
+    press(&mut app, Key::Tab);
+    press(&mut app, Key::Character("b".to_owned()));
+    press(&mut app, Key::Backspace);
+    press(&mut app, Key::Character("ş".to_owned()));
+    press(&mut app, Key::Tab);
+    assert_eq!(
+        *seen.borrow(),
+        ["Input ab", "Input a", "Input aş", "Change aş"]
+    );
+}
+
+#[test]
+fn a_prevented_key_types_nothing() {
+    let mut app = app("<input id=t value=a>");
+    let t = node(&app, "#t");
+    let html = node(&app, "html");
+    // The host takes the letter x for itself.
+    app.on_capture(html, EventKind::KeyDown, |cx, event| {
+        if event.key == Some(Key::Character("x".to_owned())) {
+            cx.prevent_default();
+        }
+    })
+    .unwrap();
+    press(&mut app, Key::Tab);
+    press(&mut app, Key::Character("x".to_owned()));
+    press(&mut app, Key::Character("y".to_owned()));
+    assert_eq!(app.value(t), Ok(Some("ay".to_owned())));
 }

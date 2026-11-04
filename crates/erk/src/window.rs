@@ -344,6 +344,13 @@ fn key(logical: &WinitKey) -> Key {
         WinitKey::Named(NamedKey::Space) => Key::Space,
         WinitKey::Named(NamedKey::Escape) => Key::Escape,
         WinitKey::Named(NamedKey::Backspace) => Key::Backspace,
+        WinitKey::Named(NamedKey::Delete) => Key::Delete,
+        WinitKey::Named(NamedKey::ArrowLeft) => Key::ArrowLeft,
+        WinitKey::Named(NamedKey::ArrowRight) => Key::ArrowRight,
+        WinitKey::Named(NamedKey::ArrowUp) => Key::ArrowUp,
+        WinitKey::Named(NamedKey::ArrowDown) => Key::ArrowDown,
+        WinitKey::Named(NamedKey::Home) => Key::Home,
+        WinitKey::Named(NamedKey::End) => Key::End,
         // Some platforms report the space bar as the character it types.
         WinitKey::Character(text) if text.as_str() == " " => Key::Space,
         WinitKey::Character(text) => Key::Character(text.to_string()),
@@ -492,11 +499,18 @@ mod tests {
             (WinitKey::Character(" ".into()), Key::Space),
             (WinitKey::Named(NamedKey::Escape), Key::Escape),
             (WinitKey::Named(NamedKey::Backspace), Key::Backspace),
+            (WinitKey::Named(NamedKey::Delete), Key::Delete),
+            (WinitKey::Named(NamedKey::ArrowLeft), Key::ArrowLeft),
+            (WinitKey::Named(NamedKey::ArrowRight), Key::ArrowRight),
+            (WinitKey::Named(NamedKey::ArrowUp), Key::ArrowUp),
+            (WinitKey::Named(NamedKey::ArrowDown), Key::ArrowDown),
+            (WinitKey::Named(NamedKey::Home), Key::Home),
+            (WinitKey::Named(NamedKey::End), Key::End),
             (
                 WinitKey::Character("ş".into()),
                 Key::Character("ş".to_owned()),
             ),
-            (WinitKey::Named(NamedKey::ArrowDown), Key::Other),
+            (WinitKey::Named(NamedKey::F1), Key::Other),
         ] {
             assert_eq!(key(&logical), expected, "{logical:?}");
         }

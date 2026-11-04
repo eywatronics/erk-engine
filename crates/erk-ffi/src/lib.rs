@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 9;
+pub const ERK_ABI_VERSION: u32 = 10;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -207,6 +207,13 @@ pub const ERK_KEY_ESCAPE: u32 = 4;
 /// The key typed `text`.
 pub const ERK_KEY_CHARACTER: u32 = 5;
 pub const ERK_KEY_BACKSPACE: u32 = 6;
+pub const ERK_KEY_DELETE: u32 = 7;
+pub const ERK_KEY_ARROW_LEFT: u32 = 8;
+pub const ERK_KEY_ARROW_RIGHT: u32 = 9;
+pub const ERK_KEY_ARROW_UP: u32 = 10;
+pub const ERK_KEY_ARROW_DOWN: u32 = 11;
+pub const ERK_KEY_HOME: u32 = 12;
+pub const ERK_KEY_END: u32 = 13;
 
 pub const ERK_MOD_SHIFT: u32 = 1;
 pub const ERK_MOD_CONTROL: u32 = 2;
@@ -908,6 +915,13 @@ pub extern "C" fn erk_app_input(app: *mut ErkApp, input: *const ErkInput) -> Erk
                 ERK_KEY_SPACE => Key::Space,
                 ERK_KEY_ESCAPE => Key::Escape,
                 ERK_KEY_BACKSPACE => Key::Backspace,
+                ERK_KEY_DELETE => Key::Delete,
+                ERK_KEY_ARROW_LEFT => Key::ArrowLeft,
+                ERK_KEY_ARROW_RIGHT => Key::ArrowRight,
+                ERK_KEY_ARROW_UP => Key::ArrowUp,
+                ERK_KEY_ARROW_DOWN => Key::ArrowDown,
+                ERK_KEY_HOME => Key::Home,
+                ERK_KEY_END => Key::End,
                 ERK_KEY_CHARACTER => Key::Character(text(field!(input, ErkInput, text, none))?),
                 _ => return Err(ERK_ERR_INVALID_ARGUMENT),
             };
@@ -1571,6 +1585,13 @@ fn subscribe(
                     Some(Key::Space) => ERK_KEY_SPACE,
                     Some(Key::Escape) => ERK_KEY_ESCAPE,
                     Some(Key::Backspace) => ERK_KEY_BACKSPACE,
+                    Some(Key::Delete) => ERK_KEY_DELETE,
+                    Some(Key::ArrowLeft) => ERK_KEY_ARROW_LEFT,
+                    Some(Key::ArrowRight) => ERK_KEY_ARROW_RIGHT,
+                    Some(Key::ArrowUp) => ERK_KEY_ARROW_UP,
+                    Some(Key::ArrowDown) => ERK_KEY_ARROW_DOWN,
+                    Some(Key::Home) => ERK_KEY_HOME,
+                    Some(Key::End) => ERK_KEY_END,
                     Some(Key::Character(_)) => ERK_KEY_CHARACTER,
                 },
             };

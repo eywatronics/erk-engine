@@ -233,7 +233,8 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
   `tab-size`. Chrome referans sayfası (stillenmiş alanlar) ve altın görüntü
   (varsayılan görünüm).
 
-Dört PR:
+Beş PR (ikinci adım, imlecin saate bağlanması C-ABI'ye bir istek
+türü getirdiği için ikiye bölündü):
 
 1. **Metin alanının çizimi.** UA stil sayfasında `input` ve `textarea`
    (satır içi blok, kenarlık, dolgu, yazı tipi; `input` tek satır `pre`,
@@ -242,16 +243,20 @@ Dört PR:
    yeniden şekilleniyor; kâhin aynı. Taşan satır kırpılıyor, taban çizgisi
    metninki. Altın görüntü (varsayılan görünüm) ve Chrome referans
    sayfası (stillenmiş alanlar).
-2. **Düzenleme ve imleç.** Odaktaki alanda imleç; yazılan karakter, Geri
-   Silme, Delete, oklar, Home, End (`ERK_KEY_*` büyür). Düzenleme tuşun
+2. **Düzenleme.** Odaktaki alanda imleç; yazılan karakter, Geri Silme,
+   Delete, oklar, Home, End (`ERK_KEY_*` büyür). Düzenleme tuşun
    varsayılan işi: `keydown` iptal edilirse yapılmaz; düzenleme `input`
-   olayı, odak kaybında değer değiştiyse `change`. İmleç host'un saatiyle
-   yanıp sönüyor (B6); imleç görünür kalacak kadar kaydırma. `placeholder`.
-3. **Seçim ve pano.** Fareyle ve Shift+okla seçim, seçimin boyanması,
+   olayı, odak kaybında kullanıcı değeri değiştirdiyse `change`. İmleç
+   sabit çiziliyor.
+3. **İmlecin zamanı ve yeri.** İmleç host'un saatiyle yanıp sönüyor (B6:
+   motor saati `tick`'ten alıyor, bir sonraki kareyi ne zaman istediğini
+   söylüyor; C-ABI'de de); tıklama imleci tıklanan yere koyuyor; imleç
+   görünür kalacak kadar kaydırma. `placeholder`.
+4. **Seçim ve pano.** Fareyle ve Shift+okla seçim, seçimin boyanması,
    Ctrl+A/C/X/V. Pano karar 5'teki gibi: C-ABI'de ve ekransız kipte host'un
    geri çağrısı, pencere kipinde platform panosu (bağımlılık kararı bu
    PR'da, lisans denetimiyle).
-4. **IME ve imlecin dikdörtgeni.** Ön düzenleme ve onay girdi türleri,
+5. **IME ve imlecin dikdörtgeni.** Ön düzenleme ve onay girdi türleri,
    altı çizili kompozisyon, imlecin dikdörtgeni; Türkçe ve CJK girişi;
    `break-spaces`, `tab-size`; `size`, `cols`, `rows`.
 
@@ -737,3 +742,21 @@ kullanılıyor: iç kapların çubukları içeriğin içinde.
 | WPT | `textarea-pre-wrap-014` PASS'ten FAIL'e, gerekçesiyle: alan çizilmediği için test ve referans ikisi de boştu. Çizilince `div` eşi `pre-wrap-014` gibi düşüyor (yumuşak sarmada asılı boşluklar iki yana yaslamada hâlâ sayılıyor). `textarea-always-preserves-spaces` boşluk koruma kuralıyla geçmeye devam ediyor |
 | Kırpma | Tarayıcılar tek satırlı alanın metnini içerik kutusunda kırpıyor: dolgu boş kalıyor. Kaydırma kapsamının alanı tek satırlı alanda içerik kutusu (`scroll.rs`); `textarea` dolgu kutusunda, kaydırılan bir kap gibi. Skor %86,54'ten %86,67'ye |
 | Mutasyonlar | 18'den 17'si yakalandı (kırpmanın dolgu kutusuna dönmesi altın görüntüde ve referans skorunda). İlk turda kaçan üçünden ikisi için test eklendi (onay kutusu metin alanı değil; alanın metnine işaret alanı buluyor), biri ölü koddu ve silindi (boş alana sıfır genişlikli boşluk: boş paragraf da bir satır tutuyor). Sağ çıkan: düğümsüz metni belgede olmayan bir düğüme atfetmek; o düğüm hiçbir aramada çıkmıyor, gözlemlenemez. Gerçekçi hata, metni alanın kendisine atfetmek, isabet testinde yakalanıyor |
+
+İnceleme raporu (`docs/reviews/m5_6_to_8_incremental_and_forms_review.md`,
+2026-10-14): M5.6–M5.8'in ilk adımının özeti ve onayı; düzeltme isteyen
+madde yok. Kayda değer iki not: raporun andığı kaydırma süresi (12 ms)
+#73'ün ölçümü, M5.6'nın sonu B15 p95 7,3 ms; ve Erk bir tarayıcı motoru
+değil, gömülü bir UI motoru (proje kuralları, "Ürün").
+
+İkinci PR: düzenleme.
+
+| Konu | Not |
+|---|---|
+| Model | Odaktaki metin alanının imleci sayfada: değerde bir bayt konumu (`Page::caret`), odak alana gelince sonda. Odak alındığındaki değer ve kullanıcının düzenleyip düzenlemediği (`focus_value`): odak giderken kullanıcı değiştirdiyse ve değer farklıysa `blur`'dan önce `change`, tarayıcılar gibi. Host'un yazdığı değer `change` doğurmuyor |
+| Tuşlar | `Key`'e ve C-ABI'ye Delete, dört ok, Home, End (`ERK_KEY_DELETE`..`ERK_KEY_END`, 7–13). Tanınan bir tuş başka bir değerle gelmiyor ama yeni değerler eski bir host'un `ERK_KEY_OTHER` gibi okuması gereken değerler: ABI 10 (M4.5'teki Geri Silme gibi). winit eşlemesi testli |
+| Düzenleme | Tuşun varsayılan işi (`Page::edit`, karar 7): karakter ve boşluk imlece giriyor; Enter yalnızca `textarea`'da satır sonu; Geri Silme ve Delete bir grafem kümesi siliyor, oklar bir grafem kümesi ilerliyor (`icu_segmenter`, Stylo'nun zaten getirdiği; birleşik karakter ve bayrak tek adım); Home ve End satırın başı ve sonu; yukarı ve aşağı `textarea`'da bir satır, aynı sütunda (satırlar metnin satır sonları arası; sarılan satırlar imlecin yeriyle 3. adımda). Değişen her değer bir `input` olayı; yalnızca imleç oynarsa olay yok, kare var |
+| Kullanıcının değeri | `Document::set_typed_value`: `input`'ta satır sonları atılıyor ama `url` ve `email` kırpılmıyor; kırpılsa son yazılan boşluk anında silinirdi |
+| İmleç | Odaktaki alanın imleci 1 piksel genişliğinde, alanın renginde, satırının yüksekliğinde; Parley'nin imleç geometrisinden (`Cursor::geometry`), şifrede nokta sayısına çevrilerek. Liste kurulduktan sonra ekleniyor (vurgu gibi): kâhin de aynı yoldan geçiyor. Bir kare istemek için `Engine` düzenlemeden ya da imleç hareketinden sonra `changed` |
+| Testler | Motor: yazma, gezinme, silme ve imlecin çizimi kâhinle (`typing_in_a_focused_field_edits_its_value_at_the_caret`), birleşik karakter ve bayrak (`the_caret_steps_over_a_grapheme_cluster_whole`), `textarea`'nın satırları, tıklamayla odaklanan şifre alanında imleç noktaların sonunda, `change`'in ne zaman geldiği (host'un yazdığı değer, değişip geri dönen değer). `erk`: abonenin her karakterde yeni değeri görmesi, iptal edilen tuşun yazmaması. C-ABI: yeni tuşların iki yönlü eşlenmesi. Fuzz yorumlayıcısının tuşlarına yeniler ve grafem kümeleri girdi |
+| Mutasyonlar | 24 mutasyondan 23'ü yakalandı. İlk turda kaçan yedisinden altısına test eklendi (sağ ok, tek satırda Enter'ın olay doğurmaması, `textarea`'da End, host'un değeri değiştirmesi, değişip aynı kalan değer, şifrede imlecin bayt yerine nokta sayısı); biri ölü koddu ve silindi (imlecin odakla süzülmesi: odak taşınırken imleç zaten kuruluyor ya da kalkıyor) |

@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 9
+#define ERK_ABI_VERSION 10
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -80,6 +80,20 @@
 #define ERK_KEY_CHARACTER 5
 
 #define ERK_KEY_BACKSPACE 6
+
+#define ERK_KEY_DELETE 7
+
+#define ERK_KEY_ARROW_LEFT 8
+
+#define ERK_KEY_ARROW_RIGHT 9
+
+#define ERK_KEY_ARROW_UP 10
+
+#define ERK_KEY_ARROW_DOWN 11
+
+#define ERK_KEY_HOME 12
+
+#define ERK_KEY_END 13
 
 #define ERK_MOD_SHIFT 1
 
