@@ -22,9 +22,9 @@ use erk_style::{ComputedValues, Interaction, Invalidation, Restyler, StyleEngine
 use crate::display::{Content, Cull, DisplayItem, DisplayList, Extents, Frame as Rect};
 use crate::layout;
 use crate::messages::{
-    BoxModel, ClipboardRequest, Cursor, Event, EventKind, Frame, FrameStats, Key, KeyInput,
-    KeyState, Modifiers, NodeKind, PointerButton, PointerInput, PointerKind, ResourceRequest,
-    Stage, Status,
+    BoxModel, CaretRect, ClipboardRequest, Cursor, Event, EventKind, Frame, FrameStats, Key,
+    KeyInput, KeyState, Modifiers, NodeKind, PointerButton, PointerInput, PointerKind,
+    ResourceRequest, Stage, Status,
 };
 use crate::paint;
 use crate::resources::Resources;
@@ -75,6 +75,8 @@ pub(crate) struct Page {
     /// field to show it. Only then, so that a field the user scrolled
     /// stays where they left it.
     reveal_caret: bool,
+    /// Where the last frame put the caret on the viewport.
+    caret_rect: Option<CaretRect>,
     /// The last frame's viewport, in CSS pixels.
     viewport: (f32, f32),
     /// How far the user has scrolled each scroll container.
@@ -227,6 +229,7 @@ struct Built {
     offsets: Offsets,
     scrollers: Vec<Scroller>,
     hits: Vec<HitRegion>,
+    caret_rect: Option<CaretRect>,
     stats: FrameStats,
 }
 
@@ -288,6 +291,7 @@ impl Page {
             now: 0,
             caret_since: 0,
             reveal_caret: false,
+            caret_rect: None,
             viewport: (0.0, 0.0),
             offsets: Offsets::new(),
             scrollers: Vec::new(),
@@ -410,9 +414,11 @@ impl Page {
             offsets,
             scrollers,
             hits,
+            caret_rect,
             stats,
         } = built;
         self.layout = Some(KeptLayout { layouts, revision });
+        self.caret_rect = caret_rect;
         self.viewport = viewport;
         self.list = Some(kept_list);
         self.offsets = offsets;
@@ -683,11 +689,27 @@ impl Page {
             }
         };
         let mut list = content.scrolled(&scrolling, &bars);
-        list.items
-            .extend(self.selection_items(&layouts, &scrolling));
-        list.items
-            .extend(self.caret_item(&layouts, &scrolling, &styles));
         let hits = hits(&list.items);
+        // The selection and the caret go over the content, through the
+        // transforms around their field: those its hit region was made in.
+        let around = self.caret.map_or(crate::transform::IDENTITY, |(field, _)| {
+            transforms_around(&hits, field)
+        });
+        let mut marks: Vec<DisplayItem> = self
+            .selection_items(&layouts, &scrolling)
+            .into_iter()
+            .collect();
+        marks.extend(self.caret_item(&layouts, &scrolling, &styles));
+        if !marks.is_empty() && around != crate::transform::IDENTITY {
+            list.items.push(DisplayItem::PushTransform(around));
+            list.items.append(&mut marks);
+            list.items.push(DisplayItem::PopTransform);
+        } else {
+            list.items.append(&mut marks);
+        }
+        let caret_rect = self
+            .caret_line(&layouts, &scrolling)
+            .map(|(_, line)| bounds(&around, &line));
         if let Some(node) = self.highlight {
             list.items.extend(
                 hits.iter()
@@ -735,6 +757,7 @@ impl Page {
             layouts,
             viewport: (w, h),
             hits,
+            caret_rect,
             stats,
         };
         mark(Stage::DisplayList);
@@ -1432,8 +1455,30 @@ impl Page {
         scrolling: &Scrolling,
         styles: &Styles,
     ) -> Option<DisplayItem> {
+        if !self.caret_shown() {
+            return None;
+        }
+        let (field, line) = self.caret_line(layouts, scrolling)?;
+        let color = crate::color::srgb_bytes(styles.computed(field)?.clone_color());
+        Some(DisplayItem::Rect {
+            x: line.x,
+            y: line.y,
+            width: line.width,
+            height: line.height,
+            color,
+        })
+    }
+
+    /// The focused text field and where its caret is, before the
+    /// transforms around the field: a line one pixel wide, as tall as the
+    /// line of text it is on. Blinking does not move it.
+    fn caret_line(
+        &self,
+        layouts: &layout::Layouts,
+        scrolling: &Scrolling,
+    ) -> Option<(NodeId, Rect)> {
         // The caret goes with the focus: moving it sets or clears it.
-        let (field, at) = self.caret.filter(|_| self.caret_shown())?;
+        let (field, at) = self.caret?;
         let kind = crate::layout::text_field(&self.doc, field)?;
         let value = self.doc.value(field).ok()??;
         let at = floor_boundary(&value, at.min(value.len()));
@@ -1452,14 +1497,21 @@ impl Page {
         );
         let line = cursor.geometry(&text.layout, 1.0);
         let (left, top) = text_origin(layouts, scrolling, field)?;
-        let color = crate::color::srgb_bytes(styles.computed(field)?.clone_color());
-        Some(DisplayItem::Rect {
-            x: left + line.x0 as f32,
-            y: top + line.y0 as f32,
-            width: 1.0,
-            height: (line.y1 - line.y0) as f32,
-            color,
-        })
+        Some((
+            field,
+            Rect {
+                x: left + line.x0 as f32,
+                y: top + line.y0 as f32,
+                width: 1.0,
+                height: (line.y1 - line.y0) as f32,
+            },
+        ))
+    }
+
+    /// Where the focused field's caret is on the viewport (see
+    /// [`CaretRect`]), as of the last frame.
+    pub(crate) fn caret_rect(&self) -> Option<CaretRect> {
+        self.caret_rect
     }
 
     fn event(
@@ -2142,6 +2194,39 @@ fn hits(items: &[DisplayItem]) -> Vec<HitRegion> {
         }
     }
     hits
+}
+
+/// The transforms around `node`, as its hit regions were made in them (a
+/// node's regions are all in its own); none for a node without one
+/// (clipped away entirely).
+fn transforms_around(hits: &[HitRegion], node: NodeId) -> Matrix {
+    hits.iter()
+        .find(|hit| hit.node == node)
+        .and_then(|hit| hit.within.last())
+        .map_or(crate::transform::IDENTITY, |(matrix, _)| *matrix)
+}
+
+/// The box on the viewport around `rect` once `matrix` has moved it.
+fn bounds(matrix: &Matrix, rect: &Rect) -> CaretRect {
+    let corners = [
+        (rect.x, rect.y),
+        (rect.x + rect.width, rect.y),
+        (rect.x, rect.y + rect.height),
+        (rect.x + rect.width, rect.y + rect.height),
+    ]
+    .map(|corner| crate::transform::apply(matrix, corner));
+    let (mut left, mut top) = corners[0];
+    let (mut right, mut bottom) = corners[0];
+    for (x, y) in corners {
+        (left, top) = (left.min(x), top.min(y));
+        (right, bottom) = (right.max(x), bottom.max(y));
+    }
+    CaretRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    }
 }
 
 fn intersect(a: &Rect, b: &Rect) -> Rect {

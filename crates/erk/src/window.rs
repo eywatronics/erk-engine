@@ -13,10 +13,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use erk_renderer::{Cursor, Frame, Painted, Raster, RasterThread};
+use erk_renderer::{CaretRect, Cursor, Frame, Painted, Raster, RasterThread};
 use softbuffer::{Context as SoftContext, Surface};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
@@ -59,6 +59,7 @@ pub(crate) fn run(app: &mut App) -> Result<(), RunError> {
         modifiers: Modifiers::default(),
         started: Instant::now(),
         cursor: None,
+        caret: None,
         panic: None,
     };
     let result = event_loop.run_app(&mut host);
@@ -148,6 +149,8 @@ struct Host<'a> {
     started: Instant,
     /// The cursor the window shows.
     cursor: Option<Cursor>,
+    /// Where the window last told the system the caret is.
+    caret: Option<CaretRect>,
     /// A panic in the host's callbacks, carried out of the loop.
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
@@ -254,6 +257,29 @@ impl Host<'_> {
             }
         }
     }
+
+    /// Tell the system where the caret is, when it moves: an input method
+    /// puts its candidate window there (M5 plan, decision 6).
+    fn show_caret(&mut self) {
+        let now = self.app.caret_rect();
+        if self.caret == now {
+            return;
+        }
+        self.caret = now;
+        if let (Some(state), Some(rect)) = (&self.window, now) {
+            let (position, size) = ime_area(rect);
+            state.window.set_ime_cursor_area(position, size);
+        }
+    }
+}
+
+/// The caret's box as winit takes it: CSS pixels are the window's logical
+/// pixels (the engine's scale is the window's).
+fn ime_area(rect: CaretRect) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+    (
+        LogicalPosition::new(f64::from(rect.x), f64::from(rect.y)),
+        LogicalSize::new(f64::from(rect.width), f64::from(rect.height)),
+    )
 }
 
 impl ApplicationHandler<UserEvent> for Host<'_> {
@@ -394,6 +420,7 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
         let now = u64::try_from(self.started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.guarded(event_loop, |app| app.tick(now));
         self.show_cursor();
+        self.show_caret();
         // Wake for what moves by itself (the caret's blink), else for input.
         event_loop.set_control_flow(match self.app.next_tick() {
             Some(at) => ControlFlow::WaitUntil(self.started + Duration::from_nanos(at)),
@@ -749,6 +776,18 @@ mod tests {
             return;
         }
         assert_eq!(read, Some(text));
+    }
+
+    #[test]
+    fn the_caret_reaches_the_system_in_the_windows_logical_pixels() {
+        let (position, size) = ime_area(CaretRect {
+            x: 12.5,
+            y: 30.0,
+            width: 1.0,
+            height: 18.0,
+        });
+        assert_eq!((position.x, position.y), (12.5, 30.0));
+        assert_eq!((size.width, size.height), (1.0, 18.0));
     }
 
     #[test]

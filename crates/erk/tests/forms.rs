@@ -125,6 +125,29 @@ fn a_focused_field_asks_for_the_next_tick_at_its_caret_blink() {
     assert_eq!(app.next_tick(), None);
 }
 
+#[test]
+fn the_host_reads_where_the_caret_is_after_a_tick() {
+    let mut app = app("<input id=t value=a><button>b</button>");
+    assert_eq!(app.caret_rect(), None);
+    press(&mut app, Key::Tab);
+    app.tick(1);
+    let rect = app.caret_rect().expect("a caret");
+    let field = app.node_box(node(&app, "#t")).unwrap();
+    // Inside the field, one pixel wide, a line of text tall.
+    assert!(
+        rect.x > field.x
+            && rect.x < field.x + field.width
+            && rect.y >= field.y
+            && rect.y + rect.height <= field.y + field.height,
+        "{rect:?} in {field:?}"
+    );
+    assert_eq!(rect.width, 1.0);
+    assert!(rect.height > 10.0, "{rect:?}");
+    press(&mut app, Key::Tab);
+    app.tick(2);
+    assert_eq!(app.caret_rect(), None);
+}
+
 /// Press Control with `letter`.
 fn command(app: &mut App, letter: &str) {
     for state in [KeyState::Down, KeyState::Up] {
