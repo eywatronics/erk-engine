@@ -149,6 +149,17 @@ pub enum Key {
     Other,
 }
 
+/// What a key asked of the clipboard, which the core does not reach (M5
+/// plan, decision 5): the embedding layer answers it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClipboardRequest {
+    /// Copied or cut: this text goes on the clipboard.
+    Write(String),
+    /// Paste: the clipboard's text, if any, goes to
+    /// [`crate::Engine::paste`].
+    Read,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyState {
     Down,

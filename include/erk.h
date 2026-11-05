@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 11
+#define ERK_ABI_VERSION 12
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -239,6 +239,19 @@ typedef struct {
 typedef void (*ErkPostFn)(void *user_data, ErkApp *app);
 
 typedef void (*ErkDestroyFn)(void *user_data);
+
+/*
+ The host's clipboard, read for a paste: point `*text` at its text (in
+ the host's memory, copied before the call returns) and return `ERK_OK`,
+ or return `ERK_ERR_NOT_FOUND` when it holds no text. It must not call Erk.
+ */
+typedef ErkStatus (*ErkClipboardReadFn)(void *user_data, ErkStr *text);
+
+/*
+ The host's clipboard, written by a copy or a cut: `text` is lent for the
+ call. It must not call Erk.
+ */
+typedef void (*ErkClipboardWriteFn)(void *user_data, ErkStr text);
 
 /*
  Input for a headless app, in CSS pixels. Fields past `struct_size` are 0.
@@ -508,6 +521,20 @@ ErkStatus erk_app_tick(ErkApp *app, uint64_t now_ns);
  the page moves by itself.
  */
 ErkStatus erk_app_next_tick(ErkApp *app, uint64_t *out_ns);
+
+/*
+ Where the app's copied text goes and pasted text comes from (M5 plan,
+ decision 5): the host's clipboard, through `read` and `write`, both
+ required. The app owns `user_data` from here: `destroy` runs once, when
+ another clipboard is set or the app is destroyed. Until a clipboard is
+ set the app has its own, which copies and pastes within it. Not from
+ inside a callback.
+ */
+ErkStatus erk_app_set_clipboard(ErkApp *app,
+                                ErkClipboardReadFn read,
+                                ErkClipboardWriteFn write,
+                                void *user_data,
+                                ErkDestroyFn destroy);
 
 /*
  Give a headless app input, as a window would.

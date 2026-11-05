@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_11() {
-    assert_eq!(erk_abi_version(), 11);
+fn the_abi_version_is_0_12() {
+    assert_eq!(erk_abi_version(), 12);
 }
 
 #[test]
@@ -403,6 +403,82 @@ fn a_key_event_names_its_key_and_what_it_typed() {
         ERK_ERR_INVALID_ARGUMENT
     );
     assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn the_hosts_clipboard_is_used_from_c_and_let_go_once() {
+    #[derive(Default)]
+    struct Board {
+        written: std::sync::Mutex<String>,
+        destroyed: AtomicU32,
+    }
+    #[allow(unsafe_code)] // SAFETY: called by Erk with the Board it was given, alive for the test.
+    unsafe extern "C" fn read(_: *mut c_void, text: *mut ErkStr) -> ErkStatus {
+        static PASTED: &str = "yapıştır";
+        // SAFETY: Erk gives a writable ErkStr for the call.
+        unsafe { *text = lent(PASTED) };
+        ERK_OK
+    }
+    #[allow(unsafe_code)] // SAFETY: called by Erk with the Board it was given, alive for the test.
+    unsafe extern "C" fn write(user_data: *mut c_void, text: ErkStr) {
+        // SAFETY: user_data is the test's Board.
+        let board = unsafe { &*user_data.cast::<Board>() };
+        *board.written.lock().unwrap() = super::text(text).unwrap();
+    }
+    #[allow(unsafe_code)] // SAFETY: called by Erk with the Board it was given, alive for the test.
+    unsafe extern "C" fn destroy(user_data: *mut c_void) {
+        // SAFETY: user_data is the test's Board.
+        let board = unsafe { &*user_data.cast::<Board>() };
+        board.destroyed.fetch_add(1, Ordering::SeqCst);
+    }
+    let board = Board::default();
+    let user_data = std::ptr::from_ref(&board).cast_mut().cast();
+    let app = app_with("<input id=t value=metin>");
+    // Both functions are required; a refused clipboard leaves user_data.
+    assert_eq!(
+        erk_app_set_clipboard(app, Some(read), None, user_data, Some(destroy)),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(board.destroyed.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        erk_app_set_clipboard(app, Some(read), Some(write), user_data, Some(destroy)),
+        ERK_OK
+    );
+    let press = |key, text: &str, modifiers| ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind: ERK_INPUT_KEY_DOWN,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key,
+        text: s(text),
+        modifiers,
+    };
+    assert_eq!(erk_app_input(app, &press(ERK_KEY_TAB, "", 0)), ERK_OK);
+    for letter in ["a", "c", "v"] {
+        assert_eq!(
+            erk_app_input(app, &press(ERK_KEY_CHARACTER, letter, ERK_MOD_CONTROL)),
+            ERK_OK
+        );
+    }
+    assert_eq!(*board.written.lock().unwrap(), "metin");
+    let mut buf = [0u8; 32];
+    let mut len = 0;
+    assert_eq!(
+        erk_node_value(
+            app,
+            query(app, "#t"),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut len
+        ),
+        ERK_OK
+    );
+    assert_eq!(&buf[..len], "yapıştır".as_bytes());
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+    assert_eq!(board.destroyed.load(Ordering::SeqCst), 1);
 }
 
 #[test]

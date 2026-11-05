@@ -472,6 +472,16 @@ gerekçeli bir daraltma:
   saatte; yoksa `ERK_ERR_NOT_FOUND`. Odaktaki metin alanının imleci
   host'un saatiyle yanıp söner (yarım saniye görünür, yarım saniye
   görünmez; imleç oynayınca baştan, görünür).
+- **v0.12 (M5.8):** pano (M5 planı, karar 5; çekirdek panoya erişmez):
+  `erk_app_set_clipboard(app, read, write, user_data, destroy)`. Metin
+  alanında Control+C ve Control+X seçimi `write`'a verir (şifre hiçbir
+  zaman), Control+V `read`'den aldığını seçimin yerine yazar ve bir
+  `ERK_EVENT_INPUT` doğar. `read` metni host'un belleğinde ödünç verir,
+  Erk çağrı dönmeden kopyalar; metin yoksa `ERK_ERR_NOT_FOUND`. İkisi de
+  Erk'i çağıramaz. `user_data` uygulamanın olur, `destroy` başka bir pano
+  kurulunca ya da uygulama yok edilince bir kez çalışır; ikisinden biri
+  `NULL` ise `ERK_ERR_INVALID_ARGUMENT` ve sahiplik host'ta kalır. Pano
+  kurulmadan uygulamanın kendi panosu vardır (uygulama içinde kopyalar).
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -52,7 +52,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 11u));
+  CHECK(erk_abi_version() == ((0u << 16) | 12u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);

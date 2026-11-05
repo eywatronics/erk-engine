@@ -28,8 +28,8 @@ use erk_dom::NodeId;
 
 use crate::list::Prepared;
 use crate::messages::{
-    BoxModel, Cursor, Event, FontCatalog, FrameStats, KeyInput, NodeKind, PointerInput,
-    ResourceRequest, ResourceResponse, Stage, Status,
+    BoxModel, ClipboardRequest, Cursor, Event, FontCatalog, FrameStats, KeyInput, NodeKind,
+    PointerInput, ResourceRequest, ResourceResponse, Stage, Status,
 };
 use crate::page::Page;
 use crate::resources::Resources;
@@ -219,6 +219,21 @@ impl Engine {
     pub fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
         let events = self.restyled_by(|page| page.key_default(input));
         // A text field edited or its caret moved (M5.8).
+        self.changed |= self.page.take_edited();
+        events
+    }
+
+    /// What the last key's default asked of the clipboard (Control with C,
+    /// X or V in a text field), once: the embedding layer writes the text,
+    /// or reads the clipboard and gives it to [`Engine::paste`].
+    pub fn take_clipboard(&mut self) -> Option<ClipboardRequest> {
+        self.page.take_clipboard()
+    }
+
+    /// `text` pasted in the focused text field, at its selection: the
+    /// events that follow (an `input` event when it changed the value).
+    pub fn paste(&mut self, text: &str) -> Vec<Event> {
+        let events = self.page.paste(text);
         self.changed |= self.page.take_edited();
         events
     }
@@ -2096,6 +2111,70 @@ mod tests {
         pointer(&mut engine, PointerKind::Move, 2.0, Modifiers::default());
         type_text(&mut engine, "!");
         assert_eq!(engine.value(t), Ok(Some("a-!".to_owned())));
+    }
+
+    #[test]
+    fn copy_cut_and_paste_ask_the_clipboard_and_paste_types_its_text() {
+        use crate::messages::{ClipboardRequest, Key};
+        let command = |engine: &mut Engine, letter: &str| {
+            press_with(engine, Key::Character(letter.to_owned()), CONTROL);
+            engine.take_clipboard()
+        };
+        let mut engine = verifying(
+            "<input id=t value=abcdef><input id=s type=password value=gizli><button>b</button>",
+        );
+        let (t, s) = (
+            engine.query(None, "#t").unwrap().unwrap(),
+            engine.query(None, "#s").unwrap().unwrap(),
+        );
+        press(&mut engine, Key::Tab);
+        // Nothing selected: nothing to copy or cut.
+        assert_eq!(command(&mut engine, "c"), None);
+        assert_eq!(command(&mut engine, "x"), None);
+        press_with(&mut engine, Key::ArrowLeft, SHIFT);
+        press_with(&mut engine, Key::ArrowLeft, SHIFT);
+        assert_eq!(
+            command(&mut engine, "c"),
+            Some(ClipboardRequest::Write("ef".to_owned()))
+        );
+        assert_eq!(
+            engine.value(t),
+            Ok(Some("abcdef".to_owned())),
+            "copied, not cut"
+        );
+        assert_eq!(
+            command(&mut engine, "x"),
+            Some(ClipboardRequest::Write("ef".to_owned()))
+        );
+        assert_eq!(engine.value(t), Ok(Some("abcd".to_owned())));
+        // Paste asks for the clipboard; what it holds is typed in at the
+        // selection, an input event.
+        press(&mut engine, Key::Home);
+        press_with(&mut engine, Key::ArrowRight, SHIFT);
+        assert_eq!(command(&mut engine, "v"), Some(ClipboardRequest::Read));
+        let kinds: Vec<EventKind> = engine
+            .paste("X\nY")
+            .into_iter()
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(kinds, [EventKind::Input]);
+        assert_eq!(
+            engine.value(t),
+            Ok(Some("XYbcd".to_owned())),
+            "an input drops line breaks"
+        );
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(caret(&prepared.unwrap()).is_some());
+        // A password is never copied or cut.
+        press(&mut engine, Key::Tab);
+        press_with(&mut engine, Key::Character("a".to_owned()), CONTROL);
+        assert_eq!(command(&mut engine, "c"), None);
+        assert_eq!(command(&mut engine, "x"), None);
+        assert_eq!(engine.value(s), Ok(Some("gizli".to_owned())));
+        // With no field focused, a paste types nothing.
+        press(&mut engine, Key::Tab);
+        assert_eq!(engine.paste("z"), Vec::new());
     }
 
     #[test]

@@ -72,7 +72,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use erk_renderer::{Engine, Painted, Prepared, RasterThread, Stage};
+use erk_renderer::{ClipboardRequest, Engine, Painted, Prepared, RasterThread, Stage};
 
 pub use context::{BatchError, Context, Mutation, Ref};
 pub use erk_renderer::{
@@ -257,6 +257,8 @@ pub struct App {
     config: Config,
     fonts: Option<Arc<SystemFonts>>,
     resources: Option<ResourceProvider>,
+    /// Where copied text goes and pasted text comes from.
+    clipboard: Box<dyn Clipboard>,
     log: Option<Log>,
     /// The frame with the raster, and when it went there.
     painting: Option<(FrameTimings, Instant)>,
@@ -324,6 +326,7 @@ impl App {
             config,
             fonts,
             resources: None,
+            clipboard: Box::new(OwnClipboard::default()),
             log: None,
             painting: None,
             timings: None,
@@ -356,6 +359,13 @@ impl App {
         self.resources = Some(Box::new(provide));
     }
 
+    /// Where copied text goes and pasted text comes from (M5 plan,
+    /// decision 5): the system's clipboard, or the host's. Until one is
+    /// set the app has its own, which copies and pastes within it.
+    pub fn set_clipboard(&mut self, clipboard: impl Clipboard + 'static) {
+        self.clipboard = Box::new(clipboard);
+    }
+
     /// Where Erk's own messages go (a refused resource, how the window
     /// draws), as severe as the config's `log_level` or more.
     pub fn set_log(&mut self, log: impl FnMut(LogLevel, &str) + 'static) {
@@ -379,7 +389,18 @@ impl App {
                 if prevented {
                     Vec::new()
                 } else {
-                    self.cx.engine.key_default(&key)
+                    let mut events = self.cx.engine.key_default(&key);
+                    // Copy, cut or paste: the clipboard is the host's.
+                    match self.cx.engine.take_clipboard() {
+                        Some(ClipboardRequest::Write(text)) => self.clipboard.write(&text),
+                        Some(ClipboardRequest::Read) => {
+                            if let Some(text) = self.clipboard.read() {
+                                events.extend(self.cx.engine.paste(&text));
+                            }
+                        }
+                        None => {}
+                    }
+                    events
                 }
             }
             Input::Wheel { dx, dy, x, y } => {
@@ -571,5 +592,30 @@ impl Deref for App {
 impl DerefMut for App {
     fn deref_mut(&mut self) -> &mut Context {
         &mut self.cx
+    }
+}
+
+/// Where copied text goes and pasted text comes from: the system's
+/// clipboard, or one the host keeps (M5 plan, decision 5; the core does no
+/// I/O).
+pub trait Clipboard {
+    /// The clipboard's text, if it holds text.
+    fn read(&mut self) -> Option<String>;
+    /// Put `text` on the clipboard.
+    fn write(&mut self, text: &str);
+}
+
+/// The clipboard an app has until its host sets one: its own, which copies
+/// and pastes within the app.
+#[derive(Default)]
+struct OwnClipboard(Option<String>);
+
+impl Clipboard for OwnClipboard {
+    fn read(&mut self) -> Option<String> {
+        self.0.clone()
+    }
+
+    fn write(&mut self, text: &str) {
+        self.0 = Some(text.to_owned());
     }
 }

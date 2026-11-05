@@ -230,7 +230,7 @@ fn key(bytes: &mut Bytes) -> Key {
         3 => Key::Escape,
         4 => Key::Character(
             bytes
-                .pick(&["a", "ş", " ", "\n", "e\u{301}", "🇹🇷"])
+                .pick(&["a", "ş", " ", "\n", "e\u{301}", "🇹🇷", "c", "x", "v"])
                 .to_owned(),
         ),
         // The keys that edit a text field and move its caret (M5.8).
@@ -342,10 +342,18 @@ pub fn run(app: &mut App, script: &[u8]) {
                 } else {
                     KeyState::Up
                 };
+                // Shift selects, Control makes a letter a command (select
+                // all, copy, cut, paste: the app's own clipboard).
+                let held = bytes.byte();
+                let modifiers = Modifiers {
+                    shift: held & 1 != 0,
+                    control: held & 2 != 0,
+                    ..Modifiers::default()
+                };
                 app.input(Input::Key(KeyInput {
                     key: key(&mut bytes),
                     state,
-                    modifiers: Modifiers::default(),
+                    modifiers,
                 }));
             }
             12 => {
