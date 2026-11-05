@@ -176,6 +176,8 @@ input:not([type=checkbox i], [type=radio i], [type=hidden i], [type=submit i],
     [type=reset i], [type=button i], [type=image i], [type=file i],
     [type=range i], [type=color i]) {
   padding: 1px 2px;
+  /* size by default (HTML §15.5.15); set, it is a presentational
+   * hint. */
   width: 20ch;
   white-space: pre;
   overflow: hidden;
@@ -183,8 +185,10 @@ input:not([type=checkbox i], [type=radio i], [type=hidden i], [type=submit i],
 
 textarea {
   padding: 2px;
+  /* cols by default (HTML §15.5.16); set, it is a presentational
+   * hint. The height, rows lines (two by default), comes from layout:
+   * Stylo has no lh for line-height: normal. */
   width: 20ch;
-  height: 2.8em;
   font-family: monospace;
   white-space: pre-wrap;
   overflow-wrap: break-word;

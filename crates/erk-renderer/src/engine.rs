@@ -1431,22 +1431,31 @@ mod tests {
     fn a_fields_value_keeps_its_spaces_whatever_its_white_space() {
         // `white-space: normal` wraps a textarea's value but keeps its
         // spaces and line breaks (WPT textarea-always-preserves-spaces).
-        let style = "style='white-space: normal; width: 300px; height: auto'";
-        let mut engine = verifying(&format!(
-            "<textarea id=a {style}>eski</textarea><textarea id=b {style}>bir</textarea>"
-        ));
-        let (a, b) = (
-            engine.query(None, "#a").unwrap().unwrap(),
-            engine.query(None, "#b").unwrap().unwrap(),
-        );
+        let mut engine =
+            verifying("<textarea id=a style='white-space: normal; width: 300px'>eski</textarea>");
+        let a = engine.query(None, "#a").unwrap().unwrap();
         engine.set_value(a, "a    b\nc").unwrap();
         let (prepared, _) = engine.prepare();
         assert_eq!(engine.verify(), Ok(()));
-        let text = painted_text(&prepared.unwrap());
+        let prepared = prepared.unwrap();
+        let text = painted_text(&prepared);
         assert!(text.contains("a    b"), "{text:?}");
-        // Two lines: twice as tall as the one-line field beside it.
-        let height = |id| engine.node_box(id).unwrap().unwrap().height;
-        assert!(height(a) > 1.5 * height(b), "{} {}", height(a), height(b));
+        // The line break kept: "c" on the line below. (A textarea is as
+        // high as its `rows`, not as what it holds.)
+        let top = |wanted: &str| {
+            prepared
+                .list
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    crate::list::DisplayItem::Glyphs(run) if run.text.contains(wanted) => {
+                        run.glyphs.first().map(|glyph| glyph.y)
+                    }
+                    _ => None,
+                })
+                .expect("painted")
+        };
+        assert!(top("c") > top("a    b") + 5.0);
     }
 
     #[test]
@@ -2946,5 +2955,69 @@ mod tests {
         press(&mut engine, Key::Tab);
         engine.commit_composition("bir\niki");
         assert_eq!(engine.value(a), Ok(Some("bir\niki".to_owned())));
+    }
+
+    #[test]
+    fn size_cols_and_rows_size_a_text_field_in_characters_and_lines() {
+        const PLAIN: &str = "font: 16px monospace; line-height: 20px; border: 0; padding: 0";
+        let mut engine = verifying(&format!(
+            "<input id=a style='{PLAIN}'><input id=b size=40 style='{PLAIN}'>\
+             <input id=c size=0 style='{PLAIN}'><input id=d size=' +5x' style='{PLAIN}'>\
+             <input id=e type=checkbox size=40>\
+             <textarea id=t cols=10 rows=3 style='{PLAIN}'></textarea>\
+             <textarea id=u cols=-4 rows=two style='{PLAIN}'></textarea>"
+        ));
+        let size = |engine: &Engine, id: &str| {
+            let node = engine.query(None, &format!("#{id}")).unwrap().unwrap();
+            let found = engine.node_box(node).unwrap().unwrap();
+            (found.width, found.height)
+        };
+        let (twenty, _) = size(&engine, "a");
+        // Twenty characters by default, as many as `size` says if it is a
+        // positive integer (layout rounds to whole pixels).
+        assert!(twenty > 100.0, "{twenty}");
+        assert!((size(&engine, "b").0 - 2.0 * twenty).abs() < 1.0);
+        assert_eq!(size(&engine, "c").0, twenty);
+        assert!((size(&engine, "d").0 - twenty / 4.0).abs() < 1.0);
+        // Not on a checkbox.
+        let e = engine.query(None, "#e").unwrap().unwrap();
+        let style = engine.computed_style(e).unwrap().unwrap();
+        // Its own width line, not `min-width`'s.
+        assert!(
+            style.lines().any(|line| line.trim() == "width: auto;"),
+            "{style}"
+        );
+        // A textarea: `cols` characters wide, `rows` lines high.
+        let (width, height) = size(&engine, "t");
+        assert!((width - twenty / 2.0).abs() < 1.0, "{width}");
+        assert_eq!(height, 60.0);
+        // Values that are no positive integer keep the defaults: twenty
+        // characters, two lines.
+        assert_eq!(size(&engine, "u"), (twenty, 40.0));
+        // Set later, they size the field again; the frame is the oracle's.
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        engine.set_attr(t, "rows", "5").unwrap();
+        engine.set_attr(t, "cols", "20").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(size(&engine, "t"), (twenty, 100.0));
+        engine.remove_attr(t, "rows").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(size(&engine, "t").1, 40.0);
+    }
+
+    #[test]
+    fn a_presentational_attribute_set_later_restyles_its_element() {
+        let mut engine = verifying("<div id=d style='height: 10px'>x</div>");
+        let d = engine.query(None, "#d").unwrap().unwrap();
+        engine.set_attr(d, "bgcolor", "#ff0000").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        let style = engine.computed_style(d).unwrap().unwrap();
+        assert!(
+            style.contains("background-color: rgb(255, 0, 0)"),
+            "{style}"
+        );
     }
 }

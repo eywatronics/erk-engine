@@ -135,8 +135,8 @@ struct KeptLayout {
 /// The attributes layout reads besides those styles see: an image's
 /// source, the language that picks fonts and case mapping, and what a
 /// text field shows: its value until one is set, its type (a password's
-/// bullets) and its placeholder.
-const LAYOUT_ATTRIBUTES: [&str; 5] = ["src", "lang", "value", "type", "placeholder"];
+/// bullets), its placeholder and a textarea's lines.
+const LAYOUT_ATTRIBUTES: [&str; 6] = ["src", "lang", "value", "type", "placeholder", "rows"];
 
 /// Whether an element with `style` puts a decoration (a background or a
 /// border) in its paragraph: an inline element that paints one.

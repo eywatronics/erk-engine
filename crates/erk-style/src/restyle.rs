@@ -318,6 +318,15 @@ impl Restyler {
             if change.names.iter().any(|name| name == "style") {
                 frame.hints.push((id, RestyleHint::RESTYLE_STYLE_ATTRIBUTE));
             }
+            // An attribute that gives a presentational hint (`rows`,
+            // `bgcolor`) restyles its element, though no selector reads it.
+            if change
+                .names
+                .iter()
+                .any(|name| crate::node::is_presentational(element, name))
+            {
+                frame.hints.push((id, RestyleHint::RESTYLE_SELF));
+            }
         }
     }
 
