@@ -34,8 +34,8 @@ pub use engine::Engine;
 pub use gpu::Window;
 pub use list::Prepared;
 pub use messages::{
-    BoxModel, ClipboardRequest, Cursor, ElementBox, Event, EventKind, FontCatalog, Frame,
-    FrameStats, GenericFamilies, Key, KeyInput, KeyState, Modifiers, NodeKind, Painted,
+    BoxModel, CaretRect, ClipboardRequest, Cursor, ElementBox, Event, EventKind, FontCatalog,
+    Frame, FrameStats, GenericFamilies, Key, KeyInput, KeyState, Modifiers, NodeKind, Painted,
     PointerButton, PointerInput, PointerKind, Raster, ResourceKind, ResourceRequest,
     ResourceResponse, ScriptFallback, Stage, Status, TextBox,
 };

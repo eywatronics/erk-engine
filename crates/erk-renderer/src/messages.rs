@@ -359,6 +359,18 @@ pub struct TextBox {
     pub height: f32,
 }
 
+/// Where the focused text field's caret is, in CSS pixels relative to the
+/// viewport: the box around it once the transforms around its field have
+/// moved it (M5 plan, decision 6). An input method puts its candidate
+/// window there. It is there while the caret blinks off too.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaretRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// The border box of one element, in CSS pixels relative to the viewport.
 /// A forerunner of the inspection queries of M3 (p1-contract §8.1).
 #[derive(Clone, Debug, PartialEq)]

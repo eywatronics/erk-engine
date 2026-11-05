@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 12;
+pub const ERK_ABI_VERSION: u32 = 13;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -354,6 +354,17 @@ pub struct ErkBox {
     pub margin: [f32; 4],
     pub border: [f32; 4],
     pub padding: [f32; 4],
+}
+
+/// A rectangle in CSS pixels relative to the viewport; times the scale the
+/// host set, in device pixels.
+#[repr(C)]
+pub struct ErkRect {
+    pub struct_size: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// How long the last frame's stages took, measured outside the core.
@@ -885,6 +896,30 @@ pub extern "C" fn erk_app_next_tick(app: *mut ErkApp, out_ns: *mut u64) -> ErkSt
     guard(app, Calls::Document, |app| {
         let next = app.app().next_tick().ok_or(ERK_ERR_NOT_FOUND)?;
         put(out_ns, next)
+    })
+}
+
+/// Where the focused text field's caret is, as of the last frame: the box
+/// around it once the transforms around its field have moved it, there
+/// while it blinks off too (M5 plan, decision 6). A host that draws the
+/// frames in its own window reads it after each tick and puts the input
+/// method's candidate window there; Erk's own window does that itself.
+/// `ERK_ERR_NOT_FOUND` without a focused text field.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_app_caret_rect(app: *mut ErkApp, out: *mut ErkRect) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let rect = app.app().caret_rect().ok_or(ERK_ERR_NOT_FOUND)?;
+        put_sized(
+            out,
+            ErkRect {
+                struct_size: 0,
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            },
+        )
     })
 }
 

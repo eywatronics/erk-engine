@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 12
+#define ERK_ABI_VERSION 13
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -239,6 +239,18 @@ typedef struct {
 typedef void (*ErkPostFn)(void *user_data, ErkApp *app);
 
 typedef void (*ErkDestroyFn)(void *user_data);
+
+/*
+ A rectangle in CSS pixels relative to the viewport; times the scale the
+ host set, in device pixels.
+ */
+typedef struct {
+  uint32_t struct_size;
+  float x;
+  float y;
+  float width;
+  float height;
+} ErkRect;
 
 /*
  The host's clipboard, read for a paste: point `*text` at its text (in
@@ -521,6 +533,16 @@ ErkStatus erk_app_tick(ErkApp *app, uint64_t now_ns);
  the page moves by itself.
  */
 ErkStatus erk_app_next_tick(ErkApp *app, uint64_t *out_ns);
+
+/*
+ Where the focused text field's caret is, as of the last frame: the box
+ around it once the transforms around its field have moved it, there
+ while it blinks off too (M5 plan, decision 6). A host that draws the
+ frames in its own window reads it after each tick and puts the input
+ method's candidate window there; Erk's own window does that itself.
+ `ERK_ERR_NOT_FOUND` without a focused text field.
+ */
+ErkStatus erk_app_caret_rect(ErkApp *app, ErkRect *out);
 
 /*
  Where the app's copied text goes and pasted text comes from (M5 plan,

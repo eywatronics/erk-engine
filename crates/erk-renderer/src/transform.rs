@@ -80,7 +80,6 @@ pub(crate) fn invertible(matrix: &Matrix) -> bool {
 }
 
 /// Where `matrix` takes `(x, y)`.
-#[cfg(test)]
 pub(crate) fn apply(matrix: &Matrix, (x, y): (f32, f32)) -> (f32, f32) {
     let [a, b, c, d, e, f] = *matrix;
     (a * x + c * y + e, b * x + d * y + f)

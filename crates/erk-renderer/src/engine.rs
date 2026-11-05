@@ -28,8 +28,8 @@ use erk_dom::NodeId;
 
 use crate::list::Prepared;
 use crate::messages::{
-    BoxModel, ClipboardRequest, Cursor, Event, FontCatalog, FrameStats, KeyInput, NodeKind,
-    PointerInput, ResourceRequest, ResourceResponse, Stage, Status,
+    BoxModel, CaretRect, ClipboardRequest, Cursor, Event, FontCatalog, FrameStats, KeyInput,
+    NodeKind, PointerInput, ResourceRequest, ResourceResponse, Stage, Status,
 };
 use crate::page::Page;
 use crate::resources::Resources;
@@ -469,6 +469,13 @@ impl Engine {
     /// What the pointer should look like over the last frame.
     pub fn cursor(&self) -> Cursor {
         self.page.cursor()
+    }
+
+    /// Where the focused text field's caret is on the viewport, as of the
+    /// last frame prepared; `None` without one. An input method's
+    /// candidate window goes there (M5 plan, decision 6).
+    pub fn caret_rect(&self) -> Option<CaretRect> {
+        self.page.caret_rect()
     }
 
     /// Whether a frame should be prepared: something that shows has changed
@@ -2607,5 +2614,121 @@ mod tests {
         assert_eq!(engine.text(0), Err(Status::InvalidArgument));
         engine.load_html("<p>yeni</p>");
         assert_eq!(engine.text(a), Err(Status::StaleNode));
+    }
+
+    const FIELD: &str = "font: 20px sans-serif; border: 0; padding: 0; margin: 0";
+
+    /// A focused field styled `style`, in a box that clips it, its frame
+    /// made: the engine and that
+    /// frame's display list.
+    fn focused_field(style: &str) -> (Engine, Vec<crate::list::DisplayItem>) {
+        let mut engine = verifying(&format!(
+            "<body style='margin: 20px'><div style='overflow: hidden; padding: 50px'><input value=ab style='{FIELD}; {style}'></div><button>b</button>"
+        ));
+        assert_eq!(engine.caret_rect(), None, "no focus, no caret");
+        press(&mut engine, crate::messages::Key::Tab);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        (engine, prepared.expect("a frame").list.items)
+    }
+
+    #[test]
+    fn the_caret_rect_is_where_the_caret_is_painted_and_goes_with_the_focus() {
+        let (mut engine, items) = focused_field("");
+        let rect = engine.caret_rect().expect("a caret");
+        let painted = items
+            .iter()
+            .find_map(|item| match item {
+                crate::list::DisplayItem::Rect {
+                    x,
+                    y,
+                    width: 1.0,
+                    height,
+                    ..
+                } => Some(CaretRect {
+                    x: *x,
+                    y: *y,
+                    width: 1.0,
+                    height: *height,
+                }),
+                _ => None,
+            })
+            .expect("a painted caret");
+        assert_eq!(rect, painted);
+        // At the end of "ab", on the line of a 20px font.
+        assert!(rect.x > 30.0 && rect.height > 15.0, "{rect:?}");
+        // Blinking off, the caret is not painted but is still there.
+        engine.set_time(CARET_BLINK_NS);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(caret(&prepared.expect("a frame")), None);
+        assert_eq!(engine.caret_rect(), Some(rect));
+        // Leaving the field, it goes.
+        press(&mut engine, crate::messages::Key::Tab);
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.caret_rect(), None);
+    }
+
+    const CARET_BLINK_NS: u64 = 500_000_000;
+
+    /// Whether `items` paints `wanted` inside a transform: after a push of
+    /// one that is not yet popped.
+    fn inside_a_transform(
+        items: &[crate::list::DisplayItem],
+        wanted: impl Fn(&crate::list::DisplayItem) -> bool,
+    ) -> bool {
+        let mut open = 0;
+        for item in items {
+            match item {
+                crate::list::DisplayItem::PushTransform(_) => open += 1,
+                crate::list::DisplayItem::PopTransform => open -= 1,
+                item if wanted(item) => return open > 0,
+                _ => {}
+            }
+        }
+        panic!("not painted")
+    }
+
+    fn is_caret(item: &crate::list::DisplayItem) -> bool {
+        matches!(item, crate::list::DisplayItem::Rect { width: 1.0, .. })
+    }
+
+    fn is_selection(item: &crate::list::DisplayItem) -> bool {
+        matches!(item, crate::list::DisplayItem::Rect { color, .. } if color[3] == 90)
+    }
+
+    #[test]
+    fn a_transformed_fields_caret_is_painted_and_reported_where_the_field_went() {
+        let (plain, items) = focused_field("");
+        let at = plain.caret_rect().expect("a caret");
+        assert!(!inside_a_transform(&items, is_caret));
+        // Moved: the caret goes with it, painted in the field's transform.
+        let (mut moved, items) = focused_field("transform: translate(40px, 30px)");
+        let rect = moved.caret_rect().expect("a caret");
+        assert!(
+            (rect.x - at.x - 40.0).abs() < 0.01 && (rect.y - at.y - 30.0).abs() < 0.01,
+            "{rect:?} from {at:?}"
+        );
+        assert_eq!((rect.width, rect.height), (at.width, at.height));
+        assert!(inside_a_transform(&items, is_caret));
+        // So is the selection.
+        press_with(
+            &mut moved,
+            crate::messages::Key::Character("a".to_owned()),
+            CONTROL,
+        );
+        let (prepared, _) = moved.prepare();
+        assert_eq!(moved.verify(), Ok(()));
+        assert!(inside_a_transform(
+            &prepared.expect("a frame").list.items,
+            is_selection
+        ));
+        // Turned a quarter: the caret lies across, and its box with it.
+        let (turned, _) = focused_field("transform: rotate(90deg)");
+        let rect = turned.caret_rect().expect("a caret");
+        assert!(
+            (rect.width - at.height).abs() < 0.01 && (rect.height - 1.0).abs() < 0.01,
+            "{rect:?} from {at:?}"
+        );
     }
 }

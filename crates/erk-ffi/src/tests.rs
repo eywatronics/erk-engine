@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_12() {
-    assert_eq!(erk_abi_version(), 12);
+fn the_abi_version_is_0_13() {
+    assert_eq!(erk_abi_version(), 13);
 }
 
 #[test]
@@ -504,6 +504,61 @@ fn the_next_tick_is_the_carets_blink() {
     assert_eq!(next, 7 + 500_000_000);
     assert_eq!(
         erk_app_next_tick(app, std::ptr::null_mut()),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn the_caret_rect_is_read_after_a_tick() {
+    let app = app_with("<input id=t value=a><button>b</button>");
+    let empty = || ErkRect {
+        struct_size: size_of::<ErkRect>() as u32,
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+    };
+    let mut rect = empty();
+    assert_eq!(erk_app_caret_rect(app, &mut rect), ERK_ERR_NOT_FOUND);
+    let tab = ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind: ERK_INPUT_KEY_DOWN,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key: ERK_KEY_TAB,
+        text: s(""),
+        modifiers: 0,
+    };
+    assert_eq!(erk_app_input(app, &tab), ERK_OK);
+    assert_eq!(erk_app_tick(app, 1), ERK_OK);
+    assert_eq!(erk_app_caret_rect(app, &mut rect), ERK_OK);
+    // One pixel wide, a line tall, inside the field.
+    let mut field = ErkBox {
+        struct_size: size_of::<ErkBox>() as u32,
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+        margin: [0.0; 4],
+        border: [0.0; 4],
+        padding: [0.0; 4],
+    };
+    assert_eq!(erk_node_box(app, query(app, "#t"), &mut field), ERK_OK);
+    assert_eq!(rect.width, 1.0);
+    assert!(rect.height > 10.0);
+    assert!(rect.x > field.x && rect.x < field.x + field.width);
+    assert!(rect.y >= field.y && rect.y + rect.height <= field.y + field.height);
+    // An older, smaller structure gets what it has room for.
+    let mut short = empty();
+    short.struct_size = (size_of::<u32>() + 2 * size_of::<f32>()) as u32;
+    assert_eq!(erk_app_caret_rect(app, &mut short), ERK_OK);
+    assert_eq!((short.x, short.y, short.width), (rect.x, rect.y, 0.0));
+    assert_eq!(
+        erk_app_caret_rect(app, std::ptr::null_mut()),
         ERK_ERR_INVALID_ARGUMENT
     );
     assert_eq!(erk_app_destroy(app), ERK_OK);

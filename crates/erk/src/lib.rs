@@ -76,8 +76,8 @@ use erk_renderer::{ClipboardRequest, Engine, Painted, Prepared, RasterThread, St
 
 pub use context::{BatchError, Context, Mutation, Ref};
 pub use erk_renderer::{
-    BoxModel, Frame, FrameStats, KeyInput, KeyState, NodeKind, PointerButton, PointerInput,
-    PointerKind, ResourceKind, ResourceRequest,
+    BoxModel, CaretRect, Frame, FrameStats, KeyInput, KeyState, NodeKind, PointerButton,
+    PointerInput, PointerKind, ResourceKind, ResourceRequest,
 };
 pub use events::{Event, EventKind, Key, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};
@@ -437,6 +437,16 @@ impl App {
     /// nothing on the page moves by itself.
     pub fn next_tick(&self) -> Option<u64> {
         self.cx.engine.next_tick()
+    }
+
+    /// Where the focused text field's caret is, in CSS pixels on the
+    /// viewport, as of the last frame; `None` without one. The box around
+    /// it once its field's transforms have moved it, there while it blinks
+    /// off too: an input method's candidate window goes there (M5 plan,
+    /// decision 6). A window tells the system itself; a host that draws the
+    /// frames reads it after each tick.
+    pub fn caret_rect(&self) -> Option<CaretRect> {
+        self.cx.engine.caret_rect()
     }
 
     /// Run a turn of the app at `now_ns`, the host's monotonic clock in

@@ -486,6 +486,17 @@ gerekçeli bir daraltma:
   sistemin panosu olmayan bir pencerenin (görüntü sunucusu yok) kendi
   panosu vardır, uygulama içinde kopyalar; ikincisinde bir uyarı loglanır.
   Panoya yazılan metin hiçbir zaman loglanmaz.
+- **v0.13 (M5.8):** imlecin dikdörtgeni (M5 planı, karar 6):
+  `erk_app_caret_rect(app, *out)` ve `ErkRect` (`struct_size` ile, sonuna
+  alan eklenebilir). Odaktaki metin alanının imlecinin son karedeki yeri:
+  alanın etrafındaki dönüşümlerden geçmiş sınırlayıcı kutu, görüntü
+  alanına göre CSS pikselinde (cihaz pikseli host'un verdiği ölçekle
+  çarpılarak). İmleç sönükken de vardır; odakta metin alanı yoksa
+  `ERK_ERR_NOT_FOUND`. Kendi penceresini süren host IME'nin aday
+  penceresini her `tick`'ten sonra buna göre koyar; Erk'in penceresi
+  bunu kendisi yapar (winit `set_ime_cursor_area`). Ayrı bir olay yok:
+  dikdörtgen yalnızca bir karede değişir, kareyi de host'un `tick`'i
+  hazırlar.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

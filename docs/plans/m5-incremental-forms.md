@@ -852,3 +852,21 @@ Yedinci PR'ın düzeltmesi: meşgul pano.
 | Düzeltme | Pano meşgulse okuma ve yazma 5 ms arayla 20 kez deneniyor (en çok ~95 ms, kullanıcının bastığı bir tuş için bir kez). Yalnızca `ClipboardOccupied` yeniden deneniyor; boş pano denenmiyor. Saniyelerce tutan bir program beklenmiyor: UI iş parçacığı donmasın; o durumda yapıştırma boş kalıyor. Uzak Masaüstü'nde tutma 2 saniyeyi aştı |
 | Test | Yeniden denemenin üç yolu birim testli. Gerçek pano testi, okuma boş döner ve pano hâlâ başkasındaysa bunu yazıp denetlemeden çıkıyor (CI koşucusunda pano izleyicisi yok); okuma kodu bozulmuşsa pano boşta olduğu için yine kırılıyor |
 | Mutasyonlar | 3 mutasyonun 3'ü yakalandı (hiç denememek, her hatayı denemek, sınırsız denemek). Okumanın yeniden denemeyi kullanmaması birim testle yakalanmıyor: sahte bir arka uç gerekirdi, tek satırlık bağlantı |
+
+Beşinci adımın (IME ve imlecin dikdörtgeni) yürütmesi üç PR'a bölündü:
+imlecin dikdörtgeni; kompozisyon (ön düzenleme ve onay girdi türleri,
+altı çizili kompozisyon, Türkçe ve CJK); `break-spaces`, `tab-size`,
+`size`, `cols`, `rows`. Gerekçe: üçü ayrı alt sistemlere dokunuyor
+(boyama ve dönüşüm; girdi ve C-ABI; stil ve yerleşim), ve kompozisyonun
+aday penceresi dikdörtgen olmadan yanlış yerde açılır.
+
+Sekizinci PR: imlecin dikdörtgeni.
+
+| Konu | Not |
+|---|---|
+| Model | Dikdörtgen build'de hesaplanıyor: alanın dönüşümleri, isabet bölgesinin yapıldığı matristen (`within`'in sonuncusu: alanın kendi çerçevesi hep o matrisle ekleniyor). İmlecin yeri yanıp sönmeden ayrıldı (`caret_line`): sönükken de dikdörtgen var. Sayfada son karenin değeri tutuluyor; sorgu kare hazırlamıyor |
+| Bulunan hata | İmleç ve seçim display list'in sonuna, dönüşümlerin dışında ekleniyordu: dönen ya da kaydırılan bir alanda yanlış yerde çiziliyorlardı. Artık alanın dönüşümünün içinde (`PushTransform` ile, dönüşüm yoksa eskisi gibi). Planın "dönen bir alanda da doğru yerde" maddesi bu |
+| Sınır | İmleç ve seçim alanı kırpan kutularla kesilmiyor: bir kırpma kabının dışına kaydırılmış alanın imleci kabın üstüne çiziliyor. Önceden de böyleydi; kırpmayı dönüşümle birlikte yeniden kurmak raster'ın kırpma ve dönüşüm sırasına bağlı, ayrı iş |
+| C-ABI | Planın adı `erk_caret_rect`'ti; uygulama düzeyindeki diğer sorgular gibi `erk_app_caret_rect` oldu (ABI 13). Birim CSS pikseli: cihaz pikseli host'un verdiği ölçekle çarpım, iki alan taşımak gereksiz. Planın "ve olay" kısmı alınmadı: dikdörtgen yalnızca bir karede değişir, kareyi host'un `tick`'i hazırlar; host her `tick`'ten sonra sorar (Erk'in penceresi de böyle yapıyor) |
+| Pencere | Her turdan sonra dikdörtgen değiştiyse winit'in `set_ime_cursor_area`'sı (mantıksal piksel: motorun ölçeği pencereninki). IME'yi açan `set_ime_allowed` kompozisyon PR'ında: o olmadan Windows'ta aday penceresi zaten açılmaz |
+| Mutasyonlar | 10 mutasyonun 9'u yakalandı: dönüşümün dışında boyamak, dikdörtgenin dönüşümü yok sayması, yanıp sönmesi, sınırlayıcı kutunun genişliği koruması, dikdörtgenin saklanmaması, en dıştaki matris (test alanı bu yüzden bir kırpma kabına kondu), pencerenin koordinatları karıştırması, uygulamanın ve C-ABI'nin dikdörtgeni kaybetmesi. Kaçan "ilk isabet bölgesi" ölü bir ayrımdı: bir düğümün bölgelerinin hepsi kendi dönüşümünde, `.rev()` silindi |
