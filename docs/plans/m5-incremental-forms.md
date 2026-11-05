@@ -370,6 +370,42 @@ başlarken, B16'nın ölçümüyle birlikte karara bağlanır.
 | Görünür elemanları R-Tree ile bulmak | `Extents`: her düğüm alt ağacının kapsamını tutuyor, liste kurulurken bantla kesişmeyen alt ağaçlar gezilmiyor (belge ağacı üzerinde fiilen bir BVH). İsabet testi son karenin bölgelerini doğrusal tarıyor | Liste için var. İsabet testinin taraması ölçülür ve pahalıysa bir indeks adayı; ayrı bir R-Tree bellek de ister |
 | "470 MB'tan 30–50 MB'a, 120 Hz korunarak" | 472 MB ölçülen (`erk-10000.html`, CPU); hedef 2026-10-12'de 100–150 MB kondu | 30–50 MB bir iddia, ölçüm değil; hedef B16'dan ve referans cihazdaki ölçümden sonra yeniden konur. 120 Hz'in kare bütçesi 8,3 ms, B15'in hedefiyle aynı |
 
+Gömülü host'un şekli (öneri, 2026-11-05; dışarıdan gelen bir önerinin
+Erk'in bağımlılık kurallarına göre düzeltilmiş hâli):
+
+- **Hedef profili.** Masaüstüsüz Linux, 2 GB RAM, X11 yok; `cage` gibi tek
+  uygulamalı (kiosk) bir Wayland kompozitörü. Cihazın kendisi (kart,
+  işlemci, GPU ve sürücüsü) açık soru: CPU ya da GPU yolu seçimi ona bağlı
+  (örneğin Raspberry Pi 4/5'in GPU'su Mesa ile Vulkan veriyor, i.MX8'in
+  Vivante'sinde pratikte yalnızca GLES var).
+- **Host'un yeri.** winit `erk`'te yaşıyor ve C-ABI (`erk-ffi`) de `erk`'e
+  bağlı: her host bugün winit'i getiriyor. Yeni bir crate `erk-renderer`'a
+  doğrudan bağlanamaz (muhafız: kabuk motora yalnızca `erk` üzerinden
+  ulaşır). Doğru şekil: `erk`'te winit, softbuffer ve `arboard` bir `window`
+  özelliğinin arkasına alınır; kiosk host'u ayrı bir crate olarak `erk`'i
+  bu özellik olmadan kullanır ve Wayland'ı `smithay-client-toolkit` ile
+  kendisi konuşur; bağımlılık muhafızının izin listesine eklenir.
+- **Kullanacağı yüzey zaten var.** CPU yolunda `App::headless`, `frame`,
+  `input`, `tick` ve `next_tick`, `caret_rect`, `Clipboard`; GPU yolunda
+  `RasterThread::on_window` `raw-window-handle`'ı olan her yüzeyi alıyor,
+  wgpu Wayland yüzeyini (Vulkan ya da GLES) kendisi bağlıyor: dmabuf'u elle
+  yönetmek gerekmiyor.
+- **Kazancın kaynağı, ölçülecek.** winit'in Wayland arka ucu zaten
+  `smithay-client-toolkit` üzerine kurulu: winit'i atmanın kendi bellek
+  kazancı küçük olabilir. Asıl kazançlar: kareyi doğrudan Wayland'ın
+  paylaşımlı bellek tamponuna (`wl_shm`) çizmek (bugün raster'ın kendi
+  tamponu, sonra softbuffer'a bir kopya: kare boyunda bir tampon ve bir
+  kopya), Erk'in döşeme hasarını (`damage.rs`) `wl_surface.damage_buffer`
+  ile kompozitöre vermek, kareyi `wl_surface.frame` geri çağrısıyla
+  zamanlamak, pencere süslemesi (CSD) olmamak.
+- **Riskler.** Klavye düzeni (Türkçe) xkbcommon ister: Linux'ta işletim
+  sisteminin kütüphanesi, winit de onu kullanıyor. CJK IME kompozitörün
+  `text-input-v3` desteğine bağlı: `cage`'in desteklediği doğrulanmalı.
+  Pano `wl_data_device` ile (`smithay-clipboard` bir aday, lisans ve boyut
+  denetimiyle).
+- **Zaman.** Cihaz profili ve CPU/GPU kararı M5.13'te, ölçümle; `erk`'in
+  özellik ayrımı ve kiosk host'u M8'de (ürünleşme) ya da ayrı bir taşta.
+
 ### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
