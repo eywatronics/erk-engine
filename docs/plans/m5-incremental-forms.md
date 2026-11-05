@@ -351,6 +351,25 @@ Bellek tüketimini düşürürken Erk'in en önemli avantajı olan artımlı ren
 6. **M5.13-F: CI Bütçesi ve Regresyon Muhafızı:**
    - Her optimizasyonun bellek kazancı ve FPS üzerindeki etkisi ölçülür; p95 kare süresi veya doğruluk kâhini bozulmadan `.github/memory-budget.txt` tavanı kilitlenir.
 
+#### Karar bekleyen öneriler (2026-11-05)
+
+Proje sahibinin yönü (2026-11-05): Erk'in ileride kullanılacağı yer 2 GB
+RAM'li gömülü bir Linux cihaz; Erk cihazın tek arayüzü, etrafında masaüstü
+yok. Bu yüzden winit olmadan doğrudan Wayland ile konuşması, hızlı ve az
+bellekle çalışması isteniyor. Bugünkü rota değişmedi: aşağıdakiler M5.13
+başlarken, B16'nın ölçümüyle birlikte karara bağlanır.
+
+| Öneri | Erk'te bugün | Değerlendirme (karar M5.13'te) |
+|---|---|---|
+| Gömülü hedef: 2 GB RAM, masaüstüsüz Linux, doğrudan Wayland (winit yok) | Pencere, girdi ve IME winit'te; winit'in varsayılan özellikleri Wayland'ı açık getiriyor, Wayland oturumunda doğrudan Wayland istemcisi (pencere süslemesi `wayland-csd-adwaita` ile). Pano `arboard` ile yalnızca X11: XWayland'sız cihazda Erk kendi panosuna düşer | winit'i bırakmak pencereyi, girdiyi, IME'yi (Wayland `text-input`), ölçeği ve kare zamanlamasını Erk'in yazması demek: `docs/design/` altında bir karar. Kazancı ölçülmeli: winit'in kendi belleği küçük olabilir, asıl pay B16'da görülür; ara yol winit'in gereksiz özelliklerini (X11, pencere süslemesi) kapatmak. Ölçüm bir referans cihazda yapılır. Wayland panosu iki yolda da gerekli |
+| Stylo'yu çatallayıp Erk'in desteklemediği CSS'i kod tabanından silmek | Stylo servo kipinde derleniyor: Gecko'ya özgü özellikler zaten yok | İkili boyutunu kesin küçültür (gömülü depolama için değerli); RAM'e etkisi B16'daki stil payına bağlı, hesaplanmış stil yapıları öğeler arasında `Arc` ile paylaşılıyor. Bedeli: her html5ever ve Stylo yükseltmesinde çatalın yeniden uyarlanması (ikisi birlikte yükseltilir), `deny.toml`'daki MPL notunun ("Erk onları yamalamıyor") değişmesi, ayrıştırılmayan özelliklerle `@supports` ve yedek bildirimlerin davranışı (WPT ve Chrome referansı yakalar). M5.13-E'de karar |
+| Masaüstüne göre ayarlı önbellekleri gömülüye göre kısmak | Stylo'nun önbellekleri (stil paylaşımı, kural ağacı, font ölçüleri); Erk'in şekil önbelleği, tutulan yerleşim ve liste, döşeme özetleri | Erk'in önbellekleri artımlı çizimin kendisi: kısılınca kare süresi artar (3. ilke). Öneri: "masaüstü" ve "gömülü" iki profil, ikisinin de bellek bütçesi ve p95'i CI'da (M5.13-F) |
+| Kademeli silme: ekran dışının piksellerini at, yerleşimi tut | Erk ekran dışı piksel tutmuyor: kare görüntü alanı boyunda, döşemeler yalnızca karenin özetleri (`damage.rs`) | Pikselde silinecek bir şey yok. `erk-10000.html`'in CPU yolundaki 472 MB'ı (eleman başına ~15 KB) her eleman için tutulan veriden geliyor olmalı (stil, yerleşim ağacı, şekillenmiş metnin iki kopyası): B16 gösterecek. Önerinin tersine ağır olan, "hafif" sayılan katman olabilir. Aday: ekran dışındaki paragrafların şekillenmiş metnini bırakıp yaklaşınca yeniden şekillendirmek, kare bütçesiyle ölçülerek |
+| Kaydırma tamponu: ekranın üstü ve altı hazır | Display list iki ekranlık bir bantla sınırlı (`display::band`, p2-incremental §3.7.1); bant içinde kaydırma listeyi değiştirmiyor | Var. Bandın genişliği bir ayar olabilir (gömülü profilde dar) |
+| Kaydırmayı kompozitör iş parçacığına vermek: çizilmiş dokuyu GPU'da kaydırmak | M9'da planlı (kaydırma katmanı başına döşeme önbelleği) | Hız kazandırır, belleği artırır (ekrandan büyük dokular): diyetin aracı değil. B15'in p95 < 8,3 ms hedefi bugün bu olmadan tutuyor |
+| Görünür elemanları R-Tree ile bulmak | `Extents`: her düğüm alt ağacının kapsamını tutuyor, liste kurulurken bantla kesişmeyen alt ağaçlar gezilmiyor (belge ağacı üzerinde fiilen bir BVH). İsabet testi son karenin bölgelerini doğrusal tarıyor | Liste için var. İsabet testinin taraması ölçülür ve pahalıysa bir indeks adayı; ayrı bir R-Tree bellek de ister |
+| "470 MB'tan 30–50 MB'a, 120 Hz korunarak" | 472 MB ölçülen (`erk-10000.html`, CPU); hedef 2026-10-12'de 100–150 MB kondu | 30–50 MB bir iddia, ölçüm değil; hedef B16'dan ve referans cihazdaki ölçümden sonra yeniden konur. 120 Hz'in kare bütçesi 8,3 ms, B15'in hedefiyle aynı |
+
 ### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
