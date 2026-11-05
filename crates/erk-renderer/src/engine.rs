@@ -238,6 +238,33 @@ impl Engine {
         events
     }
 
+    /// What an input method is composing in the focused text field (M5
+    /// plan, decision 6): `text`, shown at the caret and underlined but not
+    /// yet in its value, with the caret `caret` bytes into it (at its end
+    /// for `None`). Empty text ends the composition. The events that
+    /// follow: an `input` event when starting over a selection deleted it.
+    /// Nothing in a password field, which takes no composition.
+    pub fn compose(&mut self, text: &str, caret: Option<usize>) -> Vec<Event> {
+        let events = self.page.compose(text, caret);
+        self.changed |= self.page.take_edited();
+        events
+    }
+
+    /// What an input method composed, committed: the composition goes and
+    /// `text` is typed in at the caret, then an `input` event, as a paste.
+    pub fn commit_composition(&mut self, text: &str) -> Vec<Event> {
+        let events = self.page.commit_composition(text);
+        self.changed |= self.page.take_edited();
+        events
+    }
+
+    /// Whether the focus is in a text field an input method may compose in:
+    /// one that is not a password. A window lets the input method work
+    /// only then.
+    pub fn takes_composition(&self) -> bool {
+        self.page.takes_composition()
+    }
+
     /// The host's clock is at `now_ns` (p1-contract §7): what depends on
     /// time, the caret's blink, catches up, and a frame is due if it looks
     /// different.
@@ -2730,5 +2757,194 @@ mod tests {
             (rect.width - at.height).abs() < 0.01 && (rect.height - 1.0).abs() < 0.01,
             "{rect:?} from {at:?}"
         );
+    }
+
+    /// The text a frame paints in blue, its runs joined, and the underlines
+    /// it draws: rectangles a pixel high in that blue.
+    fn shown(prepared: &Prepared) -> (String, usize) {
+        let text = prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Glyphs(run) if run.color == [0, 0, 255, 255] => {
+                    Some(run.text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let underlines = prepared
+            .list
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(item, crate::list::DisplayItem::Rect { height: 1.0, width, color: [0, 0, 255, 255], .. } if *width > 1.0)
+            })
+            .count();
+        (text, underlines)
+    }
+
+    /// A frame, checked against the oracle.
+    fn frame(engine: &mut Engine) -> Prepared {
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        prepared.expect("a frame")
+    }
+
+    const BLUE_FIELD: &str = "<input id=t value=ab style='color: rgb(0, 0, 255); font: 20px sans-serif'><button>b</button>";
+
+    #[test]
+    fn an_input_method_composes_at_the_caret_and_commits_into_the_value() {
+        use crate::messages::Key;
+        let mut engine = verifying(BLUE_FIELD);
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        press(&mut engine, Key::ArrowLeft);
+        let before = caret(&frame(&mut engine)).expect("a caret");
+        assert!(engine.takes_composition());
+        // Shown and underlined at the caret, not in the value.
+        assert_eq!(engine.compose("か", None), []);
+        let prepared = frame(&mut engine);
+        assert_eq!(shown(&prepared), ("aかb".to_owned(), 1));
+        assert_eq!(engine.value(t), Ok(Some("ab".to_owned())));
+        // The caret at the composition's end; the input method's window
+        // at its start, where the caret was.
+        let after = caret(&prepared).expect("a caret");
+        assert!(after.0 > before.0 + 5.0, "{after:?} after {before:?}");
+        assert_eq!(engine.caret_rect().map(|rect| rect.x), Some(before.0));
+        // The caret inside it, where the input method puts it.
+        engine.compose("かな", Some("か".len()));
+        let prepared = frame(&mut engine);
+        assert_eq!(shown(&prepared).0, "aかなb");
+        let inside = caret(&prepared).expect("a caret");
+        assert!((inside.0 - after.0).abs() < 1.0, "{inside:?} and {after:?}");
+        // Keys are the input method's while it composes: none edits.
+        assert_eq!(
+            press(&mut engine, Key::Character("x".to_owned())),
+            [EventKind::KeyDown, EventKind::KeyUp]
+        );
+        press(&mut engine, Key::Backspace);
+        assert_eq!(engine.value(t), Ok(Some("ab".to_owned())));
+        // Committed: typed in as a paste, an input event.
+        let kinds: Vec<EventKind> = engine
+            .commit_composition("仮名")
+            .into_iter()
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(kinds, [EventKind::Input]);
+        assert_eq!(engine.value(t), Ok(Some("a仮名b".to_owned())));
+        assert_eq!(shown(&frame(&mut engine)), ("a仮名b".to_owned(), 0));
+        // Typing edits again, at the caret after what was committed.
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(t), Ok(Some("a仮名!b".to_owned())));
+    }
+
+    #[test]
+    fn a_composition_takes_the_selections_place_and_ends_with_the_focus_or_a_press() {
+        use crate::messages::Key;
+        let mut engine = verifying(BLUE_FIELD);
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        press_with(&mut engine, Key::Character("a".to_owned()), CONTROL);
+        // Starting over a selection deletes it, an input event.
+        let kinds: Vec<EventKind> = engine
+            .compose("k", None)
+            .into_iter()
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(kinds, [EventKind::Input]);
+        assert_eq!(engine.value(t), Ok(Some(String::new())));
+        assert_eq!(shown(&frame(&mut engine)), ("k".to_owned(), 1));
+        // An empty composition ends it.
+        engine.compose("", None);
+        assert_eq!(shown(&frame(&mut engine)), (String::new(), 0));
+        // The focus leaving takes it away; the value stays.
+        engine.compose("k", None);
+        frame(&mut engine);
+        press(&mut engine, Key::Tab);
+        assert_eq!(shown(&frame(&mut engine)), (String::new(), 0));
+        // A press in the field ends it too.
+        press(&mut engine, Key::Tab);
+        engine.compose("k", None);
+        let field = engine.node_box(t).unwrap().unwrap();
+        click(&mut engine, (field.x + 2.0, field.y + field.height / 2.0));
+        assert_eq!(shown(&frame(&mut engine)), (String::new(), 0));
+        assert_eq!(engine.value(t), Ok(Some(String::new())));
+    }
+
+    #[test]
+    fn a_press_past_a_composition_finds_its_place_in_the_value() {
+        use crate::messages::Key;
+        let mut engine = verifying(
+            "<input id=t value=abcdef style='color: rgb(0, 0, 255); font: 20px sans-serif; border: 0; padding: 0; width: 290px'><button>b</button>",
+        );
+        let t = engine.query(None, "#t").unwrap().unwrap();
+        press(&mut engine, Key::Tab);
+        press(&mut engine, Key::Home);
+        press(&mut engine, Key::ArrowRight);
+        frame(&mut engine);
+        // Where "c" ends, before anything is composed.
+        for _ in 0..2 {
+            press(&mut engine, Key::ArrowRight);
+        }
+        let after_c = caret(&frame(&mut engine)).expect("a caret").0;
+        for _ in 0..2 {
+            press(&mut engine, Key::ArrowLeft);
+        }
+        // Composed after "a", what follows moves right by its width.
+        engine.compose("かな", None);
+        let end = caret(&frame(&mut engine)).expect("a caret").0;
+        let width = end - engine.caret_rect().expect("a caret").x;
+        let y = engine.caret_rect().unwrap().y + 5.0;
+        // A press where "c" now ends: there in the value, the composition
+        // gone.
+        click(&mut engine, (after_c + width + 0.5, y));
+        frame(&mut engine);
+        type_text(&mut engine, "!");
+        assert_eq!(engine.value(t), Ok(Some("abc!def".to_owned())));
+    }
+
+    #[test]
+    fn only_a_text_field_that_is_no_password_takes_a_composition() {
+        use crate::messages::Key;
+        let mut engine = verifying(
+            "<input id=p type=password value=gizli style='color: rgb(255, 0, 0)'>\
+             <input id=t placeholder=Adınız style='color: rgb(0, 0, 255)'>\
+             <textarea id=a style='color: rgb(0, 0, 255)'></textarea><button>b</button>",
+        );
+        let (p, t, a) = (
+            engine.query(None, "#p").unwrap().unwrap(),
+            engine.query(None, "#t").unwrap().unwrap(),
+            engine.query(None, "#a").unwrap().unwrap(),
+        );
+        assert!(!engine.takes_composition());
+        assert_eq!(engine.compose("k", None), []);
+        press(&mut engine, Key::Tab);
+        assert!(!engine.takes_composition());
+        assert_eq!(engine.compose("k", None), []);
+        let lines = frame(&mut engine)
+            .list
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(item, crate::list::DisplayItem::Rect { height: 1.0, width, .. } if *width > 1.0)
+            })
+            .count();
+        assert_eq!(lines, 0, "nothing composed, nothing underlined");
+        // Text committed is typed, as in any field.
+        engine.commit_composition("k");
+        assert_eq!(engine.value(p), Ok(Some("gizlik".to_owned())));
+        // A line takes no line break; the placeholder goes while it
+        // composes.
+        press(&mut engine, Key::Tab);
+        assert!(engine.takes_composition());
+        engine.compose("bir\niki", None);
+        assert_eq!(shown(&frame(&mut engine)), ("biriki".to_owned(), 1));
+        engine.commit_composition("bir\niki");
+        assert_eq!(engine.value(t), Ok(Some("biriki".to_owned())));
+        // A textarea keeps it.
+        press(&mut engine, Key::Tab);
+        engine.commit_composition("bir\niki");
+        assert_eq!(engine.value(a), Ok(Some("bir\niki".to_owned())));
     }
 }

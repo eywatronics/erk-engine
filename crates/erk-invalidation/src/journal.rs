@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use erk_dom::{Document, NodeData, NodeId};
+use erk_dom::{Composition, Document, NodeData, NodeId};
 
 /// A node's state as the journal compares it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -30,6 +30,9 @@ pub struct State {
     children: Vec<NodeId>,
     /// A form control's value, if one was set (M5.8: drawn in the field).
     value: Option<String>,
+    /// What an input method is composing in a text field, also drawn in
+    /// it.
+    composition: Option<Composition>,
 }
 
 impl State {
@@ -55,6 +58,7 @@ impl State {
             attrs,
             children: doc.children(id).collect(),
             value: doc.value_set(id).map(str::to_owned),
+            composition: doc.composition(id).cloned(),
         }
     }
 }
@@ -83,7 +87,8 @@ pub struct Changes {
     pub attrs: Vec<AttrChange>,
     /// Nodes whose children changed: added, removed or moved.
     pub children: Vec<NodeId>,
-    /// Form controls whose value was set to another.
+    /// Form controls whose value was set to another, or text fields whose
+    /// composition changed: what the field shows.
     pub values: Vec<NodeId>,
 }
 
@@ -117,7 +122,7 @@ impl Changes {
         if before.children != after.children {
             self.children.push(id);
         }
-        if before.value != after.value {
+        if before.value != after.value || before.composition != after.composition {
             self.values.push(id);
         }
     }
@@ -407,5 +412,27 @@ mod tests {
         journal.touch(&doc, t);
         doc.set_value(t, "b").unwrap();
         assert_eq!(journal.take(&doc).0, Changes::default());
+    }
+
+    #[test]
+    fn a_composition_shown_or_taken_away_is_a_change_of_its_field() {
+        let mut doc = doc("<input id=t value=a>");
+        let t = find(&doc, "t");
+        let composition = |text: &str| {
+            Some(erk_dom::Composition {
+                at: 1,
+                text: text.to_owned(),
+                caret: text.len(),
+            })
+        };
+        let mut journal = Journal::default();
+        for shown in [composition("k"), composition("か"), None] {
+            let before = snapshot(&doc);
+            journal.touch(&doc, t);
+            doc.set_composition(t, shown).unwrap();
+            let (changes, _) = journal.take(&doc);
+            assert_eq!(changes.values, [t]);
+            assert_eq!(changes, difference(&before, &doc));
+        }
     }
 }

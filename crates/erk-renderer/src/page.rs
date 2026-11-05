@@ -699,6 +699,7 @@ impl Page {
             .selection_items(&layouts, &scrolling)
             .into_iter()
             .collect();
+        marks.extend(self.composition_items(&layouts, &scrolling, &styles));
         marks.extend(self.caret_item(&layouts, &scrolling, &styles));
         if !marks.is_empty() && around != crate::transform::IDENTITY {
             list.items.push(DisplayItem::PushTransform(around));
@@ -708,8 +709,8 @@ impl Page {
             list.items.append(&mut marks);
         }
         let caret_rect = self
-            .caret_line(&layouts, &scrolling)
-            .map(|(_, line)| bounds(&around, &line));
+            .ime_line(&layouts, &scrolling)
+            .map(|line| bounds(&around, &line));
         if let Some(node) = self.highlight {
             list.items.extend(
                 hits.iter()
@@ -964,6 +965,8 @@ impl Page {
                 if let Some(field) = focus
                     && let Some(at) = self.caret_at_point(field, (input.x, input.y))
                 {
+                    // A press ends what an input method was composing.
+                    self.end_composition();
                     // Shift extends the selection to the press, as it
                     // extends it to where an arrow moves.
                     let extends = input.modifiers.shift && events.is_empty();
@@ -1105,6 +1108,8 @@ impl Page {
         if focus == self.focus {
             return Vec::new();
         }
+        // What an input method was composing goes with the focus.
+        self.end_composition();
         self.focus_visible = focus.is_some_and(|node| by_keyboard || self.takes_typing(node));
         let mut events = Vec::new();
         if let Some(old) = self
@@ -1147,6 +1152,11 @@ impl Page {
     /// caret, then an `input` event, or move the caret. `None` for a key
     /// that does neither there (Tab, Escape, Enter in a one-line field).
     fn edit(&mut self, field: NodeId, input: &KeyInput) -> Option<Vec<Event>> {
+        // While an input method composes, keys are its: none edits, as in
+        // browsers.
+        if self.doc.composing() == Some(field) {
+            return None;
+        }
         let kind = crate::layout::text_field(&self.doc, field)?;
         let value = self.doc.value(field).ok()??;
         let at = self
@@ -1261,25 +1271,16 @@ impl Page {
         layouts: &layout::Layouts,
         scrolling: &Scrolling,
     ) -> Vec<DisplayItem> {
-        let Some((field, at)) = self.caret else {
+        // While an input method composes there is no selection: it took
+        // the selection's place.
+        let Some((field, at)) = self.caret.filter(|_| self.doc.composing().is_none()) else {
             return Vec::new();
         };
-        let (Some(kind), Some(value)) = (
-            crate::layout::text_field(&self.doc, field),
-            self.doc.value(field).ok().flatten(),
-        ) else {
+        let (Some(anchor), Some(focus)) =
+            (self.shown_at(field, self.anchor), self.shown_at(field, at))
+        else {
             return Vec::new();
         };
-        let shown = |at: usize| {
-            let at = floor_boundary(&value, at.min(value.len()));
-            match kind {
-                crate::layout::TextField::Password => {
-                    value[..at].chars().count() * '\u{2022}'.len_utf8()
-                }
-                crate::layout::TextField::Line | crate::layout::TextField::Area => at,
-            }
-        };
-        let (anchor, focus) = (shown(self.anchor), shown(at));
         if anchor == focus {
             return Vec::new();
         }
@@ -1343,6 +1344,19 @@ impl Page {
                     .map_or(value.len(), |(at, _)| at)
             }
             crate::layout::TextField::Line | crate::layout::TextField::Area => {
+                // A press in what is composed is at its place in the value.
+                let shown = match self.doc.composition(field) {
+                    Some(composition) => {
+                        let start = crate::layout::composed_at(&value, composition);
+                        let end = start + composition.text.len();
+                        if shown >= end {
+                            shown - composition.text.len()
+                        } else {
+                            shown.min(start)
+                        }
+                    }
+                    None => shown,
+                };
                 floor_boundary(&value, shown.min(value.len()))
             }
         })
@@ -1352,16 +1366,8 @@ impl Page {
     /// view, the field's scroll offset that shows it: a one-line field
     /// scrolls across, a textarea down or up, by no more than it takes.
     fn caret_scroll(&self, layouts: &layout::Layouts) -> Option<(NodeId, (f32, f32))> {
-        let (field, at) = self.caret.filter(|_| self.reveal_caret)?;
+        let (field, shown) = self.shown_caret().filter(|_| self.reveal_caret)?;
         let kind = crate::layout::text_field(&self.doc, field)?;
-        let value = self.doc.value(field).ok()??;
-        let at = floor_boundary(&value, at.min(value.len()));
-        let shown = match kind {
-            crate::layout::TextField::Password => {
-                value[..at].chars().count() * '\u{2022}'.len_utf8()
-            }
-            crate::layout::TextField::Line | crate::layout::TextField::Area => at,
-        };
         let text = &layouts.text(field)?.layout;
         let line = parley::layout::Cursor::from_byte_index(
             &text.layout,
@@ -1417,6 +1423,145 @@ impl Page {
             modifiers: Modifiers::default(),
         };
         self.edit(field, &typed).unwrap_or_default()
+    }
+
+    /// What an input method is composing in the focused text field (M5
+    /// plan, decision 6): `text`, shown at the caret and underlined but not
+    /// yet in the value, with the caret `caret` bytes into it (at its end
+    /// without one). Empty text takes the composition away. A composition
+    /// starting over a selection deletes it first, an `input` event. Not in
+    /// a password, which takes no composition, as in browsers.
+    pub(crate) fn compose(&mut self, text: &str, caret: Option<usize>) -> Vec<Event> {
+        let Some((field, _)) = self.caret else {
+            return Vec::new();
+        };
+        let Some(kind) = crate::layout::text_field(&self.doc, field)
+            .filter(|kind| *kind != crate::layout::TextField::Password)
+        else {
+            return Vec::new();
+        };
+        if text.is_empty() {
+            self.end_composition();
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        if self.doc.composing() != Some(field) && self.selected() {
+            let delete = KeyInput {
+                key: Key::Backspace,
+                state: KeyState::Down,
+                modifiers: Modifiers::default(),
+            };
+            events = self.edit(field, &delete).unwrap_or_default();
+        }
+        // A line takes no line break, typed or composed.
+        let text: String = match kind {
+            crate::layout::TextField::Area => text.to_owned(),
+            _ => text.chars().filter(|c| !matches!(c, '\r' | '\n')).collect(),
+        };
+        let Some((_, at)) = self.caret else {
+            return events;
+        };
+        let caret = caret.unwrap_or(text.len());
+        self.journal.touch(&self.doc, field);
+        let _ = self
+            .doc
+            .set_composition(field, Some(erk_dom::Composition { at, text, caret }));
+        self.edited = true;
+        self.caret_since = self.now;
+        self.reveal_caret = true;
+        events
+    }
+
+    /// What an input method composed, committed: the composition goes and
+    /// `text` is typed in at the caret, an `input` event, as a paste is.
+    pub(crate) fn commit_composition(&mut self, text: &str) -> Vec<Event> {
+        self.end_composition();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        self.paste(text)
+    }
+
+    /// Take away what an input method was composing, if anything: the
+    /// focus moved, the user pressed elsewhere, or the method ended it.
+    fn end_composition(&mut self) {
+        if let Some(field) = self.doc.composing() {
+            self.journal.touch(&self.doc, field);
+            let _ = self.doc.set_composition(field, None);
+            self.edited = true;
+        }
+    }
+
+    /// Whether the focus is in a text field that takes a composition: one
+    /// that is not a password.
+    pub(crate) fn takes_composition(&self) -> bool {
+        self.caret.is_some_and(|(field, _)| {
+            crate::layout::text_field(&self.doc, field)
+                .is_some_and(|kind| kind != crate::layout::TextField::Password)
+        })
+    }
+
+    /// Whether the focused field has text selected.
+    fn selected(&self) -> bool {
+        self.caret.is_some_and(|(_, at)| at != self.anchor)
+    }
+
+    /// What an input method composes, underlined: a line a pixel high
+    /// under each line of it, in the field's colour, kept inside the
+    /// field's content box.
+    fn composition_items(
+        &self,
+        layouts: &layout::Layouts,
+        scrolling: &Scrolling,
+        styles: &Styles,
+    ) -> Vec<DisplayItem> {
+        let Some((field, _)) = self.caret else {
+            return Vec::new();
+        };
+        let (Some(composition), Some(value)) = (
+            self.doc.composition(field),
+            self.doc.value(field).ok().flatten(),
+        ) else {
+            return Vec::new();
+        };
+        let (Some(text), Some(origin), Some(field_box), Some(style)) = (
+            layouts.text(field),
+            text_origin(layouts, scrolling, field),
+            box_model(layouts, scrolling, field),
+            styles.computed(field),
+        ) else {
+            return Vec::new();
+        };
+        let color = crate::color::srgb_bytes(style.clone_color());
+        let start = crate::layout::composed_at(&value, composition);
+        let layout = &text.layout.layout;
+        let cursor = |index| {
+            parley::layout::Cursor::from_byte_index(
+                layout,
+                index,
+                parley::layout::Affinity::Downstream,
+            )
+        };
+        let left = field_box.x + field_box.border[3] + field_box.padding[3];
+        let top = field_box.y + field_box.border[0] + field_box.padding[0];
+        let right = field_box.x + field_box.width - field_box.border[1] - field_box.padding[1];
+        let bottom = field_box.y + field_box.height - field_box.border[2] - field_box.padding[2];
+        parley::layout::Selection::new(cursor(start), cursor(start + composition.text.len()))
+            .geometry(layout)
+            .into_iter()
+            .filter_map(|(rect, _)| {
+                let x0 = (origin.0 + rect.x0 as f32).max(left);
+                let x1 = (origin.0 + rect.x1 as f32).min(right);
+                let y = origin.1 + rect.y1 as f32 - 1.0;
+                (x0 < x1 && y >= top && y + 1.0 <= bottom).then_some(DisplayItem::Rect {
+                    x: x0,
+                    y,
+                    width: x1 - x0,
+                    height: 1.0,
+                    color,
+                })
+            })
+            .collect()
     }
 
     /// Whether input moved a caret or edited a field since the last call.
@@ -1477,35 +1622,56 @@ impl Page {
         layouts: &layout::Layouts,
         scrolling: &Scrolling,
     ) -> Option<(NodeId, Rect)> {
+        let (field, shown) = self.shown_caret()?;
+        Some((field, line_at(layouts, scrolling, field, shown)?))
+    }
+
+    /// Where an input method's candidate window goes: at the caret, or
+    /// while it composes at the start of what it composes (M5 plan,
+    /// decision 6), before the transforms around the field.
+    fn ime_line(&self, layouts: &layout::Layouts, scrolling: &Scrolling) -> Option<Rect> {
+        let (field, at) = self.caret?;
+        let shown = match self.doc.composition(field) {
+            Some(composition) => {
+                crate::layout::composed_at(&self.doc.value(field).ok()??, composition)
+            }
+            None => self.shown_at(field, at)?,
+        };
+        line_at(layouts, scrolling, field, shown)
+    }
+
+    /// The focused text field, and where its caret is in the text the
+    /// field shows: a password's counted in bullets, past what an input
+    /// method composes before it, and while it composes at its caret.
+    fn shown_caret(&self) -> Option<(NodeId, usize)> {
         // The caret goes with the focus: moving it sets or clears it.
         let (field, at) = self.caret?;
+        if let Some(composition) = self.doc.composition(field) {
+            let value = self.doc.value(field).ok()??;
+            let start = crate::layout::composed_at(&value, composition);
+            let into = floor_boundary(
+                &composition.text,
+                composition.caret.min(composition.text.len()),
+            );
+            return Some((field, start + into));
+        }
+        Some((field, self.shown_at(field, at)?))
+    }
+
+    /// Where byte `at` of text field `field`'s value is in the text the
+    /// field shows while nothing is composed in it: a password shows a
+    /// bullet for each character. (While an input method composes, the
+    /// caret and its window have their own places, and nothing is selected.)
+    fn shown_at(&self, field: NodeId, at: usize) -> Option<usize> {
         let kind = crate::layout::text_field(&self.doc, field)?;
         let value = self.doc.value(field).ok()??;
         let at = floor_boundary(&value, at.min(value.len()));
-        // A password shows a bullet for each character.
-        let shown = match kind {
+        Some(match kind {
             crate::layout::TextField::Password => {
                 value[..at].chars().count() * '\u{2022}'.len_utf8()
             }
             crate::layout::TextField::Line | crate::layout::TextField::Area => at,
-        };
-        let text = &layouts.text(field)?.layout;
-        let cursor = parley::layout::Cursor::from_byte_index(
-            &text.layout,
-            shown,
-            parley::layout::Affinity::Downstream,
-        );
-        let line = cursor.geometry(&text.layout, 1.0);
-        let (left, top) = text_origin(layouts, scrolling, field)?;
-        Some((
-            field,
-            Rect {
-                x: left + line.x0 as f32,
-                y: top + line.y0 as f32,
-                width: 1.0,
-                height: (line.y1 - line.y0) as f32,
-            },
-        ))
+        })
     }
 
     /// Where the focused field's caret is on the viewport (see
@@ -2277,6 +2443,31 @@ fn text_origin(
         x + layout.border.left + layout.padding.left,
         y + layout.border.top + layout.padding.top,
     ))
+}
+
+/// The caret's line at byte `shown` of the text field `field` shows: one
+/// pixel wide, as tall as the line of text, in the viewport before the
+/// transforms around the field.
+fn line_at(
+    layouts: &layout::Layouts,
+    scrolling: &Scrolling,
+    field: NodeId,
+    shown: usize,
+) -> Option<Rect> {
+    let text = &layouts.text(field)?.layout;
+    let line = parley::layout::Cursor::from_byte_index(
+        &text.layout,
+        shown,
+        parley::layout::Affinity::Downstream,
+    )
+    .geometry(&text.layout, 1.0);
+    let (left, top) = text_origin(layouts, scrolling, field)?;
+    Some(Rect {
+        x: left + line.x0 as f32,
+        y: top + line.y0 as f32,
+        width: 1.0,
+        height: (line.y1 - line.y0) as f32,
+    })
 }
 
 /// The colour a field's selection is painted over its text with: a

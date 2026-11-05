@@ -1578,26 +1578,42 @@ pub(crate) enum TextField {
 }
 
 impl TextField {
-    /// The text the field shows: its value, a password's as bullets, or
+    /// The text the field shows: its value with what an input method is
+    /// composing in it, a password's as bullets (it never composes), or
     /// while it is empty its placeholder. An empty one still holds a line,
     /// as an empty paragraph does.
     fn shown(self, doc: &Document, id: NodeId) -> String {
         if let Some(placeholder) = placeholder(doc, id) {
             return placeholder;
         }
-        let value = doc.value(id).ok().flatten().unwrap_or_default();
+        let mut value = doc.value(id).ok().flatten().unwrap_or_default();
         match self {
             TextField::Password => "\u{2022}".repeat(value.chars().count()),
-            TextField::Line | TextField::Area => value,
+            TextField::Line | TextField::Area => {
+                if let Some(composition) = doc.composition(id) {
+                    value.insert_str(composed_at(&value, composition), &composition.text);
+                }
+                value
+            }
         }
     }
+}
+
+/// Where in `value` a composition is shown: at its byte, or the character
+/// boundary before it, inside the value.
+pub(crate) fn composed_at(value: &str, composition: &erk_dom::Composition) -> usize {
+    let mut at = composition.at.min(value.len());
+    while !value.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 /// The placeholder text field `id` shows while its value is empty: its
 /// `placeholder` attribute, an input's without line breaks (HTML §4.10.5.3.10).
 pub(crate) fn placeholder(doc: &Document, id: NodeId) -> Option<String> {
     let field = text_field(doc, id)?;
-    if !doc.value(id).ok()??.is_empty() {
+    if !doc.value(id).ok()??.is_empty() || doc.composition(id).is_some() {
         return None;
     }
     let text = doc

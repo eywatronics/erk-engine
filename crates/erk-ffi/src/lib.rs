@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 13;
+pub const ERK_ABI_VERSION: u32 = 14;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -201,6 +201,14 @@ pub const ERK_INPUT_POINTER_LEAVE: u32 = 4;
 pub const ERK_INPUT_KEY_DOWN: u32 = 5;
 pub const ERK_INPUT_KEY_UP: u32 = 6;
 pub const ERK_INPUT_WHEEL: u32 = 7;
+/// What an input method is composing in the focused text field: `text`,
+/// shown at the caret and underlined but not yet typed, with the caret
+/// `caret` bytes into it. Empty text ends the composition. Keys do not edit
+/// the field while it lasts.
+pub const ERK_INPUT_PREEDIT: u32 = 8;
+/// Text an input method committed, `text`: the composition ends and the
+/// text is typed in at the caret, an `ERK_EVENT_INPUT`.
+pub const ERK_INPUT_COMMIT: u32 = 9;
 
 pub const ERK_BUTTON_NONE: u32 = 0;
 pub const ERK_BUTTON_PRIMARY: u32 = 1;
@@ -243,10 +251,14 @@ pub struct ErkInput {
     pub button: u32,
     /// `ERK_KEY_*`.
     pub key: u32,
-    /// The character an `ERK_KEY_CHARACTER` typed.
+    /// The character an `ERK_KEY_CHARACTER` typed, or an input method's
+    /// text (`ERK_INPUT_PREEDIT`, `ERK_INPUT_COMMIT`).
     pub text: ErkStr,
     /// `ERK_MOD_*` bits.
     pub modifiers: u32,
+    /// `ERK_INPUT_PREEDIT`: how many bytes into `text` the caret is; past
+    /// its end (`UINT32_MAX`) at its end.
+    pub caret: u32,
 }
 
 // ---- Events ------------------------------------------------------------------
@@ -1059,6 +1071,11 @@ pub extern "C" fn erk_app_input(app: *mut ErkApp, input: *const ErkInput) -> Erk
                 x,
                 y,
             },
+            ERK_INPUT_PREEDIT => Input::Preedit {
+                text: text(field!(input, ErkInput, text, none))?,
+                caret: Some(field!(input, ErkInput, caret, u32::MAX) as usize),
+            },
+            ERK_INPUT_COMMIT => Input::Commit(text(field!(input, ErkInput, text, none))?),
             _ => return Err(ERK_ERR_INVALID_ARGUMENT),
         };
         app.app().input(input);

@@ -23,6 +23,16 @@ pub(crate) enum Control {
     Selected(bool),
 }
 
+/// What an input method is composing in a text field (M5.8): `text`, shown
+/// in the field at byte `at` of its value but not yet part of it, with the
+/// caret `caret` bytes into it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Composition {
+    pub at: usize,
+    pub text: String,
+    pub caret: usize,
+}
+
 /// What kind of control an element is, as far as its value goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -192,9 +202,46 @@ impl Document {
         }
     }
 
+    /// Show `composition` in text field `id` (an `input` or a `textarea`),
+    /// or with `None` take its composition away. One field composes at a
+    /// time: a composition shown in one leaves the field that had one.
+    /// `Err` for any other element.
+    pub fn set_composition(
+        &mut self,
+        id: NodeId,
+        composition: Option<Composition>,
+    ) -> Result<(), MutationError> {
+        match self.kind(id).map_err(|_| MutationError::Stale)? {
+            Some(Kind::Text | Kind::Trimmed | Kind::TextArea) => {}
+            _ => return Err(MutationError::NotAControl),
+        }
+        match composition {
+            Some(composition) => self.composition = Some((id, composition)),
+            None if self.composing() == Some(id) => self.composition = None,
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// What an input method is composing in text field `id`, if anything.
+    pub fn composition(&self, id: NodeId) -> Option<&Composition> {
+        self.composition
+            .as_ref()
+            .filter(|(field, _)| *field == id)
+            .map(|(_, composition)| composition)
+    }
+
+    /// The text field an input method is composing in.
+    pub fn composing(&self) -> Option<NodeId> {
+        self.composition.as_ref().map(|(field, _)| *field)
+    }
+
     /// Forget the state of `id`, a node that is gone.
     pub(crate) fn forget_control(&mut self, id: NodeId) {
         self.controls.remove(&id);
+        if self.composing() == Some(id) {
+            self.composition = None;
+        }
     }
 
     fn kind(&self, id: NodeId) -> Result<Option<Kind>, StaleNode> {
@@ -436,6 +483,49 @@ mod tests {
             stack.extend(doc.children(node));
         }
         panic!("no #{id}");
+    }
+
+    #[test]
+    fn one_text_field_composes_at_a_time_and_a_removed_one_no_longer_does() {
+        use crate::Composition;
+        let mut doc = Document::parse_html(
+            "<input id=t value=ab><textarea id=a></textarea><p id=p></p><input id=k type=checkbox>",
+        );
+        let (t, a, p, k) = (
+            find(&doc, "t"),
+            find(&doc, "a"),
+            find(&doc, "p"),
+            find(&doc, "k"),
+        );
+        let kana = Composition {
+            at: 1,
+            text: "か".to_owned(),
+            caret: 3,
+        };
+        doc.set_composition(t, Some(kana.clone())).unwrap();
+        assert_eq!(doc.composition(t), Some(&kana));
+        assert_eq!(doc.composing(), Some(t));
+        // Shown, not part of the value.
+        assert_eq!(doc.value(t), Ok(Some("ab".to_owned())));
+        // Taking another field's away leaves this one's.
+        doc.set_composition(a, None).unwrap();
+        assert_eq!(doc.composition(t), Some(&kana));
+        // Another field composing takes it over.
+        doc.set_composition(a, Some(kana.clone())).unwrap();
+        assert_eq!((doc.composition(t), doc.composing()), (None, Some(a)));
+        doc.set_composition(a, None).unwrap();
+        assert_eq!(doc.composing(), None);
+        // Only text fields compose.
+        for other in [p, k] {
+            assert_eq!(
+                doc.set_composition(other, Some(kana.clone())),
+                Err(crate::MutationError::NotAControl)
+            );
+        }
+        // A field that is removed composes no more.
+        doc.set_composition(t, Some(kana)).unwrap();
+        doc.remove(t);
+        assert_eq!(doc.composing(), None);
     }
 
     #[test]

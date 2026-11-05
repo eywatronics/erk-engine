@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 13
+#define ERK_ABI_VERSION 14
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -55,6 +55,20 @@
 #define ERK_INPUT_KEY_UP 6
 
 #define ERK_INPUT_WHEEL 7
+
+/*
+ What an input method is composing in the focused text field: `text`,
+ shown at the caret and underlined but not yet typed, with the caret
+ `caret` bytes into it. Empty text ends the composition. Keys do not edit
+ the field while it lasts.
+ */
+#define ERK_INPUT_PREEDIT 8
+
+/*
+ Text an input method committed, `text`: the composition ends and the
+ text is typed in at the caret, an `ERK_EVENT_INPUT`.
+ */
+#define ERK_INPUT_COMMIT 9
 
 #define ERK_BUTTON_NONE 0
 
@@ -290,13 +304,19 @@ typedef struct {
    */
   uint32_t key;
   /*
-   The character an `ERK_KEY_CHARACTER` typed.
+   The character an `ERK_KEY_CHARACTER` typed, or an input method's
+   text (`ERK_INPUT_PREEDIT`, `ERK_INPUT_COMMIT`).
    */
   ErkStr text;
   /*
    `ERK_MOD_*` bits.
    */
   uint32_t modifiers;
+  /*
+   `ERK_INPUT_PREEDIT`: how many bytes into `text` the caret is; past
+   its end (`UINT32_MAX`) at its end.
+   */
+  uint32_t caret;
 } ErkInput;
 
 /*
