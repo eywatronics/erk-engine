@@ -829,6 +829,17 @@ Altıncı PR: pano (dördüncü adımın ikinci yarısının ilk parçası).
 |---|---|
 | Model | Pano bir G/Ç (karar 5): çekirdek ona erişmez. Metin alanında Control+C ve Control+X tuşun varsayılan işi olarak bir istek bırakıyor (`ClipboardRequest::Write`, seçili metin; kes ayrıca seçimi siliyor ve bir `input` olayı); Control+V okuma istiyor (`ClipboardRequest::Read`). İsteği `erk` karşılıyor: yazıyor, ya da okuyup `Engine::paste` ile seçimin yerine yazdırıyor (yazmayla aynı yol: `input`'ta satır sonları atılıyor). Şifre hiçbir zaman kopyalanmıyor ya da kesilmiyor, tarayıcılar gibi. Tür `messages.rs`'te düz veri; yüzey muhafızının listesi aynı PR'da |
 | Host'un panosu | Rust'ta `Clipboard` trait'i ve `App::set_clipboard`; C-ABI'de `erk_app_set_clipboard` (ABI 12, ekleme ama yeni bir sahiplik yolu): `read` metni ödünç veriyor, Erk hemen kopyalıyor; `destroy` başka pano kurulunca ya da uygulama yok edilince bir kez. Kurulmadan uygulamanın kendi panosu: uygulama içinde kopyalayıp yapıştırıyor, testler de onunla |
-| Sonraki | Pencere kipinde sistem panosu: yeni bir bağımlılık (`arboard` ya da eşdeğeri), lisans ve boyut bütçesi denetimiyle ayrı PR |
+| Sonraki | Pencere kipinde sistem panosu: yeni bir bağımlılık (`arboard` ya da eşdeğeri), lisans ve boyut bütçesi denetimiyle ayrı PR (yedinci PR) |
 | Fuzz | Yorumlayıcının tuşlarına Shift ve Control, harflere `c`, `x`, `v` girdi: seçim, kopyala, kes ve yapıştır kâhinle her karede |
 | Mutasyonlar | 12 mutasyondan 11'i yakalandı, biri ölü koddu ve silindi (yapıştırmada imlecin odakla süzülmesi: imleç odakla gidip geliyor); "pano için okuma yeter" mutasyonu ilk turda derlenmemişti, derlenince yakalandı |
+
+Yedinci PR: pencerede sistem panosu (dördüncü adımın ikinci yarısının ikinci parçası).
+
+| Konu | Not |
+|---|---|
+| Bağımlılık | `arboard` 3.7.0 (1Password; MIT OR Apache-2.0), `default-features = false`: görüntü desteği yok (`image` ve onun çözücüleri gelmiyor), Wayland'ın `wl-clipboard-rs`'i yok. Yalnızca dört yeni paket: `arboard`, `clipboard-win`, `error-code`, `objc2-app-kit`; `x11rb`, `objc2` ve `windows-sys` zaten winit'le vardı. Reddedilen: `copypasta` (bakımı daha zayıf, Windows tarafı aynı `clipboard-win`), kendi yazdığımız platform kodu (üç işletim sistemi, X11'de sahiplik iş parçacığı; `unsafe` gerekirdi ve `erk` `unsafe` istisna listesinde değil) |
+| Lisans | `clipboard-win` ve `error-code` BSL-1.0 (Boost). MIT'ten serbest: bildirim yalnızca kaynakla gider, ikili dağıtım yükümlülük getirmez. `deny.toml`'a gerekçesiyle eklendi; GPL ailesinden değil, `check-license-config.sh` geçiyor |
+| Model | Pano yine host'un (karar 5): `erk` çekirdeğin dışında. Pencere açılırken host bir pano kurmadıysa sistem panosu kuruluyor (`window_clipboard`); kurulamazsa (Linux'ta görüntü sunucusu yok) bir uyarı ve uygulamanın kendi panosu. Host'un panosu her zaman önce gelir; sistem panosu o durumda hiç açılmıyor. Pano pencere boyunca tutuluyor: X11'de kopyalanan metni sahibi canlıyken sunuluyor |
+| Wayland | `wayland-data-control` özelliği açılmadı: yeni bir bağımlılık ağacı (`wl-clipboard-rs`) ve winit'in Wayland'ı zaten XWayland'la birlikte çalışıyor. Yerel Wayland panosu M5.8 dışında; ihtiyaç doğarsa açık soru |
+| Test | Karar yolunun üçü birim testli (host'unki kalır ve sistemin panosu hiç açılmaz; sistemin panosu kurulur; yoksa uyarı ve kendi panosu). Gerçek sistem panosu yalnızca Windows'ta deneniyor (Linux koşucularında görüntü sunucusu yok); test öncesindeki metni geri koyuyor. Pencerenin `window_clipboard`'ı çağırması pencere açmadan denenemiyor: tek satırlık bağlantı |
+| Mutasyonlar | 6 mutasyonun 6'sı yakalandı (host'un panosunu ezmek, `set_clipboard`'ın işaretlememesi, sistem panosunun kurulmaması, uyarının düşmesi, okuma ve yazmanın boşa gitmesi) |

@@ -259,6 +259,8 @@ pub struct App {
     resources: Option<ResourceProvider>,
     /// Where copied text goes and pasted text comes from.
     clipboard: Box<dyn Clipboard>,
+    /// The host set the clipboard: a window keeps it.
+    host_clipboard: bool,
     log: Option<Log>,
     /// The frame with the raster, and when it went there.
     painting: Option<(FrameTimings, Instant)>,
@@ -327,6 +329,7 @@ impl App {
             fonts,
             resources: None,
             clipboard: Box::new(OwnClipboard::default()),
+            host_clipboard: false,
             log: None,
             painting: None,
             timings: None,
@@ -360,10 +363,12 @@ impl App {
     }
 
     /// Where copied text goes and pasted text comes from (M5 plan,
-    /// decision 5): the system's clipboard, or the host's. Until one is
-    /// set the app has its own, which copies and pastes within it.
+    /// decision 5), in place of the default: a window uses the system's
+    /// clipboard, a windowless app (or a window where the system has none)
+    /// its own, which copies and pastes within the app.
     pub fn set_clipboard(&mut self, clipboard: impl Clipboard + 'static) {
         self.clipboard = Box::new(clipboard);
+        self.host_clipboard = true;
     }
 
     /// Where Erk's own messages go (a refused resource, how the window

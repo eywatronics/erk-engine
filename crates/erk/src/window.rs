@@ -23,8 +23,8 @@ use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::{
-    App, Input, Key, KeyInput, KeyState, LogLevel, Modifiers, Output, PointerButton, PointerInput,
-    PointerKind, RunError,
+    App, Clipboard, Input, Key, KeyInput, KeyState, LogLevel, Modifiers, Output, PointerButton,
+    PointerInput, PointerKind, RunError,
 };
 
 enum UserEvent {
@@ -39,6 +39,11 @@ pub(crate) fn run(app: &mut App) -> Result<(), RunError> {
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|error| RunError(error.to_string()))?;
+    window_clipboard(app, || {
+        arboard::Clipboard::new()
+            .map(|system| Box::new(SystemClipboard(system)) as Box<dyn Clipboard>)
+            .map_err(|error| error.to_string())
+    });
     let proxy = event_loop.create_proxy();
     let waker = proxy.clone();
     // Fails harmlessly once the loop has ended.
@@ -64,6 +69,38 @@ pub(crate) fn run(app: &mut App) -> Result<(), RunError> {
         resume_unwind(panic);
     }
     result.map_err(|error| RunError(error.to_string()))
+}
+
+/// The clipboard a window copies to and pastes from: the host's if it set
+/// one, or else the system's, `system` (made only then). Where the system
+/// has none (no display server) the app keeps its own, and says so.
+fn window_clipboard(app: &mut App, system: impl FnOnce() -> Result<Box<dyn Clipboard>, String>) {
+    if app.host_clipboard {
+        return;
+    }
+    match system() {
+        Ok(system) => app.clipboard = system,
+        Err(error) => app.log(
+            LogLevel::Warning,
+            &format!("no system clipboard ({error}): copying within the app"),
+        ),
+    }
+}
+
+/// The system's clipboard, text only. Holding it keeps what was copied on
+/// offer where the system needs its owner alive (X11). A failure to read is
+/// an empty clipboard; a failure to write leaves it as it was, as a paste
+/// that finds nothing would.
+struct SystemClipboard(arboard::Clipboard);
+
+impl Clipboard for SystemClipboard {
+    fn read(&mut self) -> Option<String> {
+        self.0.get_text().ok()
+    }
+
+    fn write(&mut self, text: &str) {
+        let _ = self.0.set_text(text);
+    }
 }
 
 struct WindowState {
@@ -567,6 +604,85 @@ mod tests {
                 0x00ff_ffff
             ]
         );
+    }
+
+    /// A clipboard that writes down what it is given, as the system's would
+    /// keep it.
+    struct Recorded(std::rc::Rc<std::cell::RefCell<Vec<String>>>);
+
+    impl Clipboard for Recorded {
+        fn read(&mut self) -> Option<String> {
+            self.0.borrow().last().cloned()
+        }
+
+        fn write(&mut self, text: &str) {
+            self.0.borrow_mut().push(text.to_owned());
+        }
+    }
+
+    fn windowless() -> App {
+        App::headless(Config {
+            system_fonts: false,
+            ..Config::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_window_copies_to_the_systems_clipboard_unless_the_host_set_one() {
+        // No clipboard from the host: the system's.
+        let system = std::rc::Rc::default();
+        let mut app = windowless();
+        window_clipboard(&mut app, || {
+            Ok(Box::new(Recorded(std::rc::Rc::clone(&system))) as Box<dyn Clipboard>)
+        });
+        app.clipboard.write("kopya");
+        assert_eq!(*system.borrow(), ["kopya"]);
+
+        // The host's: kept, and the system's is never made.
+        let host = std::rc::Rc::default();
+        let mut app = windowless();
+        app.set_clipboard(Recorded(std::rc::Rc::clone(&host)));
+        window_clipboard(&mut app, || panic!("the system's clipboard was made"));
+        app.clipboard.write("host");
+        assert_eq!(*host.borrow(), ["host"]);
+    }
+
+    #[test]
+    fn without_a_system_clipboard_a_window_copies_within_the_app_and_says_so() {
+        let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut app = windowless();
+        let log = std::rc::Rc::clone(&said);
+        app.set_log(move |level, message| log.borrow_mut().push((level, message.to_owned())));
+        window_clipboard(&mut app, || Err("no display".to_owned()));
+        // The app's own clipboard: what is copied pastes back.
+        app.clipboard.write("içeride");
+        assert_eq!(app.clipboard.read().as_deref(), Some("içeride"));
+        assert_eq!(
+            *said.borrow(),
+            [(
+                LogLevel::Warning,
+                "no system clipboard (no display): copying within the app".to_owned()
+            )]
+        );
+    }
+
+    /// The system's clipboard itself, where CI has one: Windows always does
+    /// (Linux runners have no display server). What it held before is put
+    /// back.
+    #[cfg(windows)]
+    #[test]
+    fn text_written_to_the_systems_clipboard_reads_back() {
+        let mut clipboard = SystemClipboard(arboard::Clipboard::new().unwrap());
+        let before = clipboard.read();
+        let text = format!("erk {} ş 🇹🇷", std::process::id());
+        clipboard.write(&text);
+        // Another handle reads it: it is the system's, not this one's.
+        let read = SystemClipboard(arboard::Clipboard::new().unwrap()).read();
+        if let Some(before) = before {
+            clipboard.write(&before);
+        }
+        assert_eq!(read, Some(text));
     }
 
     #[test]

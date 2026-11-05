@@ -481,7 +481,11 @@ gerekçeli bir daraltma:
   Erk'i çağıramaz. `user_data` uygulamanın olur, `destroy` başka bir pano
   kurulunca ya da uygulama yok edilince bir kez çalışır; ikisinden biri
   `NULL` ise `ERK_ERR_INVALID_ARGUMENT` ve sahiplik host'ta kalır. Pano
-  kurulmadan uygulamanın kendi panosu vardır (uygulama içinde kopyalar).
+  kurulmadan pencere sistem panosunu kullanır (yalnızca metin; Linux'ta
+  X11, Wayland oturumları XWayland üzerinden); penceresiz uygulamanın ya da
+  sistemin panosu olmayan bir pencerenin (görüntü sunucusu yok) kendi
+  panosu vardır, uygulama içinde kopyalar; ikincisinde bir uyarı loglanır.
+  Panoya yazılan metin hiçbir zaman loglanmaz.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

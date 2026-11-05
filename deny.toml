@@ -32,6 +32,10 @@ allow = [
     # two above it says outright that it grants no patent licence; for a
     # parser of float literals that was judged acceptable (2026-10-05).
     "CC0-1.0",
+    # Boost: clipboard-win and error-code, the Windows side of arboard (the
+    # system clipboard for a window, M5.8). Looser than MIT: the notice must
+    # stay with the source, a binary carries no obligation (2026-11-05).
+    "BSL-1.0",
     # Stylo and its servo crates. File-level copyleft: modified MPL files stay
     # open, the application around them does not. Erk does not patch them.
     # Also cbindgen, which generates erk.h in a test (2026-10-07): a
