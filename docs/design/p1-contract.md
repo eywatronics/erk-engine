@@ -497,6 +497,17 @@ gerekçeli bir daraltma:
   bunu kendisi yapar (winit `set_ime_cursor_area`). Ayrı bir olay yok:
   dikdörtgen yalnızca bir karede değişir, kareyi de host'un `tick`'i
   hazırlar.
+- **v0.14 (M5.8):** IME kompozisyonu (M5 planı, karar 6): girdi türleri
+  `ERK_INPUT_PREEDIT` (8) ve `ERK_INPUT_COMMIT` (9), metin `text`'te;
+  `ErkInput`'un sonuna `caret` (ön düzenlemenin imleci, metne bayt
+  olarak; metnin ötesi, örneğin `UINT32_MAX`, sonu; alanı bilmeyen eski
+  yapıda da sonu). Ön düzenleme odaktaki metin alanında imlecin yerinde,
+  altı çizili gösterilir, değere girmez; boş metin onu bitirir. Onay
+  metni yapıştırma gibi yazar, bir `ERK_EVENT_INPUT`. Kompozisyon
+  sürerken tuşlar alanı düzenlemez; odak değişince ya da alana basılınca
+  biter; şifre alanı kompozisyon almaz. Geçersiz UTF-8
+  `ERK_ERR_INVALID_ARGUMENT`. Kompozisyon sürerken `erk_app_caret_rect`
+  kompozisyonun başını verir.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

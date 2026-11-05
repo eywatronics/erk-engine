@@ -124,6 +124,7 @@ fn cycle(app: *mut ErkApp, list: ErkNodeId, now: &mut u64) {
             key: 0,
             text: s(""),
             modifiers: 0,
+            caret: 0,
         };
         assert_eq!(erk_app_input(app, &input), ERK_OK);
     }

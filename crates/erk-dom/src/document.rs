@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use html5ever::tree_builder::QuirksMode;
 use html5ever::{LocalName, QualName, local_name, ns};
 
-use crate::forms::Control;
+use crate::forms::{Composition, Control};
 use crate::{Arena, Attribute, ElementData, Node, NodeData, NodeId};
 
 /// A DOM tree: an arena of nodes plus the id of the document node.
@@ -13,6 +13,8 @@ pub struct Document {
     pub(crate) quirks_mode: QuirksMode,
     /// What form controls hold apart from their attributes.
     pub(crate) controls: HashMap<NodeId, Control>,
+    /// What an input method is composing, and in which text field.
+    pub(crate) composition: Option<(NodeId, Composition)>,
 }
 
 impl Default for Document {
@@ -31,6 +33,7 @@ impl Document {
             root,
             quirks_mode: QuirksMode::NoQuirks,
             controls: HashMap::new(),
+            composition: None,
         }
     }
 

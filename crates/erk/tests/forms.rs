@@ -126,6 +126,34 @@ fn a_focused_field_asks_for_the_next_tick_at_its_caret_blink() {
 }
 
 #[test]
+fn an_input_methods_text_is_an_input_event_once_committed() {
+    let mut app = app("<input id=t value=a><button>b</button>");
+    let t = node(&app, "#t");
+    let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+    for kind in [EventKind::Input, EventKind::Change] {
+        let seen = seen.clone();
+        app.on(t, kind, move |cx, event| {
+            let value = cx.value(event.target).unwrap().unwrap();
+            seen.borrow_mut().push(format!("{:?} {value}", event.kind));
+        })
+        .unwrap();
+    }
+    press(&mut app, Key::Tab);
+    // Composing is no input: the value has not changed.
+    for text in ["k", "か"] {
+        app.input(Input::Preedit {
+            text: text.to_owned(),
+            caret: None,
+        });
+        app.tick(1);
+    }
+    assert_eq!(app.value(t), Ok(Some("a".to_owned())));
+    app.input(Input::Commit("仮名".to_owned()));
+    press(&mut app, Key::Tab);
+    assert_eq!(*seen.borrow(), ["Input a仮名", "Change a仮名"]);
+}
+
+#[test]
 fn the_host_reads_where_the_caret_is_after_a_tick() {
     let mut app = app("<input id=t value=a><button>b</button>");
     assert_eq!(app.caret_rect(), None);

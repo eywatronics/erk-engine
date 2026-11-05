@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_13() {
-    assert_eq!(erk_abi_version(), 13);
+fn the_abi_version_is_0_14() {
+    assert_eq!(erk_abi_version(), 14);
 }
 
 #[test]
@@ -353,6 +353,7 @@ fn a_key_event_names_its_key_and_what_it_typed() {
         key,
         text: s(text),
         modifiers: 0,
+        caret: 0,
     };
     let seen = || {
         (
@@ -455,6 +456,7 @@ fn the_hosts_clipboard_is_used_from_c_and_let_go_once() {
         key,
         text: s(text),
         modifiers,
+        caret: 0,
     };
     assert_eq!(erk_app_input(app, &press(ERK_KEY_TAB, "", 0)), ERK_OK);
     for letter in ["a", "c", "v"] {
@@ -498,6 +500,7 @@ fn the_next_tick_is_the_carets_blink() {
         key: ERK_KEY_TAB,
         text: s(""),
         modifiers: 0,
+        caret: 0,
     };
     assert_eq!(erk_app_input(app, &tab), ERK_OK);
     assert_eq!(erk_app_next_tick(app, &mut next), ERK_OK);
@@ -532,6 +535,7 @@ fn the_caret_rect_is_read_after_a_tick() {
         key: ERK_KEY_TAB,
         text: s(""),
         modifiers: 0,
+        caret: 0,
     };
     assert_eq!(erk_app_input(app, &tab), ERK_OK);
     assert_eq!(erk_app_tick(app, 1), ERK_OK);
@@ -611,6 +615,7 @@ fn a_key_prevented_from_c_does_nothing_by_default() {
         key,
         text: s(""),
         modifiers: 0,
+        caret: 0,
     };
     // Tab focuses the button; then Enter, prevented, clicks nothing.
     assert_eq!(erk_app_input(app, &key(ERK_KEY_TAB)), ERK_OK);
@@ -705,6 +710,60 @@ fn a_document_is_built_from_c() {
     let mut root = ERK_NODE_NONE;
     assert_eq!(erk_document_root(app, &mut root), ERK_OK);
     assert_eq!(erk_node_remove(app, root), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn an_input_methods_composition_and_text_come_from_c() {
+    let app = app_with("<input id=t value=ab><button>b</button>");
+    let t = query(app, "#t");
+    let value = || {
+        let mut buf = [0u8; 32];
+        let mut len = 0;
+        assert_eq!(
+            erk_node_value(app, t, buf.as_mut_ptr().cast(), buf.len(), &mut len),
+            ERK_OK
+        );
+        String::from_utf8(buf[..len].to_vec()).unwrap()
+    };
+    let input = |kind, key, text: &'static str, caret| ErkInput {
+        struct_size: size_of::<ErkInput>() as u32,
+        kind,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+        button: 0,
+        key,
+        text: s(text),
+        modifiers: 0,
+        caret,
+    };
+    assert_eq!(
+        erk_app_input(app, &input(ERK_INPUT_KEY_DOWN, ERK_KEY_TAB, "", 0)),
+        ERK_OK
+    );
+    // Composed: shown, not typed; past its end the caret is at its end.
+    assert_eq!(
+        erk_app_input(app, &input(ERK_INPUT_PREEDIT, 0, "か", u32::MAX)),
+        ERK_OK
+    );
+    assert_eq!(erk_app_tick(app, 1), ERK_OK);
+    assert_eq!(value(), "ab");
+    // Committed: typed in.
+    assert_eq!(
+        erk_app_input(app, &input(ERK_INPUT_COMMIT, 0, "仮名", 0)),
+        ERK_OK
+    );
+    assert_eq!(value(), "ab仮名");
+    // Text that is not UTF-8 is refused.
+    let mut bad = input(ERK_INPUT_COMMIT, 0, "", 0);
+    bad.text = ErkStr {
+        ptr: b"\xff".as_ptr().cast(),
+        len: 1,
+    };
+    assert_eq!(erk_app_input(app, &bad), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(value(), "ab仮名");
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }
 
@@ -1056,6 +1115,7 @@ fn destroy_runs_once_however_a_subscription_ends() {
         key: 0,
         text: s(""),
         modifiers: 0,
+        caret: 0,
     };
     assert_eq!(erk_app_input(app, &click(ERK_INPUT_POINTER_DOWN)), ERK_OK);
     assert_eq!(erk_app_input(app, &click(ERK_INPUT_POINTER_UP)), ERK_OK);

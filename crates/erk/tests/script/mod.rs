@@ -40,6 +40,10 @@ const VALUES: &[&str] = &[
     "url(\"file:///etc/passwd\")",
 ];
 
+/// What an input method composes or commits: kana, Turkish, a line break,
+/// a combining mark, nothing (which ends a composition).
+const COMPOSED: &[&str] = &["か", "かな", "ş", "\n", "e\u{301}", "ab", ""];
+
 /// Inline style properties and values, CSSOM style (M5.3): known and
 /// unknown names, shorthands, custom properties, values that do and do not
 /// fit.
@@ -350,11 +354,21 @@ pub fn run(app: &mut App, script: &[u8]) {
                     control: held & 2 != 0,
                     ..Modifiers::default()
                 };
-                app.input(Input::Key(KeyInput {
-                    key: key(&mut bytes),
-                    state,
-                    modifiers,
-                }));
+                // Or an input method composes, or commits, in place of a
+                // key (M5.8): a caret anywhere, inside a character or past
+                // the end.
+                match (held >> 2) & 3 {
+                    1 => app.input(Input::Preedit {
+                        text: bytes.pick(COMPOSED).to_owned(),
+                        caret: (!bytes.byte().is_multiple_of(4)).then(|| bytes.below(8)),
+                    }),
+                    2 => app.input(Input::Commit(bytes.pick(COMPOSED).to_owned())),
+                    _ => app.input(Input::Key(KeyInput {
+                        key: key(&mut bytes),
+                        state,
+                        modifiers,
+                    })),
+                }
             }
             12 => {
                 let kind = [

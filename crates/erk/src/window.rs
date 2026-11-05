@@ -17,7 +17,7 @@ use erk_renderer::{CaretRect, Cursor, Frame, Painted, Raster, RasterThread};
 use softbuffer::{Context as SoftContext, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
@@ -60,6 +60,7 @@ pub(crate) fn run(app: &mut App) -> Result<(), RunError> {
         started: Instant::now(),
         cursor: None,
         caret: None,
+        ime: false,
         panic: None,
     };
     let result = event_loop.run_app(&mut host);
@@ -151,6 +152,9 @@ struct Host<'a> {
     cursor: Option<Cursor>,
     /// Where the window last told the system the caret is.
     caret: Option<CaretRect>,
+    /// Whether the window lets the input method work: while the focus is
+    /// in a text field that takes a composition.
+    ime: bool,
     /// A panic in the host's callbacks, carried out of the loop.
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
@@ -261,6 +265,14 @@ impl Host<'_> {
     /// Tell the system where the caret is, when it moves: an input method
     /// puts its candidate window there (M5 plan, decision 6).
     fn show_caret(&mut self) {
+        // The input method works only where it may compose.
+        let ime = self.app.cx.engine.takes_composition();
+        if ime != self.ime {
+            self.ime = ime;
+            if let Some(state) = &self.window {
+                state.window.set_ime_allowed(ime);
+            }
+        }
         let now = self.app.caret_rect();
         if self.caret == now {
             return;
@@ -270,6 +282,24 @@ impl Host<'_> {
             let (position, size) = ime_area(rect);
             state.window.set_ime_cursor_area(position, size);
         }
+    }
+}
+
+/// What an input method's event is to the page: its composition (the
+/// caret where the method's cursor starts), its committed text, or, once
+/// it is turned off, an end to what it was composing.
+fn ime_input(ime: Ime) -> Option<Input> {
+    match ime {
+        Ime::Preedit(text, cursor) => Some(Input::Preedit {
+            text,
+            caret: cursor.map(|(start, _)| start),
+        }),
+        Ime::Commit(text) => Some(Input::Commit(text)),
+        Ime::Disabled => Some(Input::Preedit {
+            text: String::new(),
+            caret: None,
+        }),
+        Ime::Enabled => None,
     }
 }
 
@@ -372,6 +402,11 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
                     modifiers: self.modifiers,
                 });
                 self.input(event_loop, input);
+            }
+            WindowEvent::Ime(ime) => {
+                if let Some(input) = ime_input(ime) {
+                    self.input(event_loop, input);
+                }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
@@ -776,6 +811,37 @@ mod tests {
             return;
         }
         assert_eq!(read, Some(text));
+    }
+
+    #[test]
+    fn an_input_methods_events_reach_the_page_as_composition_and_text() {
+        assert_eq!(
+            ime_input(Ime::Preedit("かな".to_owned(), Some((3, 6)))),
+            Some(Input::Preedit {
+                text: "かな".to_owned(),
+                caret: Some(3)
+            })
+        );
+        assert_eq!(
+            ime_input(Ime::Preedit("か".to_owned(), None)),
+            Some(Input::Preedit {
+                text: "か".to_owned(),
+                caret: None
+            })
+        );
+        assert_eq!(
+            ime_input(Ime::Commit("仮名".to_owned())),
+            Some(Input::Commit("仮名".to_owned()))
+        );
+        // Turned off, what it was composing goes.
+        assert_eq!(
+            ime_input(Ime::Disabled),
+            Some(Input::Preedit {
+                text: String::new(),
+                caret: None
+            })
+        );
+        assert_eq!(ime_input(Ime::Enabled), None);
     }
 
     #[test]

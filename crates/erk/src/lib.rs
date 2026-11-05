@@ -220,6 +220,18 @@ pub enum Input {
         x: f32,
         y: f32,
     },
+    /// What an input method is composing in the focused text field (M5
+    /// plan, decision 6): `text`, shown at the caret and underlined but not
+    /// yet typed, with the caret `caret` bytes into it (at its end for
+    /// `None`). Empty text ends the composition. Keys do not edit the field
+    /// while it lasts: they are the input method's.
+    Preedit {
+        text: String,
+        caret: Option<usize>,
+    },
+    /// Text an input method committed: the composition ends and the text is
+    /// typed in at the caret, an `input` event, as a paste is.
+    Commit(String),
 }
 
 /// How long the stages of a frame took (p1-contract §8.1), measured by
@@ -412,6 +424,8 @@ impl App {
                 self.cx.engine.wheel((dx, dy), (x, y));
                 Vec::new()
             }
+            Input::Preedit { text, caret } => self.cx.engine.compose(&text, caret),
+            Input::Commit(text) => self.cx.engine.commit_composition(&text),
         };
         for event in events {
             self.cx.dispatch(event);
