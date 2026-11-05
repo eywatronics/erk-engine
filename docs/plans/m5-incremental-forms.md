@@ -223,15 +223,16 @@ modülü); ikinci bir seçici ya da animasyon motoru yazılmaz.
 
 ### M5.8: Metin alanları
 
-- [ ] `<input type="text">` ve `<textarea>`: değer, imleç (host'un saatiyle
+- [x] `<input type="text">` ve `<textarea>`: değer, imleç (host'un saatiyle
   yanıp sönen), seçim (fare ve klavye), düzenleme tuşları (`ERK_KEY_*`
   büyür: oklar, Delete, Home, End), pano (karar 5), IME (karar 6) ve
   imlecin dikdörtgeni (karar 6: `erk`'te sorgu ve bildirim, winit'in
   `set_ime_cursor_area`'sı, C-ABI'de `erk_caret_rect`); dönen bir alanda
   da doğru yerde (test).
-- [ ] Türkçe (`ı`, `İ`, `ş`) ve CJK IME girişi; `white-space: break-spaces`,
-  `tab-size`. Chrome referans sayfası (stillenmiş alanlar) ve altın görüntü
-  (varsayılan görünüm).
+- [x] Türkçe (`ı`, `İ`, `ş`) ve CJK IME girişi (gerçek bir IME ile elle
+  deneme M5 kabulünde); `white-space: break-spaces`, `tab-size` (M5.8'den
+  çıkarıldı: Yürütme Notları, onuncu PR). Chrome referans sayfası
+  (stillenmiş alanlar) ve altın görüntü (varsayılan görünüm).
 
 Beş PR (ikinci adım, imlecin saate bağlanması C-ABI'ye bir istek
 türü getirdiği için ikiye bölündü):
@@ -963,3 +964,13 @@ Dokuzuncu PR: IME kompozisyonu.
 | Fuzz | Yorumlayıcının tuş işleminde değiştirici baytının boş iki biti ön düzenleme ya da onay seçiyor; metinler kana, Türkçe, satır sonu, birleşen işaret, boş. İşlem numaraları kaydırılmadı: kayıtlı girdilerin anlamı korunuyor |
 | Sonraya kalan | Host'a kompozisyon olayları (`compositionstart`/`update`/`end`) yok; ihtiyaç doğarsa `EventKind`'a. Gerçek bir IME (Windows'ta Microsoft Japonca/Çince) ile elle deneme kabulde; CI'da gerçek IME yok |
 | Mutasyonlar | 21 mutasyonun 20'si yakalandı: tuşların kompozisyonda düzenlemesi, seçimin kalması, satırın satır sonu alması, şifrenin kompozisyon alması, odağın ve basışın onu bitirmemesi, alt çizginin düşmesi, IME penceresinin imleçte kalması, imlecin hep sonda olması, basışın değere çevrilmemesi, onayın yazılmaması, günlüğün kompozisyonu görmemesi, yerleşimin onu göstermemesi, yer tutucunun kalması, silinen alanın ve başka alanın kompozisyonu, winit imlecinin sonunun alınması, `Ime::Disabled`'ın yok sayılması, uygulamanın ve C-ABI'nin onayı kaybetmesi. Kaçan, `shown_at`'ın kompozisyon dalıydı: ölü kod (`shown_at` yalnızca kompozisyon yokken çağrılıyor), silindi |
+
+Onuncu PR: alanın boyu (`size`, `cols`, `rows`); M5.8'in son PR'ı.
+
+| Konu | Not |
+|---|---|
+| Genişlik | `input`'un `size`'ı ve `textarea`'nın `cols`'u sunumsal ipucu: `Nch` genişlik (HTML §15.5.15, §15.5.16; varsayılan 20 UA'da). Değer HTML'in negatif olmayan tamsayı kurallarıyla okunuyor, sıfırdan büyük değilse varsayılan kalıyor. Chrome karakteri yazı tipinin ortalama genişliğiyle ölçüyor ve `textarea`'ya kaydırma çubuğunun genişliğini ekliyor; Erk `ch` (sıfırın genişliği) kullanıyor, katmanlı kaydırma çubuğu yer kaplamıyor |
+| Yükseklik | `rows` yerleşimde: alanın yüksekliği `auto` ise içerik yüksekliği `rows` × satır yüksekliği (varsayılan 2), içerikten bağımsız; sayfanın kendi `height`'ı kazanıyor. Stilde `lh` ile denendi, reddedildi: Stylo'nun servo kipi `line-height: normal` için satır yüksekliğini 0 veriyor (`device/servo.rs`, "TODO"), varsayılan `textarea` çöktü (altın görüntüde görüldü). Satır yüksekliği Erk'in metin yerleşiminin kendi hesabı (`normal` gömülü yazı tipinin ölçüleriyle). UA'daki sabit `height: 2.8em` kalktı: altın görüntüde varsayılan `textarea` artık tam iki satır (yaklaşık 1 piksel kısa); görüntü bu PR'da yenilendi |
+| Bulunan hata | Sunumsal ipucu veren bir öznitelik (`bgcolor`, `align`, `<img width>`) sonradan değişince öğe yeniden stillenmiyordu: geçersiz kılma yalnızca seçicilerin okuduğu özniteliklere bakıyordu. Artık ipucu özniteliği değişen öğe kendisi yeniden stilleniyor (`RESTYLE_SELF`); `rows` yerleşimin okuduğu öznitelikler listesinde |
+| `tab-size`, `break-spaces` | M5.8'den çıkarıldı. Parley 0.11'de sekme durağı yok (sekmeyi tanıyor ama genişliği hesaplanmıyor) ve satır sonundaki korunmuş boşluklar hep taşıyor (`break-spaces` bunların sarılmasını ister). Erk'te taklit etmek çok geçişli bir yerleşim (sekmeleri genişliği satırdaki yerine bağlı satır içi kutulara çevirip yeniden kırmak) ve şekillendirme önbelleğine dokunmak demek; doğru yer Parley (katkı ya da bunları getiren sürümüne yükseltme). Arayüz içeriğinde ikisi de seyrek (kod düzenleyicileri dışında). Bugün `break-spaces` `pre-wrap` gibi, sekme bir boşluk genişliğinde |
+| Mutasyonlar | 11 mutasyonun 11'i yakalandı: ipucunun düşmesi, onay kutusuna da boyut, sıfırın ve `+` işaretinin okunuşu, `bgcolor` ve `cols`'un ipucu sayılmaması, yeniden stillendirmenin düşmesi, varsayılanın bir satır olması, yüksekliğin karşılaştırılmaması ve ölçülmemesi, `rows`'un yerleşim öznitelikleri listesinde olmaması. Onay kutusu mutasyonu ilk turda kaçtı: test `width: auto`'yu `min-width: auto` satırında da buluyordu, satır tam eşleşmeyle aranıyor |

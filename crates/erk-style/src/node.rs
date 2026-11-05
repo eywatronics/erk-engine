@@ -761,6 +761,14 @@ fn presentational_hints(
                 push(PropertyDeclaration::Height(size));
             }
         }
+        // A text field's width in characters (HTML §15.5.15, §15.5.16):
+        // an `input`'s `size` and a `textarea`'s `cols`; a value that is no
+        // integer above zero keeps the default, 20 in the UA style sheet.
+        // A textarea's `rows` is its height in lines, which layout gives:
+        // Stylo has no `lh` for `line-height: normal`.
+        if let Some(length) = field_size(element, &attr.name.local, value) {
+            push(PropertyDeclaration::Width(length));
+        }
         if attr.name.local == local_name!("align") {
             use style::values::computed::text::TextAlign as Keyword;
             use style::values::specified::TextAlign;
@@ -775,6 +783,80 @@ fn presentational_hints(
             }
         }
     }
+}
+
+/// Whether attribute `name` of `element` gives it a presentational hint:
+/// a change to it restyles the element, though no selector reads it.
+pub(crate) fn is_presentational(element: &erk_dom::ElementData, name: &str) -> bool {
+    match name {
+        "bgcolor" | "align" => true,
+        "width" | "height" => element.name.local == local_name!("img"),
+        "size" | "cols" => field_size(element, &LocalName::from(name), "1").is_some(),
+        _ => false,
+    }
+}
+
+/// The width attribute `name` with `value` sets for a text field: `size`
+/// on an `input` that takes text or `cols` on a `textarea`, a positive
+/// integer of characters as HTML parses non-negative integers. `None` for
+/// any other attribute, element or value.
+fn field_size(
+    element: &erk_dom::ElementData,
+    name: &LocalName,
+    value: &str,
+) -> Option<style::values::specified::Size> {
+    use style::values::generics::NonNegative;
+    use style::values::specified::length::{LengthUnit, NoCalcLength};
+    use style::values::specified::{LengthPercentage, Size};
+    if element.name.ns != ns!(html) {
+        return None;
+    }
+    match (&element.name.local, name) {
+        (&local_name!("input"), &local_name!("size")) if takes_text(element) => {}
+        (&local_name!("textarea"), &local_name!("cols")) => {}
+        _ => return None,
+    };
+    let count = positive_integer(value)?;
+    let length = NoCalcLength::new(LengthUnit::Ch, count as f32);
+    Some(Size::LengthPercentage(NonNegative(
+        LengthPercentage::Length(length),
+    )))
+}
+
+/// Whether an `input` takes a line of text: the kinds the UA style sheet
+/// draws as text fields.
+fn takes_text(element: &erk_dom::ElementData) -> bool {
+    !element
+        .attr(&local_name!("type"))
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|kind| {
+            matches!(
+                kind.as_str(),
+                "checkbox"
+                    | "radio"
+                    | "hidden"
+                    | "submit"
+                    | "reset"
+                    | "button"
+                    | "image"
+                    | "file"
+                    | "range"
+                    | "color"
+            )
+        })
+}
+
+/// `value` as HTML's rules for parsing non-negative integers read it,
+/// if above zero: leading white space, an optional `+`, digits, and
+/// anything after them ignored.
+fn positive_integer(value: &str) -> Option<u32> {
+    let value = value.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let digits = value.strip_prefix('+').unwrap_or(value);
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    let number: u32 = digits[..end].parse().ok()?;
+    (number > 0).then_some(number)
 }
 
 /// A dimension attribute value: leading digits (with an optional fraction),
