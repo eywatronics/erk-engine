@@ -353,15 +353,15 @@ Bellek tüketimini düşürürken Erk'in en önemli avantajı olan artımlı ren
 
 #### Karar bekleyen öneriler (2026-11-05)
 
-Proje sahibinin yönü (2026-11-05): Erk'in ileride kullanılacağı yer 2 GB
-RAM'li gömülü bir Linux cihaz; Erk cihazın tek arayüzü, etrafında masaüstü
+Proje sahibinin yönü (2026-11-05): Erk'in ileride kullanılacağı yer 1–2 GB
+RAM'li gömülü Linux cihazlar; Erk cihazın tek arayüzü, etrafında masaüstü
 yok. Bu yüzden winit olmadan doğrudan Wayland ile konuşması, hızlı ve az
 bellekle çalışması isteniyor. Bugünkü rota değişmedi: aşağıdakiler M5.13
 başlarken, B16'nın ölçümüyle birlikte karara bağlanır.
 
 | Öneri | Erk'te bugün | Değerlendirme (karar M5.13'te) |
 |---|---|---|
-| Gömülü hedef: 2 GB RAM, masaüstüsüz Linux, doğrudan Wayland (winit yok) | Pencere, girdi ve IME winit'te; winit'in varsayılan özellikleri Wayland'ı açık getiriyor, Wayland oturumunda doğrudan Wayland istemcisi (pencere süslemesi `wayland-csd-adwaita` ile). Pano `arboard` ile yalnızca X11: XWayland'sız cihazda Erk kendi panosuna düşer | winit'i bırakmak pencereyi, girdiyi, IME'yi (Wayland `text-input`), ölçeği ve kare zamanlamasını Erk'in yazması demek: `docs/design/` altında bir karar. Kazancı ölçülmeli: winit'in kendi belleği küçük olabilir, asıl pay B16'da görülür; ara yol winit'in gereksiz özelliklerini (X11, pencere süslemesi) kapatmak. Ölçüm bir referans cihazda yapılır. Wayland panosu iki yolda da gerekli |
+| Gömülü hedef: 1–2 GB RAM'li cihaz sınıfı, masaüstüsüz Linux, doğrudan Wayland (winit yok) | Pencere, girdi ve IME winit'te; winit'in varsayılan özellikleri Wayland'ı açık getiriyor, Wayland oturumunda doğrudan Wayland istemcisi (pencere süslemesi `wayland-csd-adwaita` ile). Pano `arboard` ile yalnızca X11: XWayland'sız cihazda Erk kendi panosuna düşer | winit'i bırakmak pencereyi, girdiyi, IME'yi (Wayland `text-input`), ölçeği ve kare zamanlamasını Erk'in yazması demek: `docs/design/` altında bir karar. Kazancı ölçülmeli: winit'in kendi belleği küçük olabilir, asıl pay B16'da görülür; ara yol winit'in gereksiz özelliklerini (X11, pencere süslemesi) kapatmak. Ölçüm bir referans cihazda yapılır. Wayland panosu iki yolda da gerekli |
 | Stylo'yu çatallayıp Erk'in desteklemediği CSS'i kod tabanından silmek | Stylo servo kipinde derleniyor: Gecko'ya özgü özellikler zaten yok | İkili boyutunu kesin küçültür (gömülü depolama için değerli); RAM'e etkisi B16'daki stil payına bağlı, hesaplanmış stil yapıları öğeler arasında `Arc` ile paylaşılıyor. Bedeli: her html5ever ve Stylo yükseltmesinde çatalın yeniden uyarlanması (ikisi birlikte yükseltilir), `deny.toml`'daki MPL notunun ("Erk onları yamalamıyor") değişmesi, ayrıştırılmayan özelliklerle `@supports` ve yedek bildirimlerin davranışı (WPT ve Chrome referansı yakalar). M5.13-E'de karar |
 | Masaüstüne göre ayarlı önbellekleri gömülüye göre kısmak | Stylo'nun önbellekleri (stil paylaşımı, kural ağacı, font ölçüleri); Erk'in şekil önbelleği, tutulan yerleşim ve liste, döşeme özetleri | Erk'in önbellekleri artımlı çizimin kendisi: kısılınca kare süresi artar (3. ilke). Öneri: "masaüstü" ve "gömülü" iki profil, ikisinin de bellek bütçesi ve p95'i CI'da (M5.13-F) |
 | Kademeli silme: ekran dışının piksellerini at, yerleşimi tut | Erk ekran dışı piksel tutmuyor: kare görüntü alanı boyunda, döşemeler yalnızca karenin özetleri (`damage.rs`) | Pikselde silinecek bir şey yok. `erk-10000.html`'in CPU yolundaki 472 MB'ı (eleman başına ~15 KB) her eleman için tutulan veriden geliyor olmalı (stil, yerleşim ağacı, şekillenmiş metnin iki kopyası): B16 gösterecek. Önerinin tersine ağır olan, "hafif" sayılan katman olabilir. Aday: ekran dışındaki paragrafların şekillenmiş metnini bırakıp yaklaşınca yeniden şekillendirmek, kare bütçesiyle ölçülerek |
@@ -373,11 +373,36 @@ başlarken, B16'nın ölçümüyle birlikte karara bağlanır.
 Gömülü host'un şekli (öneri, 2026-11-05; dışarıdan gelen bir önerinin
 Erk'in bağımlılık kurallarına göre düzeltilmiş hâli):
 
-- **Hedef profili.** Masaüstüsüz Linux, 2 GB RAM, X11 yok; `cage` gibi tek
-  uygulamalı (kiosk) bir Wayland kompozitörü. Cihazın kendisi (kart,
-  işlemci, GPU ve sürücüsü) açık soru: CPU ya da GPU yolu seçimi ona bağlı
-  (örneğin Raspberry Pi 4/5'in GPU'su Mesa ile Vulkan veriyor, i.MX8'in
-  Vivante'sinde pratikte yalnızca GLES var).
+- **Hedef profili (proje sahibinin yön bilgisi, 2026-11-05; bağlayıcı
+  sayılar M5.13'te ölçümle konur).** Masaüstüsüz Linux, X11 yok; `cage`
+  gibi tek uygulamalı (kiosk) bir Wayland kompozitörü. Ortalama hedef
+  Raspberry Pi sınıfı kartlar; taban örneği Orange Pi Zero 3W (AllWinner
+  A733: 2 × Cortex-A76, 6 × Cortex-A55; PowerVR BXM-4-64, üreticiye göre
+  GLES 3.2 ve Vulkan 1.3).
+  - **Bellek.** Kartta daha fazlası olsa da hesap 1–2 GB'lık cihaza göre
+    yapılır. 2 GB cihazın tamamı: işletim sistemi, kompozitör ve çerçeve
+    tamponları (4K'da RGBA kare başına 33 MB) da oradan yer. Erk'in kendi
+    bütçesi bunun içinde, çok daha küçük bir sayı; M5.13'te B16'nın
+    ölçümünden sonra CI'a konur. Bugünkü ölçümle `erk-10000.html` CPU
+    yolunda 472 MB, GPU yolunda 793 MB: 1 GB'lık bir cihaza sığmaz.
+  - **Kare bütçesi.** 60 Hz, 16,7 ms (masaüstünün B15 hedefi 8,3 ms).
+  - **GPU.** Kartın GPU'su sistem RAM'ini paylaşıyor: GPU yolunun ayırdığı
+    her şey bellek bütçesinden düşer (Windows'ta küçük sayfada GPU yolu
+    344 MB, CPU yolu 24 MB özel bellek). Hangi yolun daha az bellekle
+    yeterince hızlı olduğu cihazda ölçülür. PowerVR'ın Vulkan'ı büyük
+    olasılıkla üreticinin kapalı sürücüsüyle geliyor; Mesa'nın açık kaynak
+    sürücüsünün bu GPU'yu desteklediği doğrulanmadı.
+  - **Geri düşüş.** GPU açılamazsa Erk bugün de CPU raster'ına (vello_cpu)
+    kendisi düşüyor; kare bugün softbuffer üzerinden gidiyor (Wayland'da
+    `wl_shm`, araya bir kopya), doğrudan `wl_shm` kiosk host'uyla gelir.
+  - **M5.13'ten önce cihazda doğrulanacaklar (açılış listesi).** Üreticinin
+    BSP'si (işletim sistemi imajı ve çekirdek); GPU sürücüsü (`vulkaninfo`
+    ile `VK_KHR_wayland_surface`, EGL); `cage`'in (wlroots) DRM/GBM
+    üzerinden GPU ile açılıp açılmadığı (açılmazsa wlroots'un CPU ile çizen
+    yolu); panelin çözünürlüğü (1080p ya da 4K) ve tazeleme hızı.
+  - **Açık sorular.** Kartın desteklediği iki bağımsız ekran: Erk bugün
+    süreç başına tek pencere açıyor. UI ve raster iş parçacıklarının büyük
+    çekirdeklere (A76) düşmesi host'un işi.
 - **Host'un yeri.** winit `erk`'te yaşıyor ve C-ABI (`erk-ffi`) de `erk`'e
   bağlı: her host bugün winit'i getiriyor. Yeni bir crate `erk-renderer`'a
   doğrudan bağlanamaz (muhafız: kabuk motora yalnızca `erk` üzerinden
