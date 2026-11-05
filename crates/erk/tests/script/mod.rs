@@ -40,13 +40,13 @@ const VALUES: &[&str] = &[
     "url(\"file:///etc/passwd\")",
 ];
 
-/// Inline style properties and values, CSSOM style (M5.3): known and
-/// unknown names, shorthands, custom properties, values that do and do not
-/// fit.
 /// What an input method composes or commits: kana, Turkish, a line break,
 /// a combining mark, nothing (which ends a composition).
 const COMPOSED: &[&str] = &["か", "かな", "ş", "\n", "e\u{301}", "ab", ""];
 
+/// Inline style properties and values, CSSOM style (M5.3): known and
+/// unknown names, shorthands, custom properties, values that do and do not
+/// fit.
 const PROPERTIES: &[&str] = &["color", "margin", "display", "width", "--x", "colour", ""];
 
 const PROPERTY_VALUES: &[&str] = &[
