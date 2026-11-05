@@ -843,3 +843,12 @@ Yedinci PR: pencerede sistem panosu (dördüncü adımın ikinci yarısının ik
 | Wayland | `wayland-data-control` özelliği açılmadı: yeni bir bağımlılık ağacı (`wl-clipboard-rs`) ve winit'in Wayland'ı zaten XWayland'la birlikte çalışıyor. Yerel Wayland panosu M5.8 dışında; ihtiyaç doğarsa açık soru |
 | Test | Karar yolunun üçü birim testli (host'unki kalır ve sistemin panosu hiç açılmaz; sistemin panosu kurulur; yoksa uyarı ve kendi panosu). Gerçek sistem panosu yalnızca Windows'ta deneniyor (Linux koşucularında görüntü sunucusu yok); test öncesindeki metni geri koyuyor. Pencerenin `window_clipboard`'ı çağırması pencere açmadan denenemiyor: tek satırlık bağlantı |
 | Mutasyonlar | 6 mutasyonun 6'sı yakalandı (host'un panosunu ezmek, `set_clipboard`'ın işaretlememesi, sistem panosunun kurulmaması, uyarının düşmesi, okuma ve yazmanın boşa gitmesi) |
+
+Yedinci PR'ın düzeltmesi: meşgul pano.
+
+| Konu | Not |
+|---|---|
+| Bulgu | Windows'ta gerçek pano testi yerelde 12 çalıştırmanın 5'inde düştü: okuma `ClipboardOccupied` ile boş döndü. Panoyu tutanlar `GetOpenClipboardWindow` ile bulundu: `msrdc` (Uzak Masaüstü istemcisi panoyu karşı tarafa aktarırken) ve `explorer` (pano geçmişi). Yeni kopyalanan metni okumak için panoyu açıyorlar; o an yapılan bir yapıştırma hiçbir şey bulmazdı. Gerçek kullanıcıların da yaşayacağı bir durum, yalnızca test sorunu değil |
+| Düzeltme | Pano meşgulse okuma ve yazma 5 ms arayla 20 kez deneniyor (en çok ~95 ms, kullanıcının bastığı bir tuş için bir kez). Yalnızca `ClipboardOccupied` yeniden deneniyor; boş pano denenmiyor. Saniyelerce tutan bir program beklenmiyor: UI iş parçacığı donmasın; o durumda yapıştırma boş kalıyor. Uzak Masaüstü'nde tutma 2 saniyeyi aştı |
+| Test | Yeniden denemenin üç yolu birim testli. Gerçek pano testi, okuma boş döner ve pano hâlâ başkasındaysa bunu yazıp denetlemeden çıkıyor (CI koşucusunda pano izleyicisi yok); okuma kodu bozulmuşsa pano boşta olduğu için yine kırılıyor |
+| Mutasyonlar | 3 mutasyonun 3'ü yakalandı (hiç denememek, her hatayı denemek, sınırsız denemek). Okumanın yeniden denemeyi kullanmaması birim testle yakalanmıyor: sahte bir arka uç gerekirdi, tek satırlık bağlantı |

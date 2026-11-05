@@ -95,11 +95,35 @@ struct SystemClipboard(arboard::Clipboard);
 
 impl Clipboard for SystemClipboard {
     fn read(&mut self) -> Option<String> {
-        self.0.get_text().ok()
+        retried(|| self.0.get_text()).ok()
     }
 
     fn write(&mut self, text: &str) {
-        let _ = self.0.set_text(text);
+        let _ = retried(|| self.0.set_text(text));
+    }
+}
+
+/// How many times the clipboard is tried while another program holds it,
+/// and how long apart. Programs that watch the clipboard (Windows' own
+/// clipboard history among them) open it for a moment to read what was
+/// copied: a paste at that moment would find nothing. At most 95 ms in
+/// all, once, for a key the user pressed; a program that holds it longer
+/// (seconds, seen on a desktop with a clipboard watcher) is not waited
+/// for, and the paste finds nothing.
+const CLIPBOARD_TRIES: u32 = 20;
+const CLIPBOARD_WAIT: Duration = Duration::from_millis(5);
+
+/// `attempt`, tried again while another program holds the clipboard.
+fn retried<T>(mut attempt: impl FnMut() -> Result<T, arboard::Error>) -> Result<T, arboard::Error> {
+    let mut tries = 1;
+    loop {
+        match attempt() {
+            Err(arboard::Error::ClipboardOccupied) if tries < CLIPBOARD_TRIES => {
+                std::thread::sleep(CLIPBOARD_WAIT);
+                tries += 1;
+            }
+            result => return result,
+        }
     }
 }
 
@@ -667,6 +691,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_clipboard_another_program_holds_is_tried_again_for_a_while() {
+        // Held twice, then free: the third try reads it.
+        let mut tries = 0;
+        let read = retried(|| {
+            tries += 1;
+            if tries < 3 {
+                Err(arboard::Error::ClipboardOccupied)
+            } else {
+                Ok("metin")
+            }
+        });
+        assert_eq!((read.ok(), tries), (Some("metin"), 3));
+        // Held throughout: given up after the last try.
+        let mut tries = 0;
+        let read = retried(|| {
+            tries += 1;
+            Err::<(), _>(arboard::Error::ClipboardOccupied)
+        });
+        assert!(matches!(read, Err(arboard::Error::ClipboardOccupied)));
+        assert_eq!(tries, CLIPBOARD_TRIES);
+        // Nothing to paste is not tried again.
+        let mut tries = 0;
+        let read = retried(|| {
+            tries += 1;
+            Err::<(), _>(arboard::Error::ContentNotAvailable)
+        });
+        assert!(matches!(read, Err(arboard::Error::ContentNotAvailable)));
+        assert_eq!(tries, 1);
+    }
+
     /// The system's clipboard itself, where CI has one: Windows always does
     /// (Linux runners have no display server). What it held before is put
     /// back.
@@ -679,8 +734,19 @@ mod tests {
         clipboard.write(&text);
         // Another handle reads it: it is the system's, not this one's.
         let read = SystemClipboard(arboard::Clipboard::new().unwrap()).read();
+        // Nothing read while another program still holds the clipboard
+        // (a watcher on a desktop; CI's runner has none) says nothing.
+        let held = read.is_none()
+            && matches!(
+                arboard::Clipboard::new().unwrap().get_text(),
+                Err(arboard::Error::ClipboardOccupied)
+            );
         if let Some(before) = before {
             clipboard.write(&before);
+        }
+        if held {
+            eprintln!("another program holds the clipboard: not checked");
+            return;
         }
         assert_eq!(read, Some(text));
     }
