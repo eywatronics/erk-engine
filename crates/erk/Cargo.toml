@@ -19,6 +19,10 @@ winit = "=0.30.13"
 # Linux builds need no C library; without it only the embedded font remains.
 # Same version Parley uses in the renderer.
 fontique = { version = "=0.11.1", default-features = false, features = ["system", "fontconfig-dlopen"] }
+# The system's clipboard for a window (M5 plan, decision 5: the clipboard is
+# I/O and stays out of the core). Text only: no image support, and on Linux
+# X11 only (Wayland sessions reach it through XWayland).
+arboard = { version = "=3.7.0", default-features = false }
 
 [dev-dependencies]
 png = "0.18"
