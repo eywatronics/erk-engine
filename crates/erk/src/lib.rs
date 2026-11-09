@@ -428,7 +428,15 @@ impl App {
             Input::Commit(text) => self.cx.engine.commit_composition(&text),
         };
         for event in events {
-            self.cx.dispatch(event);
+            // A click does what it does by default (a summary opens its
+            // `details`) unless a subscription prevented it.
+            let click = (event.kind == EventKind::Click).then(|| event.clone());
+            let prevented = self.cx.dispatch(event);
+            if let Some(click) = click.filter(|_| !prevented) {
+                for follow in self.cx.engine.click_default(&click) {
+                    self.cx.dispatch(follow);
+                }
+            }
         }
     }
 

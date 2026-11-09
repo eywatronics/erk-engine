@@ -389,19 +389,29 @@ fn primary(slot: &Slot) -> Option<Arc<ComputedValues>> {
     slot.borrow_data()?.styles.get_primary().cloned()
 }
 
-/// Each arena slot's element state: a link's, and what `interaction` puts
-/// on the element under the pointer, the pressed one and the focused one
-/// and on their ancestors.
+/// Each arena slot's element state: a link's, an open `details` or
+/// `dialog`'s (`:open`, from its `open` attribute), and what `interaction`
+/// puts on the element under the pointer, the pressed one and the focused
+/// one and on their ancestors.
 fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
     let mut states = vec![ElementState::empty(); doc.capacity_hint()];
     let mut stack = vec![doc.root()];
     while let Some(id) = stack.pop() {
         stack.extend(doc.children(id));
-        if let Some(element) = doc.node(id).and_then(|node| node.as_element())
-            && element.name.local == local_name!("a")
-            && element.attr(&local_name!("href")).is_some()
-        {
-            states[id.index() as usize] = ElementState::UNVISITED;
+        let Some(element) = doc.node(id).and_then(|node| node.as_element()) else {
+            continue;
+        };
+        let state = &mut states[id.index() as usize];
+        match element.name.local {
+            local_name!("a") if element.attr(&local_name!("href")).is_some() => {
+                *state = ElementState::UNVISITED;
+            }
+            local_name!("details") | local_name!("dialog")
+                if element.name.ns == ns!(html) && element.attr(&local_name!("open")).is_some() =>
+            {
+                *state = ElementState::OPEN;
+            }
+            _ => {}
         }
     }
     let mut mark = |node: Option<NodeId>, own: ElementState, inherited: ElementState| {

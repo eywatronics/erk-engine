@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_14() {
-    assert_eq!(erk_abi_version(), 14);
+fn the_abi_version_is_0_15() {
+    assert_eq!(erk_abi_version(), 15);
 }
 
 #[test]
@@ -1256,5 +1256,44 @@ fn a_resource_is_answered_from_another_thread() {
     let pixels = unsafe { std::slice::from_raw_parts(frame.rgba, frame.len) };
     let at = (10 * frame.width as usize + 10) * 4;
     assert_eq!(&pixels[at..at + 3], &[255, 0, 0]);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn a_toggle_reaches_c_when_a_summary_is_pressed() {
+    let app = app_with(
+        "<body style='margin: 0'><details id=d><summary style='height: 20px'>a</summary>b</details>",
+    );
+    let last = LastKey::default();
+    let mut subscription = 0;
+    assert_eq!(
+        erk_on(
+            app,
+            query(app, "#d"),
+            ERK_EVENT_TOGGLE,
+            Some(remember_key),
+            std::ptr::from_ref(&last).cast_mut().cast(),
+            None,
+            &mut subscription
+        ),
+        ERK_OK
+    );
+    for kind in [ERK_INPUT_POINTER_DOWN, ERK_INPUT_POINTER_UP] {
+        let press = ErkInput {
+            struct_size: size_of::<ErkInput>() as u32,
+            kind,
+            x: 10.0,
+            y: 10.0,
+            dx: 0.0,
+            dy: 0.0,
+            button: ERK_BUTTON_PRIMARY,
+            key: 0,
+            text: s(""),
+            modifiers: 0,
+            caret: 0,
+        };
+        assert_eq!(erk_app_input(app, &press), ERK_OK);
+    }
+    assert_eq!(last.kind.load(Ordering::SeqCst), ERK_EVENT_TOGGLE);
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }

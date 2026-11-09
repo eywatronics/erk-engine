@@ -1197,7 +1197,62 @@ fn inline_content(
         .filter(|item| ink(item).is_none_or(|ink| walk.shows(ink)))
         .collect();
     items.extend(glyph_runs(shaped, origin, resources, &colors, walk.view()));
+    items.extend(
+        disclosure_marker(shaped, origin, block_color)
+            .filter(|item| ink(item).is_none_or(|ink| walk.shows(ink))),
+    );
     items
+}
+
+/// A summary's disclosure marker (M5.9), drawn over the room Erk wrote for
+/// it at the start of its first line: a triangle pointing to the inline end
+/// while closed and down while open, in the text's colour, its middle
+/// 0.36em above the baseline, as Chrome draws it (measured at 15 and 20
+/// pixels: 0.5em by 0.63em, from the start of the line). One side of a
+/// border draws it, the others transparent: the border's trapezoid with no
+/// inner box is a triangle.
+fn disclosure_marker(shaped: &ShapedText, origin: (f32, f32), color: Rgba) -> Option<DisplayItem> {
+    let open = shaped.marker?;
+    let layout = &shaped.layout.layout;
+    let edge = |index| {
+        parley::layout::Cursor::from_byte_index(layout, index, parley::layout::Affinity::Downstream)
+            .geometry(layout, 1.0)
+            .x0 as f32
+    };
+    let (start, end) = (edge(0), edge(crate::text::MARKER.len()));
+    let em = (end - start).abs() / crate::text::MARKER_EMS;
+    let left = start.min(end);
+    let baseline = shaped.layout.baseline(0)?;
+    let clear = [0, 0, 0, 0];
+    let (width, height, widths, colors) = if open {
+        let (width, height) = (0.63 * em, 0.5 * em);
+        (
+            width,
+            height,
+            [height, width / 2.0, 0.0, width / 2.0],
+            [color, clear, clear, clear],
+        )
+    } else {
+        let (width, height) = (0.5 * em, 0.63 * em);
+        (
+            width,
+            height,
+            [height / 2.0, 0.0, height / 2.0, width],
+            [clear, clear, clear, color],
+        )
+    };
+    let middle = baseline - 0.36 * em;
+    Some(DisplayItem::Border {
+        frame: Frame {
+            x: origin.0 + left,
+            y: origin.1 + middle - height / 2.0,
+            width,
+            height,
+        },
+        widths,
+        colors,
+        radii: [(0.0, 0.0); 4],
+    })
 }
 
 /// The style of the element whose `NodeId` bits are `element`, in this

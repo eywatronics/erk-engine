@@ -515,3 +515,31 @@ fn a_quieter_log_level_hides_warnings() {
     app.tick(0);
     assert_eq!(logged.get(), 0);
 }
+
+#[test]
+fn a_summary_opens_its_details_with_a_toggle_that_does_not_bubble() {
+    let mut app = app(
+        "<body style='margin: 0'><details id=d><summary id=s style='height: 20px'>a</summary>b</details>",
+    );
+    let (d, s) = (node(&app, "#d"), node(&app, "#s"));
+    let log: Log = Rc::default();
+    for (at, name) in [(d, "details"), (node(&app, "body"), "body")] {
+        let log = log.clone();
+        app.on(at, EventKind::Toggle, move |_, event| {
+            log.borrow_mut().push(format!("{name} {:?}", event.phase));
+        })
+        .unwrap();
+    }
+    // A click that a subscription prevents opens nothing.
+    let prevent = app
+        .on(s, EventKind::Click, |cx, _| cx.prevent_default())
+        .unwrap();
+    app.click(10.0, 10.0);
+    assert_eq!(app.attr(d, "open"), Ok(None));
+    assert!(log.borrow().is_empty());
+    // Let through, it opens the details: a toggle at it, not at the body.
+    app.off(prevent).unwrap();
+    app.click(10.0, 10.0);
+    assert_eq!(app.attr(d, "open"), Ok(Some(String::new())));
+    assert_eq!(*log.borrow(), ["details Target"]);
+}

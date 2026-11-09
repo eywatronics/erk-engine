@@ -103,6 +103,9 @@ pub(crate) struct ShapedText {
     pub(crate) relative: Vec<(f32, f32)>,
     /// The spaces `white-space` keeps.
     pub(crate) preserved: Vec<std::ops::Range<usize>>,
+    /// A disclosure marker at the start of the text, and whether it is
+    /// open (see [`crate::text::Paragraph::marker`]).
+    pub(crate) marker: Option<bool>,
     /// The ids of the inline boxes that are atomic inlines, not edges.
     pub(crate) atom_boxes: Vec<u64>,
     pub(crate) layout: InlineLayout,
@@ -260,6 +263,7 @@ pub(crate) fn layout(
                 sources: paragraph.sources.clone(),
                 colours: source_colours(doc, styles, &paragraph.sources),
                 preserved: paragraph.preserved.clone(),
+                marker: paragraph.marker,
                 atom_boxes: paragraph
                     .items
                     .iter()
@@ -1020,7 +1024,31 @@ impl<'a> Builder<'a> {
         let mut entries = Vec::new();
         let mut out_of_flow: OutOfFlow = Vec::new();
         let mut has_blocks = false;
+        // A summary's disclosure marker opens its first line: Erk writes
+        // room for it, over which it is drawn (M5.9).
+        if let Some(style) = parent_style
+            .as_ref()
+            .filter(|style| crate::text::disclosure(style).is_some())
+        {
+            entries.push(Entry::Inline(
+                vec![InlineToken::Text(
+                    crate::text::MARKER.to_owned(),
+                    style.clone(),
+                    text_language(doc, parent),
+                    None,
+                )],
+                Vec::new(),
+            ));
+        }
+        // A closed `details` shows only its first `summary` (HTML §15.5.4):
+        // the rest, bare text too, has no box.
+        let shown_alone = closed_details(doc, parent);
         for child in doc.children(parent) {
+            if let Some(summary) = shown_alone
+                && summary != Some(child)
+            {
+                continue;
+            }
             match doc.node(child).map(|node| &node.data) {
                 Some(NodeData::Text(text)) => {
                     if let Some(style) = styles.computed(parent) {
@@ -1637,6 +1665,53 @@ pub(crate) fn placeholder(doc: &Document, id: NodeId) -> Option<String> {
         }
     };
     (!text.is_empty()).then_some(text)
+}
+
+/// Whether element `id` is an HTML element named `name`.
+fn is_html(doc: &Document, id: NodeId, name: &erk_dom::LocalName) -> bool {
+    doc.node(id)
+        .and_then(|node| node.as_element())
+        .is_some_and(|element| element.name.ns == erk_dom::ns!(html) && element.name.local == *name)
+}
+
+/// The summary of `details` element `id` (HTML §4.11.1): its first
+/// `summary` child. `None` without one, or for any other element.
+pub(crate) fn details_summary(doc: &Document, id: NodeId) -> Option<NodeId> {
+    if !is_html(doc, id, &erk_dom::local_name!("details")) {
+        return None;
+    }
+    doc.children(id)
+        .find(|child| is_html(doc, *child, &erk_dom::local_name!("summary")))
+}
+
+/// Whether element `id` is a `details` element without `open`.
+pub(crate) fn is_closed_details(doc: &Document, id: NodeId) -> bool {
+    is_html(doc, id, &erk_dom::local_name!("details"))
+        && doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .is_some_and(|element| element.attr(&erk_dom::local_name!("open")).is_none())
+}
+
+/// For a `details` element without `open`, the one child it shows: its
+/// summary, if it has one. `None` for any other element.
+fn closed_details(doc: &Document, id: NodeId) -> Option<Option<NodeId>> {
+    is_closed_details(doc, id).then(|| details_summary(doc, id))
+}
+
+/// Whether node `id` is inside a closed `details` and not its summary:
+/// hidden, with no box, and not to be focused.
+pub(crate) fn hidden_in_details(doc: &Document, id: NodeId) -> bool {
+    let mut child = id;
+    while let Some(parent) = doc.node(child).and_then(|node| node.parent()) {
+        if let Some(summary) = closed_details(doc, parent)
+            && summary != Some(child)
+        {
+            return true;
+        }
+        child = parent;
+    }
+    false
 }
 
 /// How many lines textarea `id` shows: its `rows` attribute if it is an

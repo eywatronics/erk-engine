@@ -135,8 +135,17 @@ struct KeptLayout {
 /// The attributes layout reads besides those styles see: an image's
 /// source, the language that picks fonts and case mapping, and what a
 /// text field shows: its value until one is set, its type (a password's
-/// bullets), its placeholder and a textarea's lines.
-const LAYOUT_ATTRIBUTES: [&str; 6] = ["src", "lang", "value", "type", "placeholder", "rows"];
+/// bullets), its placeholder and a textarea's lines; and whether a
+/// `details` is open, which decides what of it has a box.
+const LAYOUT_ATTRIBUTES: [&str; 7] = [
+    "src",
+    "lang",
+    "value",
+    "type",
+    "placeholder",
+    "rows",
+    "open",
+];
 
 /// Whether an element with `style` puts a decoration (a background or a
 /// border) in its paragraph: an inline element that paints one.
@@ -1081,6 +1090,7 @@ impl Page {
                 };
                 let name = &element.name.local;
                 let activates = *name == local_name!("button")
+                    || self.details_of_summary(node).is_some()
                     || (input.key == Key::Enter
                         && *name == local_name!("a")
                         && element.attr(&local_name!("href")).is_some());
@@ -1750,8 +1760,108 @@ impl Page {
         } else {
             tabindex(element).is_some()
                 || (*name == local_name!("a") && element.attr(&local_name!("href")).is_some())
+                || self.details_of_summary(node).is_some()
         };
-        shown && focusable
+        shown && focusable && !crate::layout::hidden_in_details(&self.doc, node)
+    }
+
+    /// The `details` element `node` is the summary of, if it is one.
+    fn details_of_summary(&self, node: NodeId) -> Option<NodeId> {
+        let details = self.doc.node(node)?.parent()?;
+        (crate::layout::details_summary(&self.doc, details) == Some(node)).then_some(details)
+    }
+
+    /// What a click on `target` does by default (HTML §4.11.1): pressed in
+    /// a `details`' summary, and not in a link or a control inside it, the
+    /// `details` opens or closes, and a `toggle` event goes to it. Opening
+    /// one of a group that shares a `name` closes the others, each with its
+    /// own `toggle`. Nothing for a click anywhere else.
+    pub(crate) fn click_default(&mut self, target: NodeId) -> Vec<Event> {
+        let mut node = Some(target);
+        let details = loop {
+            let Some(current) = node else {
+                return Vec::new();
+            };
+            if let Some(details) = self.details_of_summary(current) {
+                break details;
+            }
+            if self.interactive(current) {
+                return Vec::new();
+            }
+            node = self.doc.node(current).and_then(|found| found.parent());
+        };
+        let open = |doc: &Document, id: NodeId| {
+            doc.node(id)
+                .and_then(|found| found.as_element())
+                .is_some_and(|element| element.attr(&local_name!("open")).is_some())
+        };
+        let mut toggled = vec![details];
+        if !open(&self.doc, details) {
+            let name = self
+                .doc
+                .node(details)
+                .and_then(|found| found.as_element())
+                .and_then(|element| element.attr(&local_name!("name")))
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned);
+            if let Some(name) = name {
+                let mut stack = vec![self.doc.root()];
+                while let Some(id) = stack.pop() {
+                    stack.extend(self.doc.children(id));
+                    let same = self
+                        .doc
+                        .node(id)
+                        .and_then(|found| found.as_element())
+                        .is_some_and(|element| {
+                            element.attr(&local_name!("name")) == Some(name.as_str())
+                        });
+                    if id != details && same && self.is_details(id) && open(&self.doc, id) {
+                        toggled.push(id);
+                    }
+                }
+            }
+        }
+        for id in &toggled {
+            let bits = id.to_bits();
+            let result = if open(&self.doc, *id) {
+                self.remove_attr(bits, "open").map(|_| ())
+            } else {
+                self.set_attr(bits, "open", "")
+            };
+            debug_assert!(result.is_ok());
+        }
+        toggled
+            .into_iter()
+            .map(|id| self.event(EventKind::Toggle, id, (0.0, 0.0), Modifiers::default()))
+            .collect()
+    }
+
+    /// Whether element `node` is a `details` element.
+    fn is_details(&self, node: NodeId) -> bool {
+        self.doc
+            .node(node)
+            .and_then(|found| found.as_element())
+            .is_some_and(|element| {
+                element.name.ns == erk_dom::ns!(html)
+                    && element.name.local == local_name!("details")
+            })
+    }
+
+    /// Whether element `node` does something of its own when pressed: a
+    /// link or a control, which a summary around it leaves to it.
+    fn interactive(&self, node: NodeId) -> bool {
+        let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
+            return false;
+        };
+        let name = &element.name.local;
+        [
+            local_name!("button"),
+            local_name!("input"),
+            local_name!("select"),
+            local_name!("textarea"),
+        ]
+        .contains(name)
+            || (*name == local_name!("a") && element.attr(&local_name!("href")).is_some())
     }
 
     /// The elements Tab visits, in order: positive `tabindex` values from

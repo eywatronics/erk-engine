@@ -1,0 +1,17 @@
+0 body block 0 20 800 267
+1 div block 20 20 476 267
+2 details block 38 34 440 28
+3 summary list-item 38 34 440 28
+4 div block 54 66 424 20
+5 details block 38 72 440 52
+6 summary list-item 38 72 440 28
+7 div block 54 104 424 20
+8 details block 38 134 440 87
+9 summary list-item 38 134 440 35
+10 div block 54 173 424 20
+11 details block 38 193 440 28
+12 summary list-item 38 193 440 28
+13 div block 54 225 424 20
+14 details block 38 231 440 32
+15 summary list-item 38 231 440 32
+16 div block 54 267 424 20

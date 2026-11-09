@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Ayrıntılar</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .kutu { margin: 20px; padding: 12px 16px; width: 440px; border: 2px solid #cbd5e1; }
+  details { margin-bottom: 10px; }
+  summary { padding: 4px 0; }
+  .icerik { margin: 4px 0 0 16px; color: #475569; }
+  .vurgu > summary { font-size: 20px; color: #1d4ed8; }
+  .duz > summary { list-style: none; background: #f1f5f9; padding: 6px 8px; }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <details>
+      <summary>Kargo ne zaman gelir?</summary>
+      <div class="icerik">Bu metin kapalıyken görünmez.</div>
+    </details>
+    <details open>
+      <summary>İade nasıl yapılır?</summary>
+      <div class="icerik">Ürünü otuz gün içinde, faturasıyla geri gönderin.</div>
+    </details>
+    <details class="vurgu" open>
+      <summary>Büyük özet</summary>
+      <div class="icerik">İç içe bir ayrıntı:</div>
+      <details>
+        <summary>İç içe kapalı</summary>
+        <div class="icerik">gizli</div>
+      </details>
+    </details>
+    <details class="duz">
+      <summary>İşaretsiz özet</summary>
+      <div class="icerik">gizli</div>
+    </details>
+  </div>
+</body>
+</html>

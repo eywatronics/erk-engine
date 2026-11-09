@@ -165,7 +165,44 @@ const TEXT_TOLERANCE: f32 = 1.0;
 /// Text nodes known to lie elsewhere than in Chrome, each with its reason:
 /// (page, text node, reason). The test fails on any other difference, and
 /// on a listed one that has gone, so the list cannot go stale.
-const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[];
+const KNOWN_TEXT_DIFFERENCES: &[(&str, usize, &str)] = &[
+    (
+        "details",
+        1,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+    (
+        "details",
+        7,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+    (
+        "details",
+        9,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+];
+
+/// Elements known to have another box than in Chrome, each with its
+/// reason: (page, element, reason). As with the text, the test fails on any
+/// other difference and on a listed one that has gone.
+const KNOWN_BOX_DIFFERENCES: &[(&str, usize, &str)] = &[
+    (
+        "details",
+        4,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+    (
+        "details",
+        13,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+    (
+        "details",
+        16,
+        "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
+    ),
+];
 
 /// A copy of `html` that loads the embedded fonts and runs `script` before
 /// `</body>`. The fonts go inside `<head>`, after the doctype: anything
@@ -909,6 +946,10 @@ fn erk_text_matches_chrome() {
                 erk.iter().filter(|b| b.index == node).collect();
             lines += theirs.len();
             if theirs.len() != ours.len() {
+                // A known difference may be a missing line: expected.
+                if known {
+                    continue;
+                }
                 failures.push(format!(
                     "{name}: text node {node} has {} line(s) in Chrome, {} in Erk: Chrome {:?}, Erk {:?}",
                     theirs.len(),
@@ -995,12 +1036,23 @@ fn erk_boxes_match_chrome() {
                 continue;
             }
             compared += 1;
+            let known = KNOWN_BOX_DIFFERENCES
+                .iter()
+                .any(|(page, n, _)| *page == name && *n == index);
             let Some(erk_box) = erk.iter().find(|b| b.index == index) else {
-                failures.push(format!(
-                    "{name}: <{tag}> #{index} has a box in Chrome ({display}) but not in Erk"
-                ));
+                if !known {
+                    failures.push(format!(
+                        "{name}: <{tag}> #{index} has a box in Chrome ({display}) but not in Erk"
+                    ));
+                }
                 continue;
             };
+            if known {
+                failures.push(format!(
+                    "{name}: <{tag}> #{index} now has a box in Erk; remove it from KNOWN_BOX_DIFFERENCES"
+                ));
+                continue;
+            }
             assert_eq!(
                 erk_box.tag, tag,
                 "{name}: element #{index} differs between Erk and Chrome; the DOMs do not line up"

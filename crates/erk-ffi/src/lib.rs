@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 14;
+pub const ERK_ABI_VERSION: u32 = 15;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -271,6 +271,9 @@ pub const ERK_EVENT_KEY_DOWN: u32 = 5;
 pub const ERK_EVENT_KEY_UP: u32 = 6;
 pub const ERK_EVENT_FOCUS: u32 = 7;
 pub const ERK_EVENT_BLUR: u32 = 8;
+/// A `details` element opened or closed because the user pressed its
+/// summary (not when the host sets `open`); it does not bubble.
+pub const ERK_EVENT_TOGGLE: u32 = 9;
 
 pub const ERK_PHASE_CAPTURE: u32 = 1;
 pub const ERK_PHASE_TARGET: u32 = 2;
@@ -1654,6 +1657,7 @@ fn kind_of(kind: u32) -> Result<EventKind, ErkStatus> {
         ERK_EVENT_KEY_UP => Ok(EventKind::KeyUp),
         ERK_EVENT_FOCUS => Ok(EventKind::Focus),
         ERK_EVENT_BLUR => Ok(EventKind::Blur),
+        ERK_EVENT_TOGGLE => Ok(EventKind::Toggle),
         _ => Err(ERK_ERR_INVALID_ARGUMENT),
     }
 }

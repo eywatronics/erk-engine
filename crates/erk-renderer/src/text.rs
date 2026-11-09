@@ -461,6 +461,10 @@ pub(crate) struct Paragraph {
     pub(crate) relative: Vec<RelativeOffset>,
     /// The atoms such an element moves: arena index, and the element.
     pub(crate) moved_atoms: Vec<(usize, u16)>,
+    /// A disclosure marker at the start of the text (a summary's, M5.9),
+    /// and whether it is open: Erk writes [`MARKER`] there and draws the
+    /// triangle over it.
+    pub(crate) marker: Option<bool>,
 }
 
 /// An inline element being read, until its `Close`.
@@ -511,6 +515,12 @@ impl Paragraph {
             space_wraps: true,
             relative: Vec::new(),
             moved_atoms: Vec::new(),
+            marker: match tokens.first() {
+                Some(InlineToken::Text(text, style, _, None)) if text == MARKER => {
+                    disclosure(style.as_ref())
+                }
+                _ => None,
+            },
         };
         let mut open: Vec<OpenElement> = Vec::new();
         // The box an element or atom is aligned in: the innermost open
@@ -1544,6 +1554,37 @@ fn collapse_whitespace(text: &str) -> String {
         .join(" ")
 }
 
+/// What Erk writes at the start of a summary's first line for its
+/// disclosure marker (HTML §15.5.4), over which the triangle is drawn: an
+/// en space and a figure space, [`MARKER_EMS`] wide in the embedded Noto
+/// Sans, as wide as the triangle and space Chrome writes (1.06em measured
+/// at 15 and 20 pixels). The embedded fonts have no triangles.
+pub(crate) const MARKER: &str = "\u{2002}\u{2007}";
+
+/// How many ems [`MARKER`] is wide: 0.5 and 0.572 in the embedded font.
+pub(crate) const MARKER_EMS: f32 = 1.072;
+
+/// Whether a box styled `style` shows a disclosure marker inside its first
+/// line, and whether it is open: a list item whose `list-style-type` is
+/// `disclosure-open` or `disclosure-closed`, its marker inside. Other
+/// markers (bullets, numbers) are not drawn yet.
+pub(crate) fn disclosure(style: &ComputedValues) -> Option<bool> {
+    use erk_style::style::computed_values::list_style_position::T as Position;
+    use erk_style::style::counter_style::CounterStyle;
+    if !style.get_box().clone_display().is_list_item() {
+        return None;
+    }
+    let list = style.get_list();
+    if list.clone_list_style_position() != Position::Inside {
+        return None;
+    }
+    match &list.clone_list_style_type().0 {
+        CounterStyle::Name(name) if &*name.0 == "disclosure-open" => Some(true),
+        CounterStyle::Name(name) if &*name.0 == "disclosure-closed" => Some(false),
+        _ => None,
+    }
+}
+
 /// The height of a line of text styled `style`: its `line-height`, and
 /// for `normal` the embedded font's, as lines are laid out.
 pub(crate) fn line_height_of(style: &ComputedValues) -> f32 {
@@ -2059,6 +2100,7 @@ mod tests {
             relative: Vec::new(),
             moved_atoms: Vec::new(),
             sources: Vec::new(),
+            marker: None,
         }
     }
 

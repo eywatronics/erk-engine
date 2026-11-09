@@ -269,6 +269,24 @@ türü getirdiği için ikiye bölündü):
   özniteliği, `commandfor`/`command`: açılır menü, akordeon ve diyalog
   host'a gitmeden çalışıyor; her biri Chrome referans sayfasıyla.
 
+Dört PR (2026-11-09):
+
+1. **`<details>`/`<summary>`.** Kapalıyken yalnızca özet (çıplak metin de
+   gizli, kutusu ve odağı yok); özete basış ya da odaktaki özette Enter
+   ve Space tıklamanın varsayılan işi olarak açıp kapatıyor, ardından
+   `toggle` olayı; `name` ile grup; `:open`; açılır işaret. Tıklamanın
+   varsayılan işi için `erk`'te bir yol (`click_default`, tuşların
+   `key_default`'u gibi): sonraki PR'lardaki düğmeler de onu kullanır.
+2. **Üst katman ve `popover`.** Sayfanın üstündeki katman (görüntü alanına
+   göre konumlanan, her şeyin üstünde çizilen öğeler, sırayla); `popover`
+   (`auto`, `manual`), `popovertarget`, dışarıya basış ve Escape ile
+   kapanma, `:popover-open`, `beforetoggle`/`toggle`.
+3. **`<dialog>`.** Modal olmayan (`open`) ve modal (üst katmanda,
+   `::backdrop`, dışı etkisiz, odak içine, Escape `cancel` ve `close`),
+   `:modal`; host'un açıp kapatması için C-ABI.
+4. **`commandfor`/`command`.** Düğmeden diyalog ve popover komutları,
+   özel komutlar (`--x`) host'a olay olarak.
+
 ### M5.10: Diğer kontroller
 
 - [ ] `checkbox`, `radio` (gruplu), `button` (yerli görünüm),
@@ -974,3 +992,17 @@ Onuncu PR: alanın boyu (`size`, `cols`, `rows`); M5.8'in son PR'ı.
 | Bulunan hata | Sunumsal ipucu veren bir öznitelik (`bgcolor`, `align`, `<img width>`) sonradan değişince öğe yeniden stillenmiyordu: geçersiz kılma yalnızca seçicilerin okuduğu özniteliklere bakıyordu. Artık ipucu özniteliği değişen öğe kendisi yeniden stilleniyor (`RESTYLE_SELF`); `rows` yerleşimin okuduğu öznitelikler listesinde |
 | `tab-size`, `break-spaces` | M5.8'den çıkarıldı. Parley 0.11'de sekme durağı yok (sekmeyi tanıyor ama genişliği hesaplanmıyor) ve satır sonundaki korunmuş boşluklar hep taşıyor (`break-spaces` bunların sarılmasını ister). Erk'te taklit etmek çok geçişli bir yerleşim (sekmeleri genişliği satırdaki yerine bağlı satır içi kutulara çevirip yeniden kırmak) ve şekillendirme önbelleğine dokunmak demek; doğru yer Parley (katkı ya da bunları getiren sürümüne yükseltme). Arayüz içeriğinde ikisi de seyrek (kod düzenleyicileri dışında). Bugün `break-spaces` `pre-wrap` gibi, sekme bir boşluk genişliğinde |
 | Mutasyonlar | 11 mutasyonun 11'i yakalandı: ipucunun düşmesi, onay kutusuna da boyut, sıfırın ve `+` işaretinin okunuşu, `bgcolor` ve `cols`'un ipucu sayılmaması, yeniden stillendirmenin düşmesi, varsayılanın bir satır olması, yüksekliğin karşılaştırılmaması ve ölçülmemesi, `rows`'un yerleşim öznitelikleri listesinde olmaması. Onay kutusu mutasyonu ilk turda kaçtı: test `width: auto`'yu `min-width: auto` satırında da buluyordu, satır tam eşleşmeyle aranıyor |
+
+### M5.9
+
+Birinci PR: `<details>`/`<summary>`.
+
+| Konu | Not |
+|---|---|
+| Gizleme | Kapalı bir `details`'in ilk özeti dışındaki çocuklarının kutusu yok (yerleşim çocukları kurarken atlıyor): CSS ile çıplak metin seçilemiyor, tarayıcılar bunu gölge ağaçtaki bir yuvayla yapıyor. Stilleri var, kutuları yok: odak sırası (`focusable`) da kapalı bir `details`'in gizlediğine bakıyor. `open` yerleşimin okuduğu öznitelikler listesinde: değişince `details`'in çocukları yeniden kuruluyor |
+| `:open` | Öğe durumu olarak (`ElementState::OPEN`): Erk durumları her karede belgeden hesaplıyor, `open` özniteliği olan `details` ve `dialog` için bayrak; değişince Stylo'nun durum geçersiz kılması seçicileri yeniden eşleştiriyor |
+| İşaret | Erk liste işaretlerini (`::marker`) hiç çizmiyordu, gömülü yazı tiplerinde üçgen yok (yalnızca •). Özetin satır içi içeriğinin başına Erk düğümsüz bir em boşluğu yazıyor (tarayıcıların "▸ " işareti kadar), paragraf bunu biliyor (`Paragraph::marker`) ve display üçgeni onun üstüne çiziyor: yeni bir display öğesi değil, tek kenarı renkli, iç kutusu olmayan bir kenarlık (CSS'teki kenarlık üçgeni; Erk'in kenarlığı renkli kenarları yamuk dolduruyor). Kapalıyken sağa, açıkken aşağı; büyük harfin ortasına; yalnızca `disclosure-open`/`disclosure-closed` ve `inside`. Reddedilen: üçgen glifli bir yazı tipi gömmek (indirme ve ikili boyutu), yeni bir yol öğesi (raster, özet ve kırpma için bir tür daha) |
+| Davranış | Tıklamanın varsayılan işi motorda bir yöntem (`click_default`): `erk` bir tıklamayı abonelere dağıtıp iptal edilmediyse çağırıyor. Özete ya da içine basış (özetin içindeki bir bağlantı ya da kontrol değilse) `details`'i açıp kapatıyor; aynı `name`'li açık başka `details` kapanıyor; her biri için kabarcıklanmayan bir `toggle` (`EventKind::Toggle`, C: `ERK_EVENT_TOGGLE`, ABI 15). Özet odak alabiliyor; odaktayken Enter ve Space düğmedeki gibi bir tıklama |
+| Sınırlar | Host `open`'ı kendisi koyarsa `toggle` yok ve grubun öbürleri kapanmıyor (HTML ikisini de istiyor; host kendi değişikliğini biliyor). Özeti olmayan bir `details` kendi başlığını ("Details") göstermiyor. Sağdan sola yazıda kapalı üçgen hâlâ sağa bakıyor |
+| Chrome | Chrome 156'ya yükselmiş: kural gereği bütün sayfalar yeniden yakalandı (ayrı commit); eski sayfaların görüntüleri ve geometrileri bayt bayt aynı. Yeni `details` sayfası %84,10. İşaret Chrome'a göre ölçüldü: üçgen kapalıyken 0,5em × 0,63em, açıkken tersi, ortası taban çizgisinin 0,36em üstünde; işaret boşluğu 1,06em (Erk'te en boşluğu ve rakam boşluğu, 1,072em); bununla skor %79,28'den %84,10'a çıktı. Chrome kapalı bir `details`'in içeriğine görünmez kutular ve satırlar veriyor, Erk kutu vermiyor: testin bilinen farklar listesinde gerekçesiyle (kutular için liste bu PR'da, metindekinin eşi: iki yönlü) |
+| Mutasyonlar | 15 mutasyonun 15'i yakalandı: kapalının her şeyi göstermesi, `:open`'ın düşmesi, işaret boşluğunun ve `inside` denetiminin düşmesi, yönün ters çizilmesi, özetin odak almaması ve gizlinin alması, özetteki bağlantının açıp kapatması, grubun ve Enter'ın düşmesi, `open`'ın yerleşim özniteliği olmaması, iptal edilen tıklamanın açması, `toggle`'ın kabarcıklanması, C-ABI'nin olayı kaybetmesi, yalnızca tıklananın olayı. İki mutasyon ilk turda kaçtı: `open`'ı izlememek (testteki açılış özetin stilini de değiştiriyordu: özetsiz bir `details`'le test eklendi) ve kabarcıklanma (kök aboneliği belge düğümündeydi, yol `html`'de bitiyor: `body`'ye taşındı) |
