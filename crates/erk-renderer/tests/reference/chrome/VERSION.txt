@@ -1,2 +1,2 @@
-Captured with: Google Chrome 155.0.8059.79 (windows)
+Captured with: Google Chrome 156.0.8078.80 (windows)
 Window 800x600, device scale 1 unless a page sets erk-device-scale, LCD text off, embedded Noto Sans.
