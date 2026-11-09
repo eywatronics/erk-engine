@@ -226,6 +226,9 @@ pub enum EventKind {
     Focus = 7,
     /// `target` lost the focus.
     Blur = 8,
+    /// A `details` element opened or closed because the user pressed its
+    /// summary; not when the host sets `open` (M5.9). It does not bubble.
+    Toggle = 9,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

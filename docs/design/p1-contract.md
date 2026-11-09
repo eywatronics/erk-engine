@@ -508,6 +508,12 @@ gerekçeli bir daraltma:
   biter; şifre alanı kompozisyon almaz. Geçersiz UTF-8
   `ERK_ERR_INVALID_ARGUMENT`. Kompozisyon sürerken `erk_app_caret_rect`
   kompozisyonun başını verir.
+- **v0.15 (M5.9):** `ERK_EVENT_TOGGLE` (9): kullanıcı bir `details`'in
+  özetine basınca (ya da odaktaki özette Enter veya Space) `details`
+  açılıp kapanır ve ona bu olay gelir; kabarcıklanmaz. Tıklamanın
+  varsayılan işidir: tıklama aboneliklerinden biri onu iptal ederse
+  (`erk_event_prevent_default`) açılmaz. Host `open`'ı kendisi koyarsa
+  olay yoktur.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -223,6 +223,21 @@ impl Engine {
         events
     }
 
+    /// What a click does by default, once the host let it through: `event`
+    /// is the click. A press in a `details`' summary opens or closes it
+    /// (M5.9). The events that follow (`toggle`); none for anything else.
+    pub fn click_default(&mut self, event: &Event) -> Vec<Event> {
+        if event.kind != crate::messages::EventKind::Click {
+            return Vec::new();
+        }
+        let Some(target) = NodeId::from_bits(event.target) else {
+            return Vec::new();
+        };
+        let events = self.page.click_default(target);
+        self.changed |= !events.is_empty();
+        events
+    }
+
     /// What the last key's default asked of the clipboard (Control with C,
     /// X or V in a text field), once: the embedding layer writes the text,
     /// or reads the clipboard and gives it to [`Engine::paste`].
@@ -3019,5 +3034,222 @@ mod tests {
             style.contains("background-color: rgb(255, 0, 0)"),
             "{style}"
         );
+    }
+
+    /// Press the primary button at `point` and let it go, as a host that
+    /// prevents nothing: the events, and what each click does by default.
+    fn press_at(engine: &mut Engine, (x, y): (f32, f32)) -> Vec<Event> {
+        let mut events = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            for event in engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            }) {
+                let follow = engine.click_default(&event);
+                events.push(event);
+                events.extend(follow);
+            }
+        }
+        events
+    }
+
+    /// The middle of `id`'s box.
+    fn middle_of(engine: &Engine, id: u64) -> (f32, f32) {
+        let found = engine.node_box(id).unwrap().unwrap();
+        (found.x + found.width / 2.0, found.y + found.height / 2.0)
+    }
+
+    /// The focused element, else the body: where a key goes.
+    fn focused(engine: &mut Engine) -> Option<u64> {
+        engine
+            .key(&KeyInput {
+                key: crate::messages::Key::Other,
+                state: crate::messages::KeyState::Up,
+                modifiers: Modifiers::default(),
+            })
+            .map(|event| event.target)
+    }
+
+    fn query_id(engine: &Engine, id: &str) -> u64 {
+        engine.query(None, &format!("#{id}")).unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_closed_details_shows_its_summary_alone_until_pressed_open() {
+        use crate::messages::Key;
+        let mut engine = verifying(
+            "<details id=d><summary id=s>Özet</summary>çıplak metin<p id=p>paragraf</p>\
+             <button id=b>iç</button></details><button id=after>sonra</button>",
+        );
+        let (d, s, p, b) = (
+            query_id(&engine, "d"),
+            query_id(&engine, "s"),
+            query_id(&engine, "p"),
+            query_id(&engine, "b"),
+        );
+        // A title makes a frame.
+        engine.set_attr(d, "title", "t").unwrap();
+        let (prepared, _) = engine.prepare();
+        let text = painted_text(&prepared.unwrap_or_else(|| panic!("a frame")));
+        assert!(
+            text.contains("Özet") && !text.contains("çıplak") && !text.contains("iç"),
+            "{text:?}"
+        );
+        // What it hides has no box and takes no focus: Tab goes from the
+        // summary to the button after it.
+        assert_eq!(engine.node_box(p), Ok(None));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(s));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(query_id(&engine, "after")));
+        // A press on the summary opens it: a toggle event at the details.
+        let at = middle_of(&engine, s);
+        let events = press_at(&mut engine, at);
+        let toggles: Vec<u64> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Toggle)
+            .map(|event| event.target)
+            .collect();
+        assert_eq!(toggles, [d]);
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        let text = painted_text(&prepared.unwrap());
+        assert!(
+            text.contains("çıplak metin") && text.contains("paragraf"),
+            "{text:?}"
+        );
+        assert!(engine.node_box(p).unwrap().is_some());
+        // The press focused the summary; what it shows takes the focus now.
+        assert_eq!(focused(&mut engine), Some(s));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(b));
+        // From the keyboard: Enter on the focused summary is a click, which
+        // closes it.
+        press_with(&mut engine, Key::Tab, SHIFT);
+        assert_eq!(focused(&mut engine), Some(s));
+        let input = KeyInput {
+            key: Key::Enter,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        let clicks = engine.key_default(&input);
+        assert_eq!(clicks.len(), 1);
+        assert_eq!(clicks[0].kind, EventKind::Click);
+        assert_eq!(engine.click_default(&clicks[0]).len(), 1);
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.node_box(p), Ok(None));
+    }
+
+    #[test]
+    fn opening_one_details_of_a_named_group_closes_the_others() {
+        let mut engine = verifying(
+            "<details id=a name=sss open><summary id=sa>A</summary>a</details>\
+             <details id=b name=sss><summary id=sb>B</summary>b</details>\
+             <details id=c name=baska open><summary>C</summary>c</details>",
+        );
+        let (a, b, c) = (
+            query_id(&engine, "a"),
+            query_id(&engine, "b"),
+            query_id(&engine, "c"),
+        );
+        let at = middle_of(&engine, query_id(&engine, "sb"));
+        let events = press_at(&mut engine, at);
+        let mut toggles: Vec<u64> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Toggle)
+            .map(|event| event.target)
+            .collect();
+        toggles.sort_unstable();
+        let mut expected = [a, b];
+        expected.sort_unstable();
+        assert_eq!(toggles, expected);
+        assert_eq!(engine.attr(a, "open"), Ok(None));
+        assert_eq!(engine.attr(b, "open"), Ok(Some(String::new())));
+        // Another name is another group.
+        assert_eq!(engine.attr(c, "open"), Ok(Some(String::new())));
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        // Closing one opens nothing.
+        let at = middle_of(&engine, query_id(&engine, "sb"));
+        press_at(&mut engine, at);
+        assert_eq!(engine.attr(a, "open"), Ok(None));
+        assert_eq!(engine.attr(b, "open"), Ok(None));
+    }
+
+    #[test]
+    fn a_link_in_a_summary_is_pressed_without_toggling_its_details() {
+        let mut engine = verifying(
+            "<style>a, b { display: inline-block }</style>\
+             <details id=d><summary><a id=l href=#>bağlantı</a> ve metin <b id=t>kalın</b></summary>x</details>",
+        );
+        let d = query_id(&engine, "d");
+        let at = middle_of(&engine, query_id(&engine, "l"));
+        press_at(&mut engine, at);
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        // Text inside the summary toggles it.
+        let at = middle_of(&engine, query_id(&engine, "t"));
+        press_at(&mut engine, at);
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+    }
+
+    /// The disclosure markers a frame paints: a border with one side in
+    /// colour, which side, and its colour.
+    fn markers(prepared: &Prepared) -> Vec<(usize, crate::color::Rgba)> {
+        prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Border { colors, .. } => {
+                    let shown: Vec<usize> = (0..4).filter(|side| colors[*side][3] != 0).collect();
+                    (shown.len() == 1).then(|| (shown[0], colors[shown[0]]))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_summarys_marker_points_aside_closed_and_down_open() {
+        let mut engine = verifying(
+            "<style>details { color: rgb(255, 0, 0) } details:open { color: rgb(0, 0, 255) }</style>\
+             <details id=d><summary>özet</summary>x</details>\
+             <details><summary style='list-style: none'>işaretsiz</summary>y</details>\
+             <details><summary style='list-style-position: outside'>dışarıda</summary>z</details>",
+        );
+        let d = query_id(&engine, "d");
+        // Closed: the left side, a triangle pointing right, in the text's
+        // colour; none where `list-style` is none, nor outside, which is not
+        // drawn yet. (A title makes a frame.)
+        engine.set_attr(d, "title", "t").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(markers(&prepared.unwrap()), [(3, [255, 0, 0, 255])]);
+        // Open: the top side, pointing down; `:open` matched.
+        engine.set_attr(d, "open", "").unwrap();
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(markers(&prepared.unwrap()), [(0, [0, 0, 255, 255])]);
+    }
+
+    #[test]
+    fn open_set_by_the_host_shows_what_a_details_without_a_summary_hides() {
+        // No summary: no style follows `open`, only what has a box.
+        let mut engine = verifying("<details id=d>çıplak<p id=p>paragraf</p></details>");
+        let (d, p) = (query_id(&engine, "d"), query_id(&engine, "p"));
+        assert_eq!(engine.node_box(p), Ok(None));
+        engine.set_attr(d, "open", "").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert!(engine.node_box(p).unwrap().is_some());
+        engine.remove_attr(d, "open").unwrap();
+        assert!(engine.prepare().0.is_some());
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.node_box(p), Ok(None));
     }
 }

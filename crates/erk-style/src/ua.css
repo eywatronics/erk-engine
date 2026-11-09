@@ -199,6 +199,27 @@ input[type=hidden i] {
   display: none;
 }
 
+/* 15.5.4 The details and summary elements (M5.9): a closed details shows
+ * only its first summary, which layout sees to (bare text too). The
+ * disclosure marker is drawn by Erk, inside the summary's first line. */
+details {
+  display: block;
+}
+
+summary {
+  display: block;
+}
+
+details > summary:first-of-type {
+  display: list-item;
+  counter-increment: list-item 0;
+  list-style: inside disclosure-closed;
+}
+
+details[open] > summary:first-of-type {
+  list-style-type: disclosure-open;
+}
+
 /* 15.3.2 The page */
 body {
   margin: 8px;

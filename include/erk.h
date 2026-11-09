@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 14
+#define ERK_ABI_VERSION 15
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -132,6 +132,12 @@
 #define ERK_EVENT_FOCUS 7
 
 #define ERK_EVENT_BLUR 8
+
+/*
+ A `details` element opened or closed because the user pressed its
+ summary (not when the host sets `open`); it does not bubble.
+ */
+#define ERK_EVENT_TOGGLE 9
 
 #define ERK_PHASE_CAPTURE 1
 
