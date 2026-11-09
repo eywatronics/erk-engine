@@ -1544,6 +1544,12 @@ fn collapse_whitespace(text: &str) -> String {
         .join(" ")
 }
 
+/// The height of a line of text styled `style`: its `line-height`, and
+/// for `normal` the embedded font's, as lines are laid out.
+pub(crate) fn line_height_of(style: &ComputedValues) -> f32 {
+    TextStyle::of(style).line_height_px()
+}
+
 /// Answers Stylo's font metric queries (for `ex`, `ch`, `cap`) from the
 /// embedded Noto Sans, so font-relative units agree with the text that is
 /// actually drawn.

@@ -601,6 +601,9 @@ struct LayoutNode {
     /// Whether the box is a text field's: its baseline is its text's, even
     /// where it clips what overflows (M5.8, as browsers lay fields out).
     field: bool,
+    /// A textarea's content height when its own is auto: `rows` lines of
+    /// its line height (HTML §15.5.16), whatever it holds.
+    field_height: Option<f32>,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -987,8 +990,14 @@ impl<'a> Builder<'a> {
                 None,
             )];
             let paragraph = Paragraph::new(&tokens, computed);
+            // A textarea is `rows` lines high, two by default; Stylo
+            // cannot give `lh` for `line-height: normal`, so it is
+            // measured here, as the text's lines are.
+            let rows = (field == TextField::Area)
+                .then(|| rows(doc, parent) as f32 * crate::text::line_height_of(computed));
             let node = &mut self.nodes[parent_index];
             node.field = true;
+            node.field_height = rows;
             node.shape_key = Some(shape_key(parent, &paragraph));
             node.paragraph = Some(paragraph);
             return Vec::new();
@@ -1392,6 +1401,7 @@ impl<'a> Builder<'a> {
                 then.in_tree
                     && node.style == then.style
                     && node.paragraph == then.paragraph
+                    && node.field_height == then.field_height
                     && match (&node.replaced, &then.replaced) {
                         (Some(now), Some(then)) => match (&now.image, &then.image) {
                             (Some(now), Some(then)) => Arc::ptr_eq(now, then),
@@ -1627,6 +1637,26 @@ pub(crate) fn placeholder(doc: &Document, id: NodeId) -> Option<String> {
         }
     };
     (!text.is_empty()).then_some(text)
+}
+
+/// How many lines textarea `id` shows: its `rows` attribute if it is an
+/// integer above zero, as HTML parses non-negative integers, else two.
+fn rows(doc: &Document, id: NodeId) -> u32 {
+    let value = doc
+        .node(id)
+        .and_then(|node| node.as_element())
+        .and_then(|element| element.attr(&erk_dom::local_name!("rows")))
+        .unwrap_or("")
+        .trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let digits = value.strip_prefix('+').unwrap_or(value);
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end]
+        .parse()
+        .ok()
+        .filter(|rows: &u32| *rows > 0)
+        .unwrap_or(2)
 }
 
 /// Whether element `id` is a text field, and which: a `textarea`, or an
@@ -1938,6 +1968,7 @@ impl<'t> LayoutTree<'t> {
         };
         let style = self.nodes[index].style.clone();
         let key = self.nodes[index].shape_key;
+        let field_height = self.nodes[index].field_height;
         let calcs = self.calcs;
         let mut measured: Option<InlineLayout> = None;
         let mut output = compute_leaf_layout(
@@ -1959,7 +1990,9 @@ impl<'t> LayoutTree<'t> {
                 let shaped = self.text.shape(&paragraph, key, max_advance, &atoms);
                 let size = Size {
                     width: known.width.unwrap_or_else(|| shaped.width()),
-                    height: known.height.unwrap_or(shaped.height),
+                    height: known
+                        .height
+                        .unwrap_or(field_height.unwrap_or(shaped.height)),
                 };
                 measured = Some(shaped);
                 size
