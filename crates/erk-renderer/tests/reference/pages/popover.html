@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="erk-press" content="ac-menu ac-alt ac-not ac-kayan">
+<title>Açılır pencereler</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .kutu { margin: 20px; padding: 12px 16px; width: 520px; border: 2px solid #cbd5e1; }
+  .ust { position: relative; z-index: 50; background: #fee2e2; padding: 8px; }
+  button { display: inline-block; font: inherit; color: #1f2933; background: #e2e8f0;
+           border: 1px solid #94a3b8; padding: 4px 10px; margin: 0 6px 6px 0; }
+  #menu { min-width: 180px; }
+  #menu p { margin: 4px 0; }
+  #alt { inset: auto; top: 150px; right: 190px; margin: 0; background: #bbf7d0;
+         border: 2px solid #059669; padding: 10px 14px; }
+  #not { inset: auto; left: 30px; bottom: 30px; margin: 0; background: #fde68a;
+         border: 1px solid #d97706; padding: 8px 12px; width: 220px; }
+  .donuk { transform: translateX(300px); opacity: 0.5; }
+  #kayan { inset: auto; left: 30px; top: 380px; margin: 0; background: #c7d2fe;
+           border: 2px solid #4f46e5; padding: 6px 10px; }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <button id="ac-menu" popovertarget="menu">Menü</button>
+    <button id="ac-not" popovertarget="not">Not</button>
+    <button popovertarget="kapali">Kapalı kalan</button>
+    <p>Açılır pencereler sayfanın üstündeki katmanda çizilir: konumlu ve
+    z-index'i yüksek bir kutu bile onların altında kalır.</p>
+    <div class="ust">z-index: 50 olan konumlu bir kutu</div>
+    <p>Kapalı bir açılır pencerenin kutusu yoktur.</p>
+    <div class="donuk">
+      <button id="ac-kayan" popovertarget="kayan">Kayan</button>
+      <div id="kayan" popover="manual">Dönüşüm ve saydamlık bana uygulanmaz</div>
+    </div>
+  </div>
+  <div id="menu" popover>
+    <p>Ortada, içeriği kadar geniş</p>
+    <button id="ac-alt" popovertarget="alt">Alt menü</button>
+  </div>
+  <div id="alt" popover>Menünün üstünde, z-index: 50 olan kutunun da</div>
+  <div id="not" popover="manual">Elle açılan not: dışarıya basınca kapanmaz</div>
+  <div id="kapali" popover>Görünmez</div>
+</body>
+</html>
