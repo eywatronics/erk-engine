@@ -11,6 +11,8 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+mod popover;
+
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
@@ -107,6 +109,8 @@ pub(crate) struct Page {
     /// only what it reaches (M5.4): a frame that only repaints does not
     /// build, and passes its changes on.
     touched: layout::Touched,
+    /// The popovers' plan and memory (M5.9).
+    popovers: popover::Popovers,
 }
 
 /// What earlier frames left for a frame to build on: the last frame's
@@ -166,6 +170,7 @@ fn only_repaints(old: &Styles, new: &Styles, changes: &Changes) -> bool {
         && changes.children.is_empty()
         && changes.text.is_empty()
         && changes.values.is_empty()
+        && changes.layers.is_empty()
         && changes.attrs.iter().all(|change| {
             !change
                 .names
@@ -313,6 +318,7 @@ impl Page {
             layout: None,
             shapes: (ShapeCache::default(), 0),
             touched: layout::Touched::default(),
+            popovers: popover::Popovers::default(),
         }
     }
 
@@ -504,6 +510,9 @@ impl Page {
         touched.shallow.extend(&changes.children);
         // A text field shows its value.
         touched.shallow.extend(&changes.values);
+        // An element that joined or left the top layer has another
+        // containing block, which the build gives it from its parent.
+        touched.deep.extend(&changes.layers);
         touched.shallow.extend(
             changes
                 .text
@@ -962,6 +971,7 @@ impl Page {
         match (input.kind, input.button) {
             (PointerKind::Down, PointerButton::Primary) => {
                 self.pressed = target;
+                self.popover_press_down(target);
                 // The focus goes to the focusable element pressed, or away
                 // when there is none, as in browsers.
                 let focus = target.and_then(|target| {
@@ -990,18 +1000,21 @@ impl Page {
                 events
             }
             (PointerKind::Up, PointerButton::Primary) => {
+                // Light dismiss comes before the click (HTML §6.12.4).
+                let mut events = self.popover_press_up(target);
                 let (Some(down), Some(up)) = (self.pressed.take(), target) else {
-                    return Vec::new();
+                    return events;
                 };
                 let Some(clicked) = self.common_ancestor(down, up) else {
-                    return Vec::new();
+                    return events;
                 };
-                vec![self.event(
+                events.push(self.event(
                     EventKind::Click,
                     clicked,
                     (input.x, input.y),
                     input.modifiers,
-                )]
+                ));
+                events
             }
             _ => Vec::new(),
         }
@@ -1081,6 +1094,8 @@ impl Page {
                 };
                 self.move_focus(Some(order[next]), input.modifiers, true)
             }
+            // A close request: the top `auto` popover closes.
+            (Key::Escape, KeyState::Down) => self.popover_escape().unwrap_or_default(),
             (Key::Enter, KeyState::Down) | (Key::Space, KeyState::Up) => {
                 let Some(node) = focused else {
                     return Vec::new();
@@ -1785,8 +1800,10 @@ impl Page {
             if let Some(details) = self.details_of_summary(current) {
                 break details;
             }
+            // A link or a control does what it does itself: a popover's
+            // button opens or closes it.
             if self.interactive(current) {
-                return Vec::new();
+                return self.invoke_popover(current).unwrap_or_default();
             }
             node = self.doc.node(current).and_then(|found| found.parent());
         };
@@ -1834,6 +1851,53 @@ impl Page {
             .into_iter()
             .map(|id| self.event(EventKind::Toggle, id, (0.0, 0.0), Modifiers::default()))
             .collect()
+    }
+
+    /// Click the elements a `<meta name="erk-press" content="id …">` names,
+    /// in order, as DOM's `click()` does: what each click does by default,
+    /// with nothing prevented, and no focus moved. What the render_html
+    /// family draws a page with a popover open from; the reference tests
+    /// click the same in Chrome.
+    pub(crate) fn press_from_meta(&mut self) {
+        let mut ids = Vec::new();
+        let mut stack = vec![self.doc.root()];
+        while let Some(node) = stack.pop() {
+            let mut children: Vec<_> = self.doc.children(node).collect();
+            children.reverse();
+            stack.extend(children);
+            let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
+                continue;
+            };
+            if element.name.local == local_name!("meta")
+                && element.attr(&local_name!("name")) == Some("erk-press")
+                && let Some(content) = element.attr(&local_name!("content"))
+            {
+                ids.extend(content.split_ascii_whitespace().map(str::to_owned));
+            }
+        }
+        for id in ids {
+            let Some(target) = self.element_with_id(&id) else {
+                continue;
+            };
+            let mut queue: Vec<Event> = self.click_default(target);
+            queue.reverse();
+            while let Some(event) = queue.pop() {
+                if event.kind != EventKind::BeforeToggle {
+                    continue;
+                }
+                let Some(at) = NodeId::from_bits(event.target) else {
+                    continue;
+                };
+                let mut follow = self.after_before_toggle(at, false);
+                follow.reverse();
+                queue.extend(follow);
+            }
+        }
+    }
+
+    /// The document, for a caller done with the page.
+    pub(crate) fn into_document(self) -> Document {
+        self.doc
     }
 
     /// Whether element `node` is a `details` element.
@@ -2119,6 +2183,8 @@ impl Page {
         }
         self.journal.touch(&self.doc, parent);
         let joins = !erk_invalidation::journal::connected(&self.doc, child);
+        // A popover moved closes (HTML's removing steps).
+        self.touch_top_layer(None);
         self.doc.insert(parent, child, before).map_err(status)?;
         // From outside the document into it: all of it is new there.
         if joins && erk_invalidation::journal::connected(&self.doc, child) {
@@ -2134,6 +2200,7 @@ impl Page {
         if let Some(parent) = self.doc.node(node).and_then(|n| n.parent()) {
             self.journal.touch(&self.doc, parent);
         }
+        self.touch_top_layer(None);
         if !self.doc.remove(node) {
             return Err(Status::InvalidArgument);
         }
@@ -2145,14 +2212,20 @@ impl Page {
     pub(crate) fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
         let node = self.node(node)?;
         self.journal.touch(&self.doc, node);
-        self.doc.set_attr(node, name, value).map_err(status)
+        let before = self.popover_kind(node);
+        self.doc.set_attr(node, name, value).map_err(status)?;
+        self.popover_attribute_changed(node, name, before);
+        Ok(())
     }
 
     /// Remove attribute `name` of element `node`; whether it had one.
     pub(crate) fn remove_attr(&mut self, node: u64, name: &str) -> Result<bool, Status> {
         let node = self.node(node)?;
         self.journal.touch(&self.doc, node);
-        self.doc.remove_attr(node, name).map_err(status)
+        let before = self.popover_kind(node);
+        let had = self.doc.remove_attr(node, name).map_err(status)?;
+        self.popover_attribute_changed(node, name, before);
+        Ok(had)
     }
 
     /// Attribute `name` of element `node`; `None` without one, or for a node

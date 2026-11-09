@@ -9,6 +9,7 @@ mod document;
 mod forms;
 mod node;
 mod sink;
+mod top_layer;
 
 pub use arena::{Arena, NodeId};
 pub use document::{Children, Document, MutationError, StaleNode};

@@ -223,17 +223,23 @@ impl Engine {
         events
     }
 
-    /// What a click does by default, once the host let it through: `event`
-    /// is the click. A press in a `details`' summary opens or closes it
-    /// (M5.9). The events that follow (`toggle`); none for anything else.
-    pub fn click_default(&mut self, event: &Event) -> Vec<Event> {
-        if event.kind != crate::messages::EventKind::Click {
-            return Vec::new();
-        }
+    /// What follows `event` once the host dispatched it, `prevented` saying
+    /// whether a subscription prevented its default; the host dispatches
+    /// the events that follow the same way, each before the next. A click
+    /// not prevented does what it does by default: a press in a
+    /// `details`' summary opens or closes it, a popover's button opens or
+    /// closes its popover (M5.9). A popover's `beforetoggle` lets it open,
+    /// unless prevented, or close.
+    pub fn follow(&mut self, event: &Event, prevented: bool) -> Vec<Event> {
+        use crate::messages::EventKind;
         let Some(target) = NodeId::from_bits(event.target) else {
             return Vec::new();
         };
-        let events = self.page.click_default(target);
+        let events = match event.kind {
+            EventKind::Click if !prevented => self.page.click_default(target),
+            EventKind::BeforeToggle => self.page.after_before_toggle(target, prevented),
+            _ => Vec::new(),
+        };
         self.changed |= !events.is_empty();
         events
     }
@@ -3048,10 +3054,19 @@ mod tests {
                 button: PointerButton::Primary,
                 modifiers: Modifiers::default(),
             }) {
-                let follow = engine.click_default(&event);
-                events.push(event);
-                events.extend(follow);
+                events.extend(deliver(engine, event));
             }
+        }
+        events
+    }
+
+    /// `event` dispatched by a host that prevents nothing, then what
+    /// follows it, each the same way: all of them, in order.
+    fn deliver(engine: &mut Engine, event: Event) -> Vec<Event> {
+        let follow = engine.follow(&event, false);
+        let mut events = vec![event];
+        for next in follow {
+            events.extend(deliver(engine, next));
         }
         events
     }
@@ -3139,7 +3154,7 @@ mod tests {
         let clicks = engine.key_default(&input);
         assert_eq!(clicks.len(), 1);
         assert_eq!(clicks[0].kind, EventKind::Click);
-        assert_eq!(engine.click_default(&clicks[0]).len(), 1);
+        assert_eq!(engine.follow(&clicks[0], false).len(), 1);
         assert_eq!(engine.attr(d, "open"), Ok(None));
         assert!(engine.prepare().0.is_some());
         assert_eq!(engine.verify(), Ok(()));
@@ -3251,5 +3266,488 @@ mod tests {
         assert!(engine.prepare().0.is_some());
         assert_eq!(engine.verify(), Ok(()));
         assert_eq!(engine.node_box(p), Ok(None));
+    }
+
+    /// A page of popovers, its buttons boxes of their own (Erk draws no
+    /// button yet: M5.10).
+    fn popover_page(html: &str) -> Engine {
+        verifying(&format!(
+            "<style>button {{ display: inline-block }}</style>{html}"
+        ))
+    }
+
+    /// Escape pressed and let go, as a host that prevents nothing: the
+    /// events, and what follows each.
+    fn escape(engine: &mut Engine) -> Vec<Event> {
+        let mut events = Vec::new();
+        for state in [
+            crate::messages::KeyState::Down,
+            crate::messages::KeyState::Up,
+        ] {
+            let input = KeyInput {
+                key: crate::messages::Key::Escape,
+                state,
+                modifiers: Modifiers::default(),
+            };
+            events.extend(engine.key(&input));
+            for event in engine.key_default(&input) {
+                events.extend(deliver(engine, event));
+            }
+        }
+        events
+    }
+
+    /// The `beforetoggle` and `toggle` events among `events`: what
+    /// popovers did.
+    fn toggles(events: &[Event]) -> Vec<(EventKind, u64)> {
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::BeforeToggle | EventKind::Toggle))
+            .map(|event| (event.kind, event.target))
+            .collect()
+    }
+
+    /// A press in the middle of `id`'s box, as [`press_at`].
+    fn press_on(engine: &mut Engine, id: u64) -> Vec<Event> {
+        let at = middle_of(engine, id);
+        press_at(engine, at)
+    }
+
+    /// The open popovers, in document order.
+    fn open_popovers(engine: &Engine) -> Vec<u64> {
+        engine.query_all(None, ":popover-open").unwrap()
+    }
+
+    /// Make a frame and check it against the oracle.
+    fn checked_frame(engine: &mut Engine) -> Prepared {
+        let (prepared, _) = engine.prepare();
+        assert_eq!(engine.verify(), Ok(()));
+        prepared.unwrap_or_else(|| panic!("a frame"))
+    }
+
+    /// A primary press at `at` and its release, the events as they come.
+    fn press_events(engine: &mut Engine, at: (f32, f32)) -> Vec<Vec<Event>> {
+        [PointerKind::Down, PointerKind::Up]
+            .into_iter()
+            .map(|kind| {
+                engine.pointer(&PointerInput {
+                    kind,
+                    x: at.0,
+                    y: at.1,
+                    button: PointerButton::Primary,
+                    modifiers: Modifiers::default(),
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_popovers_button_opens_it_above_the_page_in_the_middle_and_closes_it() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } #cover { position: relative; z-index: 99; \
+             height: 300px; background: red }</style>\
+             <button id=b popovertarget=p>menü</button><div id=cover></div>\
+             <div id=p popover>içerik</div>",
+        );
+        let (b, p) = (query_id(&engine, "b"), query_id(&engine, "p"));
+        assert_eq!(engine.node_box(p), Ok(None));
+        let events = press_on(&mut engine, b);
+        // Asked, then opened.
+        assert_eq!(
+            toggles(&events),
+            [(EventKind::BeforeToggle, p), (EventKind::Toggle, p)]
+        );
+        assert_eq!(open_popovers(&engine), [p]);
+        let text = painted_text(&checked_frame(&mut engine));
+        assert!(text.ends_with("içerik"), "{text:?}");
+        // In the middle of the viewport, as wide as what it holds, above
+        // the cover and its z-index.
+        let found = engine.node_box(p).unwrap().unwrap();
+        assert!(
+            (found.x * 2.0 + found.width - 300.0).abs() < 1.0,
+            "{found:?}"
+        );
+        assert!(
+            (found.y * 2.0 + found.height - 200.0).abs() < 1.0,
+            "{found:?}"
+        );
+        assert!(found.width < 100.0, "{found:?}");
+        assert_eq!(engine.inspect_at(150.0, 100.0), Some(p));
+        // The button again closes it; the press on its button is not a
+        // press outside it.
+        let events = press_on(&mut engine, b);
+        assert_eq!(
+            toggles(&events),
+            [(EventKind::BeforeToggle, p), (EventKind::Toggle, p)]
+        );
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+        assert_eq!(engine.node_box(p), Ok(None));
+    }
+
+    #[test]
+    fn a_press_outside_or_escape_closes_auto_popovers_from_the_top() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } [popover] { padding: 20px }</style>\
+             <button id=ba popovertarget=a>a</button>\
+             <button id=bm popovertarget=m>m</button>\
+             <div id=a popover><button id=bc popovertarget=c>c</button></div>\
+             <div id=c popover=bogus>c</div>\
+             <div id=m popover=manual>m</div>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (ba, bm, a, bc, c, m) = (id("ba"), id("bm"), id("a"), id("bc"), id("c"), id("m"));
+        press_on(&mut engine, ba);
+        checked_frame(&mut engine);
+        // A press that starts in `a` and ends outside it is no press
+        // outside: it stays open.
+        let inside = {
+            let found = engine.node_box(a).unwrap().unwrap();
+            (found.x + 2.0, found.y + 2.0)
+        };
+        for (kind, at) in [
+            (PointerKind::Down, inside),
+            (PointerKind::Up, (290.0, 190.0)),
+        ] {
+            engine.pointer(&PointerInput {
+                kind,
+                x: at.0,
+                y: at.1,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+        }
+        assert_eq!(open_popovers(&engine), [a]);
+        // An unknown value is manual: a press outside leaves it open.
+        press_on(&mut engine, bc);
+        checked_frame(&mut engine);
+        assert_eq!(open_popovers(&engine), [a, c]);
+        press_at(&mut engine, (290.0, 190.0));
+        assert_eq!(open_popovers(&engine), [c]);
+        press_on(&mut engine, ba);
+        checked_frame(&mut engine);
+        press_on(&mut engine, bc);
+        checked_frame(&mut engine);
+        assert_eq!(open_popovers(&engine), [a]);
+        engine.set_attr(c, "popover", "auto").unwrap();
+        // A press on another button is outside `a`: it closes, then the
+        // manual popover opens.
+        let events = press_on(&mut engine, bm);
+        assert_eq!(
+            toggles(&events),
+            [
+                (EventKind::BeforeToggle, a),
+                (EventKind::Toggle, a),
+                (EventKind::BeforeToggle, m),
+                (EventKind::Toggle, m),
+            ]
+        );
+        checked_frame(&mut engine);
+        // A manual popover stays: neither a press outside nor Escape
+        // closes it.
+        press_at(&mut engine, (290.0, 190.0));
+        assert!(toggles(&escape(&mut engine)).is_empty());
+        assert_eq!(open_popovers(&engine), [m]);
+        // `a` again, above `m`; a button in it opens `c`, whose ancestor it
+        // is through the button: it stays.
+        press_on(&mut engine, ba);
+        checked_frame(&mut engine);
+        let events = press_on(&mut engine, bc);
+        assert_eq!(
+            toggles(&events),
+            [(EventKind::BeforeToggle, c), (EventKind::Toggle, c)]
+        );
+        checked_frame(&mut engine);
+        assert_eq!(open_popovers(&engine), [a, c, m]);
+        // Escape closes the top one, then the next.
+        assert_eq!(
+            toggles(&escape(&mut engine)),
+            [(EventKind::BeforeToggle, c), (EventKind::Toggle, c)]
+        );
+        assert_eq!(open_popovers(&engine), [a, m]);
+        checked_frame(&mut engine);
+        assert_eq!(toggles(&escape(&mut engine)).len(), 2);
+        assert_eq!(open_popovers(&engine), [m]);
+        // Both auto ones again; a press outside closes both, the top one
+        // first.
+        press_on(&mut engine, ba);
+        checked_frame(&mut engine);
+        press_on(&mut engine, bc);
+        checked_frame(&mut engine);
+        let events = press_at(&mut engine, (290.0, 190.0));
+        assert_eq!(
+            toggles(&events),
+            [
+                (EventKind::BeforeToggle, c),
+                (EventKind::Toggle, c),
+                (EventKind::BeforeToggle, a),
+                (EventKind::Toggle, a),
+            ]
+        );
+        assert_eq!(open_popovers(&engine), [m]);
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_prevented_beforetoggle_keeps_a_popover_closed() {
+        let mut engine =
+            popover_page("<button id=b popovertarget=p>b</button><div id=p popover>p</div>");
+        let at = middle_of(&engine, query_id(&engine, "b"));
+        let mut seen = Vec::new();
+        for events in press_events(&mut engine, at) {
+            for event in events {
+                let mut queue = vec![event];
+                while let Some(event) = queue.pop() {
+                    let prevented = event.kind == EventKind::BeforeToggle;
+                    seen.push(event.kind);
+                    let mut follow = engine.follow(&event, prevented);
+                    follow.reverse();
+                    queue.extend(follow);
+                }
+            }
+        }
+        assert!(seen.contains(&EventKind::BeforeToggle), "{seen:?}");
+        assert!(!seen.contains(&EventKind::Toggle), "{seen:?}");
+        assert!(open_popovers(&engine).is_empty());
+        // A click prevented asks nothing.
+        let clicks = press_events(&mut engine, at).pop().unwrap();
+        assert_eq!(clicks.len(), 1);
+        assert!(engine.follow(&clicks[0], true).is_empty());
+        assert!(open_popovers(&engine).is_empty());
+    }
+
+    #[test]
+    fn the_focus_in_a_popover_closed_by_escape_goes_back_to_its_button() {
+        use crate::messages::Key;
+        let mut engine = popover_page(
+            "<button id=b popovertarget=p>b</button>\
+             <div id=p popover><button id=in>in</button></div><button id=after>after</button>",
+        );
+        let (b, inner) = (query_id(&engine, "b"), query_id(&engine, "in"));
+        press_on(&mut engine, b);
+        checked_frame(&mut engine);
+        assert_eq!(focused(&mut engine), Some(b));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(inner));
+        let kinds: Vec<EventKind> = escape(&mut engine)
+            .iter()
+            .filter(|event| !matches!(event.kind, EventKind::KeyDown | EventKind::KeyUp))
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::BeforeToggle,
+                EventKind::Blur,
+                EventKind::Focus,
+                EventKind::Toggle
+            ]
+        );
+        assert_eq!(focused(&mut engine), Some(b));
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_popover_moved_removed_or_made_another_kind_by_the_host_closes() {
+        let mut engine = popover_page(
+            "<button id=b popovertarget=p>b</button><div id=box style='transform: \
+             translateX(40px); opacity: 0.5'><div id=p popover>p</div></div>",
+        );
+        let (b, p) = (query_id(&engine, "b"), query_id(&engine, "p"));
+        let open = |engine: &mut Engine| {
+            press_on(engine, b);
+            let prepared = checked_frame(engine);
+            assert_eq!(open_popovers(engine), [p]);
+            prepared
+        };
+        // Laid out against the viewport, not its transformed ancestor, and
+        // painted after its translucent one's group, outside it.
+        let prepared = open(&mut engine);
+        let found = engine.node_box(p).unwrap().unwrap();
+        assert!(
+            (found.x * 2.0 + found.width - 300.0).abs() < 1.0,
+            "{found:?}"
+        );
+        let items = &prepared.list.items;
+        let last_group = items
+            .iter()
+            .rposition(|item| matches!(item, crate::list::DisplayItem::PopOpacity))
+            .unwrap();
+        let last_text = items
+            .iter()
+            .rposition(|item| matches!(item, crate::list::DisplayItem::Glyphs(_)))
+            .unwrap();
+        assert!(last_text > last_group, "{items:?}");
+        // Painted once: the button's text and its own.
+        let runs = items
+            .iter()
+            .filter(|item| matches!(item, crate::list::DisplayItem::Glyphs(_)))
+            .count();
+        assert_eq!(runs, 2, "{items:?}");
+        // Made manual: closed, with no event.
+        engine.set_attr(p, "popover", "manual").unwrap();
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+        engine.set_attr(p, "popover", "").unwrap();
+        // Another value of the same state keeps it open.
+        open(&mut engine);
+        engine.set_attr(p, "popover", "auto").unwrap();
+        assert_eq!(open_popovers(&engine), [p]);
+        checked_frame(&mut engine);
+        // Moved: closed, in a frame of its own, the move alone telling
+        // the journal.
+        let container = query_id(&engine, "box");
+        let body = engine.parent(container).unwrap().unwrap();
+        engine.insert(body, p, None).unwrap();
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+        // Its ancestor removed: gone, and out of the top layer.
+        engine.insert(container, p, None).unwrap();
+        open(&mut engine);
+        engine.remove(container).unwrap();
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+        assert_eq!(engine.node_box(b).map(|found| found.is_some()), Ok(true));
+    }
+
+    #[test]
+    fn a_buttons_action_says_what_it_does_and_some_buttons_do_nothing() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } #a { inset: auto; top: 0; right: 0; margin: 0 } \
+             #c { inset: auto; bottom: 0; right: 0; margin: 0 }</style>\
+             <form><button id=submit popovertarget=a>s</button>\
+             <button id=plain type=button popovertarget=a>p</button></form>\
+             <button id=off disabled popovertarget=a>d</button>\
+             <button id=show popovertarget=a popovertargetaction=show>show</button>\
+             <div id=a popover><button id=bc popovertarget=c>c</button></div>\
+             <div id=c popover><button id=hide popovertarget=a popovertargetaction=hide>h</button></div>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (submit, plain, off, show, a, bc, c, hide) = (
+            id("submit"),
+            id("plain"),
+            id("off"),
+            id("show"),
+            id("a"),
+            id("bc"),
+            id("c"),
+            id("hide"),
+        );
+        // A form's submit button submits; a disabled one does nothing.
+        for button in [submit, off] {
+            assert!(toggles(&press_on(&mut engine, button)).is_empty());
+        }
+        press_on(&mut engine, plain);
+        assert_eq!(open_popovers(&engine), [a]);
+        checked_frame(&mut engine);
+        // Show on an open one: nothing, and the press is in it through
+        // its button, so it stays.
+        assert!(toggles(&press_on(&mut engine, show)).is_empty());
+        assert_eq!(open_popovers(&engine), [a]);
+        press_on(&mut engine, bc);
+        checked_frame(&mut engine);
+        assert_eq!(open_popovers(&engine), [a, c]);
+        // Hide `a` from inside `c`: what is above it closes first.
+        let events = press_on(&mut engine, hide);
+        assert_eq!(
+            toggles(&events),
+            [
+                (EventKind::BeforeToggle, c),
+                (EventKind::Toggle, c),
+                (EventKind::BeforeToggle, a),
+                (EventKind::Toggle, a),
+            ]
+        );
+        assert!(open_popovers(&engine).is_empty());
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn the_popover_opened_last_is_on_top_and_takes_the_press() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } [popover] { width: 100px; height: 60px; padding: 0 }</style>\
+             <button id=ba popovertarget=a>a</button><button id=bb popovertarget=b>b</button>\
+             <div id=a popover=manual>a</div><div id=b popover=manual>b</div>",
+        );
+        let (ba, bb, a, b) = (
+            query_id(&engine, "ba"),
+            query_id(&engine, "bb"),
+            query_id(&engine, "a"),
+            query_id(&engine, "b"),
+        );
+        // `b` first, then `a`: `a` is on top, though later in the document.
+        press_on(&mut engine, bb);
+        press_on(&mut engine, ba);
+        let text = painted_text(&checked_frame(&mut engine));
+        assert!(text.ends_with("ba"), "{text:?}");
+        assert_eq!(engine.inspect_at(150.0, 100.0), Some(a));
+        // Closed and opened again, `b` goes on top.
+        press_on(&mut engine, bb);
+        press_on(&mut engine, bb);
+        checked_frame(&mut engine);
+        assert_eq!(engine.inspect_at(150.0, 100.0), Some(b));
+    }
+
+    #[test]
+    fn joining_the_top_layer_with_no_style_change_lays_it_out_again() {
+        // An author rule keeps the popover shown: opening it changes no
+        // style, only its containing block, the transformed box or the
+        // viewport.
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } [popover] { display: block; width: 50px; height: 20px; \
+             padding: 0; border: 0 }</style><button id=b popovertarget=p>b</button>\
+             <div style='transform: translateX(40px); width: 100px; height: 50px'>\
+             <div id=p popover>p</div></div>",
+        );
+        let (b, p) = (query_id(&engine, "b"), query_id(&engine, "p"));
+        let x = |engine: &Engine| engine.node_box(p).unwrap().unwrap().x;
+        // Centred in the transformed box (the box query is before
+        // transforms), then in the viewport.
+        assert_eq!(x(&engine), 25.0);
+        press_on(&mut engine, b);
+        checked_frame(&mut engine);
+        assert_eq!(x(&engine), 125.0);
+        press_on(&mut engine, b);
+        checked_frame(&mut engine);
+        assert_eq!(x(&engine), 25.0);
+    }
+
+    #[test]
+    fn an_auto_popover_opened_from_the_keyboard_closes_the_other() {
+        use crate::messages::Key;
+        let mut engine = popover_page(
+            "<button id=ba popovertarget=a>a</button><button id=bb popovertarget=b>b</button>             <div id=a popover>a</div><div id=b popover>b</div>",
+        );
+        let (ba, a, b) = (
+            query_id(&engine, "ba"),
+            query_id(&engine, "a"),
+            query_id(&engine, "b"),
+        );
+        press_on(&mut engine, ba);
+        checked_frame(&mut engine);
+        // No press outside: Tab to the other button and Enter. `b` is
+        // asked first, then `a` closes, then `b` opens.
+        press(&mut engine, Key::Tab);
+        let input = KeyInput {
+            key: Key::Enter,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers::default(),
+        };
+        let mut events = Vec::new();
+        for event in engine.key_default(&input) {
+            events.extend(deliver(&mut engine, event));
+        }
+        assert_eq!(
+            toggles(&events),
+            [
+                (EventKind::BeforeToggle, b),
+                (EventKind::BeforeToggle, a),
+                (EventKind::Toggle, a),
+                (EventKind::Toggle, b),
+            ]
+        );
+        assert_eq!(open_popovers(&engine), [b]);
+        checked_frame(&mut engine);
     }
 }

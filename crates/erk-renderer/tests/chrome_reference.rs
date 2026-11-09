@@ -102,7 +102,7 @@ window.addEventListener('load', () => document.fonts.ready.then(() => {
     }
   }
   const elements = [document.body, ...document.body.querySelectorAll('*')]
-    .filter((e) => e.id !== 'erk-geometry-script');
+    .filter((e) => e.id !== 'erk-geometry-script' && e.id !== 'erk-press-script');
   const lines = elements.map((e, i) => {
     const r = e.getBoundingClientRect();
     return [i, e.localName, getComputedStyle(e).display, r.x, r.y, r.width, r.height].join(' ');
@@ -203,6 +203,66 @@ const KNOWN_BOX_DIFFERENCES: &[(&str, usize, &str)] = &[
         "a closed details hides it: Chrome lays it out unseen, Erk gives it no box",
     ),
 ];
+
+/// The ids a page's `<meta name="erk-press" content="id …">` names.
+fn pressed_ids(html: &str) -> Vec<String> {
+    const META: &str = r#"<meta name="erk-press" content=""#;
+    let Some(at) = html.find(META) else {
+        return Vec::new();
+    };
+    let rest = &html[at + META.len()..];
+    let ids = &rest[..rest.find('"').expect("the content attribute is closed")];
+    ids.split_ascii_whitespace().map(str::to_owned).collect()
+}
+
+/// Click the elements `html`'s `erk-press` meta names in `engine`, as a
+/// host that prevents nothing would dispatch each click and what follows
+/// it: the way the render_html family clicks them.
+fn press_in(engine: &mut erk_renderer::Engine, html: &str) {
+    fn deliver(engine: &mut erk_renderer::Engine, event: &erk_renderer::Event) {
+        for next in engine.follow(event, false) {
+            deliver(engine, &next);
+        }
+    }
+    for id in pressed_ids(html) {
+        let target = engine
+            .query(None, &format!("#{id}"))
+            .unwrap()
+            .expect("an element with the id");
+        let click = erk_renderer::Event {
+            kind: erk_renderer::EventKind::Click,
+            target,
+            path: vec![target],
+            x: 0.0,
+            y: 0.0,
+            modifiers: erk_renderer::Modifiers::default(),
+            key: None,
+        };
+        deliver(engine, &click);
+    }
+}
+
+/// A copy of `html` that clicks, as it loads, the elements its
+/// `<meta name="erk-press" content="id …">` names, in order: Erk draws the
+/// page with the same clicks (`erk_renderer::render_html`), so a popover
+/// shows open in both. The script runs before the page's `load`, so before
+/// the screenshot and the measuring scripts. Erk never runs it.
+fn pressed(html: &str) -> String {
+    let ids = pressed_ids(html);
+    if ids.is_empty() {
+        return html.to_owned();
+    }
+    let list: Vec<String> = ids.iter().map(|id| format!("'{id}'")).collect();
+    let script = format!(
+        "<script id=\"erk-press-script\">for (const id of [{}]) \
+         document.getElementById(id).click();</script>\n",
+        list.join(", ")
+    );
+    let end = html
+        .rfind("</body>")
+        .expect("reference pages have a </body>");
+    format!("{}{script}{}", &html[..end], &html[end..])
+}
 
 /// A copy of `html` that loads the embedded fonts and runs `script` before
 /// `</body>`. The fonts go inside `<head>`, after the doctype: anything
@@ -725,6 +785,7 @@ fn capture_chrome_references() {
         let html = std::fs::read_to_string(&path).unwrap();
         hashes.retain(|(n, _)| *n != name);
         hashes.push((name.clone(), page_hash(&html)));
+        let html = pressed(&html);
         let page = work.join(format!("{name}.html"));
         // Inside <head>, after the doctype: anything before `<!DOCTYPE html>`
         // puts Chrome into quirks mode, where the body's first child loses
@@ -776,7 +837,7 @@ fn capture_chrome_references() {
         println!("captured {name}");
     }
     for (name, path) in &text_todo {
-        let html = std::fs::read_to_string(path).unwrap();
+        let html = pressed(&std::fs::read_to_string(path).unwrap());
         measure_text(
             &chrome,
             &work,
@@ -1104,6 +1165,7 @@ fn the_box_query_gives_the_boxes_compared_with_chrome() {
                 None => engine.resource_missing(request.id),
             }
         }
+        press_in(&mut engine, &html);
         engine.prepare();
         // The body and its descendant elements, in document order, counted
         // as element_boxes counts them.

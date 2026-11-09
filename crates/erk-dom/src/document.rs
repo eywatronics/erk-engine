@@ -15,6 +15,8 @@ pub struct Document {
     pub(crate) controls: HashMap<NodeId, Control>,
     /// What an input method is composing, and in which text field.
     pub(crate) composition: Option<(NodeId, Composition)>,
+    /// The elements drawn above the page, the top one last (top_layer.rs).
+    pub(crate) top_layer: Vec<NodeId>,
 }
 
 impl Default for Document {
@@ -34,6 +36,7 @@ impl Document {
             quirks_mode: QuirksMode::NoQuirks,
             controls: HashMap::new(),
             composition: None,
+            top_layer: Vec::new(),
         }
     }
 
@@ -225,6 +228,7 @@ impl Document {
     /// Remove `id` from its parent. The node and its subtree stay in the
     /// arena and can be inserted again.
     pub fn detach(&mut self, id: NodeId) {
+        self.leave_top_layer(id);
         let node = self.get(id);
         let Some(parent) = node.parent else {
             return;
@@ -298,6 +302,8 @@ impl Document {
     pub(crate) fn clear(&mut self) {
         self.nodes.remove_all_but(self.root);
         self.controls.clear();
+        self.composition = None;
+        self.top_layer.clear();
         let root = self.get_mut(self.root);
         root.first_child = None;
         root.last_child = None;

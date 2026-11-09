@@ -220,6 +220,26 @@ details[open] > summary:first-of-type {
   list-style-type: disclosure-open;
 }
 
+/* 15.3.20 The popover attribute (M5.9): a popover shows while it is in
+ * the top layer, laid out against the viewport and centred in it. Canvas
+ * and CanvasText are white and black, as Erk's canvas is. */
+[popover] {
+  position: fixed;
+  inset: 0;
+  width: fit-content;
+  height: fit-content;
+  margin: auto;
+  border: solid;
+  padding: 0.25em;
+  overflow: auto;
+  color: black;
+  background-color: white;
+}
+
+[popover]:not(:popover-open):not(dialog[open]) {
+  display: none;
+}
+
 /* 15.3.2 The page */
 body {
   margin: 8px;

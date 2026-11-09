@@ -1070,6 +1070,9 @@ impl<'a> Builder<'a> {
                         continue;
                     };
                     if is_out_of_flow(&computed) {
+                        if has_no_box(&computed) {
+                            continue;
+                        }
                         out_of_flow.push((child, computed, container));
                         entries.push(Entry::OutOfFlow(child));
                     } else if is_atomic_inline(&computed)
@@ -1790,8 +1793,13 @@ fn taffy_style(computed: &ComputedValues) -> Style<Atom> {
 }
 
 /// The containing block of a `position: fixed` element: its nearest
-/// ancestor with a transform (CSS Transforms 1 §2), or the viewport.
+/// ancestor with a transform (CSS Transforms 1 §2), or the viewport. An
+/// element in the top layer is laid out against the viewport whatever its
+/// ancestors are (CSS Position 4 §3).
 pub(crate) fn fixed_container(doc: &Document, styles: &Styles, id: NodeId) -> NodeId {
+    if doc.in_top_layer(id) {
+        return doc.root();
+    }
     let mut at = doc.node(id).and_then(|node| node.parent());
     while let Some(ancestor) = at {
         if styles
@@ -1822,6 +1830,12 @@ fn is_inline_box(style: &ComputedValues) -> bool {
 pub(crate) fn is_positioned(style: &ComputedValues) -> bool {
     use erk_style::style::computed_values::position::T as CssPosition;
     style.clone_position() != CssPosition::Static
+}
+
+/// `display: none`: no box, wherever it would have been (a closed
+/// popover is `position: fixed` too).
+fn has_no_box(style: &ComputedValues) -> bool {
+    style.get_box().clone_display() == erk_style::style::values::computed::Display::None
 }
 
 /// `position: absolute` or `fixed`: out of the flow.
@@ -1910,6 +1924,9 @@ fn inline_tokens(
             Some(NodeData::Element(_)) => {
                 if let Some(child_style) = styles.computed(child) {
                     if is_out_of_flow(&child_style) {
+                        if has_no_box(&child_style) {
+                            continue;
+                        }
                         tokens.push(InlineToken::Anchor(child.index() as usize));
                         out_of_flow.push((child, child_style, container));
                     } else if is_atomic_inline(&child_style)

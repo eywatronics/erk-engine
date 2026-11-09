@@ -241,6 +241,38 @@ fn hovering_restyles_the_hovered_chain_only() {
 }
 
 #[test]
+fn a_popover_shows_while_it_is_in_the_top_layer() {
+    use erk_style::style::computed_values::display::T as Display;
+    use erk_style::style::computed_values::position::T as Position;
+    let mut s = Session::new(
+        "<style>:popover-open { color: rgb(0, 128, 0) }</style>         <div id=p popover>menu</div><div id=plain>text</div>",
+    );
+    let (p, plain) = (s.find("p"), s.find("plain"));
+    let display = |s: &mut Session| s.frame().computed(p).unwrap().clone_display();
+    assert_eq!(display(&mut s), Display::None);
+    s.journal.touch(&s.doc, p);
+    s.doc.add_to_top_layer(p).unwrap();
+    let open = s.frame().computed(p).unwrap();
+    assert_eq!(open.clone_display(), Display::Block);
+    assert_eq!(open.clone_position(), Position::Fixed);
+    assert_eq!(
+        open.get_inherited_text().color,
+        erk_style::style::color::AbsoluteColor::srgb_legacy(0, 128, 0, 1.0)
+    );
+    // Only a popover matches: another element in the top layer does not.
+    s.journal.touch(&s.doc, plain);
+    s.doc.add_to_top_layer(plain).unwrap();
+    let styles = s.frame();
+    assert_ne!(
+        styles.computed(plain).unwrap().get_inherited_text().color,
+        open.get_inherited_text().color
+    );
+    s.journal.touch(&s.doc, p);
+    s.doc.remove_from_top_layer(p);
+    assert_eq!(display(&mut s), Display::None);
+}
+
+#[test]
 fn appending_to_a_list_styles_only_the_new_item() {
     let html = format!(
         "<style>li {{ color: green }}</style><ul id=list>{}</ul>",

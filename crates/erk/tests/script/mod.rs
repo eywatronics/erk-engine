@@ -20,7 +20,20 @@ const TAGS: &[&str] = &[
 ];
 
 const NAMES: &[&str] = &[
-    "id", "class", "style", "tabindex", "href", "hidden", "data-x", "x y", "", "1a", "src",
+    "id",
+    "class",
+    "style",
+    "tabindex",
+    "href",
+    "hidden",
+    "data-x",
+    "x y",
+    "",
+    "1a",
+    "src",
+    "popover",
+    "popovertarget",
+    "open",
 ];
 
 const VALUES: &[&str] = &[
@@ -83,6 +96,9 @@ const PAGES: &[&str] = &[
     "<template><p>t</p></template><a href=#>x</a>",
     "<form><input type=radio name=r checked><input type=radio name=r></form>\
      <select><option>a<option value=b>b</select><textarea>t</textarea><input value=v>",
+    // Popovers in the top layer, one inside another and one manual, and
+    // a details (M5.9).
+    "<button popovertarget=a>a</button><button popovertarget=b>b</button>     <div id=a popover><button popovertarget=c>c</button><p>in a</p></div>     <div id=c popover style='transform: scale(2)'>c</div><div id=b popover=manual>b</div>     <details><summary>s</summary>d</details>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of

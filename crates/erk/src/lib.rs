@@ -428,15 +428,18 @@ impl App {
             Input::Commit(text) => self.cx.engine.commit_composition(&text),
         };
         for event in events {
-            // A click does what it does by default (a summary opens its
-            // `details`) unless a subscription prevented it.
-            let click = (event.kind == EventKind::Click).then(|| event.clone());
-            let prevented = self.cx.dispatch(event);
-            if let Some(click) = click.filter(|_| !prevented) {
-                for follow in self.cx.engine.click_default(&click) {
-                    self.cx.dispatch(follow);
-                }
-            }
+            self.deliver(event);
+        }
+    }
+
+    /// Dispatch `event`, then what follows it, each the same way: a click
+    /// does what it does by default (a summary opens its `details`, a
+    /// button its popover) unless a subscription prevented it, and a
+    /// popover opens after its `beforetoggle` unless one prevented that.
+    fn deliver(&mut self, event: erk_renderer::Event) {
+        let prevented = self.cx.dispatch(event.clone());
+        for follow in self.cx.engine.follow(&event, prevented) {
+            self.deliver(follow);
         }
     }
 

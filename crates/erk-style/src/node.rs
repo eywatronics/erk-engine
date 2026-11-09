@@ -340,6 +340,7 @@ impl Element for ErkNode<'_> {
             NonTSPseudoClass::Hover => state.contains(ElementState::HOVER),
             NonTSPseudoClass::Link => state.contains(ElementState::UNVISITED),
             NonTSPseudoClass::Open => state.contains(ElementState::OPEN),
+            NonTSPseudoClass::PopoverOpen => state.contains(ElementState::POPOVER_OPEN),
             NonTSPseudoClass::Valid
             | NonTSPseudoClass::Invalid
             | NonTSPseudoClass::Defined
@@ -359,7 +360,6 @@ impl Element for ErkNode<'_> {
             | NonTSPseudoClass::Modal
             | NonTSPseudoClass::Optional
             | NonTSPseudoClass::OutOfRange
-            | NonTSPseudoClass::PopoverOpen
             | NonTSPseudoClass::Required
             | NonTSPseudoClass::UserInvalid
             | NonTSPseudoClass::UserValid
