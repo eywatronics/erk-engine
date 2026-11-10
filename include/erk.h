@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 17
+#define ERK_ABI_VERSION 18
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -147,7 +147,8 @@
 #define ERK_EVENT_BEFORETOGGLE 10
 
 /*
- The user asked a modal dialog to close (Escape); it does not bubble.
+ The user asked a dialog to close (Escape at a modal one, or a
+ `request-close` command); it does not bubble.
  `erk_event_prevent_default` keeps it open.
  */
 #define ERK_EVENT_CANCEL 11
@@ -157,6 +158,14 @@
  bubble.
  */
 #define ERK_EVENT_CLOSE 12
+
+/*
+ A button's command at the element its `commandfor` names, before the
+ command runs; `command` and `source` say which and whose. It does not
+ bubble. `erk_event_prevent_default` keeps a built-in command from
+ running; a custom one (`--name`) does nothing else.
+ */
+#define ERK_EVENT_COMMAND 13
 
 #define ERK_PHASE_CAPTURE 1
 
@@ -428,6 +437,16 @@ typedef struct {
    Key events: `ERK_KEY_*`.
    */
   uint32_t key;
+  /*
+   `ERK_EVENT_COMMAND`: the command, a built-in one as HTML names it
+   (`show-modal`), a custom one (`--name`) as the button wrote it;
+   empty for other events.
+   */
+  ErkStr command;
+  /*
+   `ERK_EVENT_COMMAND`: the button that sent it; 0 for other events.
+   */
+  ErkNodeId source;
 } ErkEvent;
 
 typedef void (*ErkEventFn)(void *user_data, ErkApp *app, const ErkEvent *event);

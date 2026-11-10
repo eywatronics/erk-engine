@@ -37,6 +37,11 @@ pub struct Event {
     pub modifiers: Modifiers,
     /// The key of a key event.
     pub key: Option<Key>,
+    /// A `command` event's command: a built-in one as HTML names it
+    /// (`show-modal`), a custom one (`--name`) as the button wrote it.
+    pub command: Option<String>,
+    /// A `command` event's source: the button that sent it.
+    pub source: Option<Node>,
 }
 
 /// A subscription, to cancel with [`Context::off`].

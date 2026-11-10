@@ -82,9 +82,9 @@ impl Frame {
 /// The render_html family draws a page as it loads, but for one thing a
 /// still picture cannot get otherwise: the page may name, in a
 /// `<meta name="erk-press" content="id …">`, elements clicked in order
-/// before it is drawn, as DOM's `click()` would, so that a popover shows
-/// open; `show-modal:id` shows that dialog as DOM's `showModal()` would.
-/// The reference tests do the same in Chrome.
+/// before it is drawn, as DOM's `click()` would, so that a popover or a
+/// dialog a button's command shows is open. The reference tests do the
+/// same in Chrome.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
     render_document(
         html,

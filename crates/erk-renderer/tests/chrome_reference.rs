@@ -224,16 +224,7 @@ fn press_in(engine: &mut erk_renderer::Engine, html: &str) {
             deliver(engine, &next);
         }
     }
-    for token in pressed_ids(html) {
-        if let Some(id) = token.strip_prefix("show-modal:") {
-            let dialog = engine
-                .query(None, &format!("#{id}"))
-                .unwrap()
-                .expect("a dialog with the id");
-            engine.show_modal_dialog(dialog).unwrap();
-            continue;
-        }
-        let id = token;
+    for id in pressed_ids(html) {
         let target = engine
             .query(None, &format!("#{id}"))
             .unwrap()
@@ -246,17 +237,19 @@ fn press_in(engine: &mut erk_renderer::Engine, html: &str) {
             y: 0.0,
             modifiers: erk_renderer::Modifiers::default(),
             key: None,
+            command: None,
+            source: None,
         };
         deliver(engine, &click);
     }
 }
 
 /// A copy of `html` that clicks, as it loads, the elements its
-/// `<meta name="erk-press" content="id …">` names, in order, and shows
-/// as modal the dialogs it names `show-modal:id`: Erk draws the page with
-/// the same (`erk_renderer::render_html`), so a popover or a dialog shows
-/// open in both. The script runs before the page's `load`, so before
-/// the screenshot and the measuring scripts. Erk never runs it.
+/// `<meta name="erk-press" content="id …">` names, in order: Erk draws
+/// the page with the same (`erk_renderer::render_html`), so a popover or
+/// a dialog a button opens shows open in both. The script runs before
+/// the page's `load`, so before the screenshot and the measuring scripts.
+/// Erk never runs it.
 fn pressed(html: &str) -> String {
     let ids = pressed_ids(html);
     if ids.is_empty() {
@@ -264,11 +257,8 @@ fn pressed(html: &str) -> String {
     }
     let list: Vec<String> = ids.iter().map(|id| format!("'{id}'")).collect();
     let script = format!(
-        "<script id=\"erk-press-script\">for (const token of [{}]) {{ \
-         const [action, id] = token.startsWith('show-modal:') \
-         ? ['show-modal', token.slice(11)] : ['click', token]; \
-         const e = document.getElementById(id); \
-         if (action === 'show-modal') e.showModal(); else e.click(); }}</script>\n",
+        "<script id=\"erk-press-script\">for (const id of [{}]) \
+         document.getElementById(id).click();</script>\n",
         list.join(", ")
     );
     let end = html
@@ -1105,7 +1095,14 @@ fn erk_boxes_match_chrome() {
             let index: usize = index.parse().expect("index");
             let [x, y, width, height] =
                 [x, y, width, height].map(|v| v.parse::<f32>().expect("number"));
-            if matches!(display, "inline" | "none" | "contents") {
+            let erk_box = erk.iter().find(|b| b.index == index);
+            // Chrome writes an element in a hidden subtree (a closed
+            // dialog's content) with its own display and an empty box at
+            // the origin: it has no box there either.
+            let boxless_in_chrome = [x, y, width, height] == [0.0; 4];
+            if matches!(display, "inline" | "none" | "contents")
+                || (boxless_in_chrome && erk_box.is_none())
+            {
                 skipped += 1;
                 continue;
             }
@@ -1113,7 +1110,7 @@ fn erk_boxes_match_chrome() {
             let known = KNOWN_BOX_DIFFERENCES
                 .iter()
                 .any(|(page, n, _)| *page == name && *n == index);
-            let Some(erk_box) = erk.iter().find(|b| b.index == index) else {
+            let Some(erk_box) = erk_box else {
                 if !known {
                     failures.push(format!(
                         "{name}: <{tag}> #{index} has a box in Chrome ({display}) but not in Erk"

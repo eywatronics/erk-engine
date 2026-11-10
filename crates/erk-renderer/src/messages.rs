@@ -203,6 +203,11 @@ pub struct Event {
     pub modifiers: Modifiers,
     /// The key of a key event.
     pub key: Option<Key>,
+    /// A `command` event's command: a built-in one as HTML names it
+    /// (`show-modal`), a custom one (`--name`) as the button wrote it.
+    pub command: Option<String>,
+    /// A `command` event's source: the button that sent it.
+    pub source: Option<u64>,
 }
 
 /// The kinds of p1-contract §10, numbered the same.
@@ -234,12 +239,18 @@ pub enum EventKind {
     /// bubble. Preventing its default keeps one that was opening closed;
     /// one that is closing closes anyway (M5.9).
     BeforeToggle = 10,
-    /// The user asked a modal dialog to close (Escape); preventing its
+    /// The user asked a dialog to close (Escape at a modal one, or a
+    /// `request-close` command); preventing its
     /// default keeps it open. It does not bubble (M5.9).
     Cancel = 11,
     /// A dialog the user closed closed; not one the host closes. It does
     /// not bubble (M5.9).
     Close = 12,
+    /// A button's `command` at the element its `commandfor` names, before
+    /// the command runs; preventing its default keeps a built-in one from
+    /// running. A custom command (`--name`) does nothing else: it is for
+    /// the host. It does not bubble (M5.9).
+    Command = 13,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

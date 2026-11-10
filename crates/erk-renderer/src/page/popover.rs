@@ -11,9 +11,10 @@
 //! steps still to take as a plan: each step that asks waits for the host
 //! to dispatch its event, which [`Page::after_before_toggle`] says. The
 //! erk crate dispatches every event before the next, so a plan is done
-//! when the input that started it returns. A modal dialog's `cancel`
+//! when the input that started it returns. A dialog's `cancel`
 //! (dialog.rs) waits in the same plan: Escape closes whichever of them is
-//! on top.
+//! on top. So does a button's `command` (command.rs), which may then open
+//! or close a popover.
 
 use std::collections::VecDeque;
 
@@ -40,8 +41,8 @@ pub(crate) struct Popovers {
 }
 
 /// One step of opening or closing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Step {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
     /// A cancelable `beforetoggle`, then the `auto` popovers that are not
     /// its ancestors close and it opens. `invoker` is the button that
     /// opens it, whose popover counts as an ancestor.
@@ -54,9 +55,23 @@ enum Step {
     Hide { popover: NodeId, focus_back: bool },
     /// It joins the top layer, and a `toggle`.
     Add(NodeId),
-    /// A modal dialog's `cancel`, which the host can prevent, then it
-    /// closes, and a `close`.
-    Cancel(NodeId),
+    /// A dialog a button's command shows as modal: it opens, and the
+    /// focus's events.
+    ShowModal(NodeId),
+    /// A dialog's `cancel`, which the host can prevent, then it closes
+    /// with `value` as its return value, if there is one, and a `close`.
+    Cancel {
+        dialog: NodeId,
+        value: Option<String>,
+    },
+    /// A `command` event at `target`, which the host can prevent, then a
+    /// built-in command runs (`None` for a custom one, which does nothing).
+    Command {
+        target: NodeId,
+        source: NodeId,
+        name: String,
+        command: Option<super::command::Command>,
+    },
 }
 
 /// The states of the `popover` attribute (HTML §6.12.1).
@@ -101,7 +116,7 @@ impl Page {
 
     /// Whether `id` is an open popover (not a modal dialog that has a
     /// `popover` attribute).
-    fn is_open_popover(&self, id: NodeId) -> bool {
+    pub(crate) fn is_open_popover(&self, id: NodeId) -> bool {
         self.doc.in_top_layer(id) && !self.doc.is_modal(id) && self.popover_kind(id).is_some()
     }
 
@@ -135,7 +150,7 @@ impl Page {
 
     /// Plan to close `popover`; an `auto` one's `auto` popovers above it
     /// close first, the top one first.
-    fn plan_hide(&mut self, popover: NodeId, focus_back: bool) {
+    pub(crate) fn plan_hide(&mut self, popover: NodeId, focus_back: bool) {
         let stack = self.auto_stack();
         if let Some(at) = stack.iter().position(|id| *id == popover) {
             for above in stack[at + 1..].iter().rev() {
@@ -161,10 +176,15 @@ impl Page {
         {
             return None;
         }
+        // A button whose `commandfor` names an element runs its command
+        // instead.
+        if self.commandfor_target(button).is_some() {
+            return None;
+        }
         let kind = element.attr(&local_name!("type"));
         let is = |name: &str| kind.is_some_and(|kind| kind.eq_ignore_ascii_case(name));
         let submits = match element.name.local {
-            local_name!("button") => !is("button") && !is("reset"),
+            local_name!("button") => super::command::submits(element),
             local_name!("input") if is("button") || is("reset") => false,
             local_name!("input") if is("submit") || is("image") => true,
             _ => return None,
@@ -184,7 +204,7 @@ impl Page {
     }
 
     /// Whether `node` is inside a `form`, which its submit button submits.
-    fn in_form(&self, node: NodeId) -> bool {
+    pub(crate) fn in_form(&self, node: NodeId) -> bool {
         let mut at = self.doc.node(node).and_then(|found| found.parent());
         while let Some(id) = at {
             let found = self.doc.node(id);
@@ -249,7 +269,11 @@ impl Page {
         let mut at = Some(node);
         let mut opened = None;
         while let Some(id) = at {
-            if let Some((popover, _)) = self.popover_target(id)
+            let invoked = self
+                .popover_target(id)
+                .map(|(popover, _)| popover)
+                .or_else(|| self.command_popover(id));
+            if let Some(popover) = invoked
                 && self.is_open_popover(popover)
             {
                 opened = Some(popover);
@@ -306,7 +330,10 @@ impl Page {
             }
         })?;
         if self.doc.is_modal(top) {
-            self.popovers.plan.push_back(Step::Cancel(top));
+            self.popovers.plan.push_back(Step::Cancel {
+                dialog: top,
+                value: None,
+            });
         } else {
             self.plan_hide(top, true);
         }
@@ -317,17 +344,52 @@ impl Page {
     /// says whether a subscription prevented it: the dialog closes unless
     /// it did. The events that follow.
     pub(crate) fn after_cancel(&mut self, target: NodeId, prevented: bool) -> Vec<Event> {
-        if !self.popovers.awaiting || self.popovers.plan.front() != Some(&Step::Cancel(target)) {
-            return Vec::new();
-        }
+        let value = match self.popovers.plan.front() {
+            Some(Step::Cancel { dialog, value }) if self.popovers.awaiting && *dialog == target => {
+                value.clone()
+            }
+            _ => return Vec::new(),
+        };
         self.popovers.plan.pop_front();
         self.popovers.awaiting = false;
         let mut events = Vec::new();
         if !prevented {
-            events.extend(self.close_dialog_now(target, None, true));
+            events.extend(self.close_dialog_now(target, value.as_deref(), true));
         }
         events.extend(self.run_popovers());
         events
+    }
+
+    /// The host dispatched the `command` event at `target`, and
+    /// `prevented` says whether a subscription prevented it: a built-in
+    /// command runs unless it did, while the element is in the document.
+    /// The events that follow.
+    pub(crate) fn after_command(&mut self, target: NodeId, prevented: bool) -> Vec<Event> {
+        let (source, command) = match self.popovers.plan.front() {
+            Some(Step::Command {
+                target: at,
+                source,
+                command,
+                ..
+            }) if self.popovers.awaiting && *at == target => (*source, *command),
+            _ => return Vec::new(),
+        };
+        self.popovers.plan.pop_front();
+        self.popovers.awaiting = false;
+        let mut events = Vec::new();
+        if let Some(command) = command
+            && !prevented
+            && erk_invalidation::journal::connected(&self.doc, target)
+        {
+            events.extend(self.run_command(target, source, command));
+        }
+        events.extend(self.run_popovers());
+        events
+    }
+
+    /// Add `step` to the end of the plan.
+    pub(crate) fn plan_push(&mut self, step: Step) {
+        self.popovers.plan.push_back(step);
     }
 
     /// The host dispatched the `beforetoggle` event at `target`, and
@@ -392,18 +454,26 @@ impl Page {
             && erk_invalidation::journal::connected(&self.doc, popover)
     }
 
+    /// The open `auto` popovers above `keep` in the stack, every one for
+    /// `None`; the top one last.
+    pub(crate) fn autos_above(&self, keep: Option<NodeId>) -> Vec<NodeId> {
+        let stack = self.auto_stack();
+        let at = keep.and_then(|keep| stack.iter().position(|id| *id == keep));
+        stack[at.map_or(0, |at| at + 1)..].to_vec()
+    }
+
     /// The nearest open `auto` popover above `popover` in the document.
-    fn popover_ancestor(&self, popover: NodeId) -> Option<NodeId> {
+    pub(crate) fn popover_ancestor(&self, popover: NodeId) -> Option<NodeId> {
         let parent = self.doc.node(popover)?.parent()?;
         self.popover_around(parent)
     }
 
     /// Take the plan's steps up to the next that asks the host: that one's
-    /// `beforetoggle` goes out and the plan waits. The events.
-    fn run_popovers(&mut self) -> Vec<Event> {
+    /// event goes out and the plan waits. The events.
+    pub(crate) fn run_popovers(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         while !self.popovers.awaiting
-            && let Some(step) = self.popovers.plan.front().copied()
+            && let Some(step) = self.popovers.plan.front().cloned()
         {
             match step {
                 Step::Ask { popover, .. } if self.can_open(popover) => {
@@ -420,12 +490,28 @@ impl Page {
                         events.extend(self.open_popover(popover));
                     }
                 }
-                Step::Cancel(dialog) if self.doc.is_modal(dialog) => {
+                Step::ShowModal(dialog) => {
+                    self.popovers.plan.pop_front();
+                    events.extend(self.show_dialog_now(dialog, true, true).unwrap_or_default());
+                }
+                Step::Cancel { dialog, .. } if self.is_dialog(dialog) && self.has_open(dialog) => {
                     self.popovers.awaiting = true;
                     events.push(self.popover_event(EventKind::Cancel, dialog));
                 }
+                Step::Command {
+                    target,
+                    source,
+                    name,
+                    ..
+                } => {
+                    self.popovers.awaiting = true;
+                    let mut event = self.popover_event(EventKind::Command, target);
+                    event.command = Some(name);
+                    event.source = Some(source.to_bits());
+                    events.push(event);
+                }
                 // Opened or closed already.
-                Step::Ask { .. } | Step::Hide { .. } | Step::Cancel(_) => {
+                Step::Ask { .. } | Step::Hide { .. } | Step::Cancel { .. } => {
                     self.popovers.plan.pop_front();
                 }
             }
@@ -508,7 +594,7 @@ impl Page {
     /// Take `popover` out of the top layer. A focus inside it goes where it
     /// was before it opened with `focus_back`, else away. The events: the
     /// focus's, then a `toggle`.
-    fn close_popover(&mut self, popover: NodeId, focus_back: bool) -> Vec<Event> {
+    pub(crate) fn close_popover(&mut self, popover: NodeId, focus_back: bool) -> Vec<Event> {
         self.touch_top_layer(None);
         self.doc.remove_from_top_layer(popover);
         let before = self.forget_focus(popover);

@@ -6,7 +6,8 @@
 //! closes, and a `close`.
 //!
 //! What the host does itself raises no event, as with a `details`' `open`
-//! or a popover it shows: it knows what it did.
+//! or a popover it shows: it knows what it did. A button's command
+//! (command.rs) shows, closes or asks to close one for the user.
 
 use erk_dom::{NodeId, local_name};
 
@@ -34,18 +35,32 @@ impl Page {
 
     /// Show dialog `node` as DOM's `show()` does, or `showModal()` with
     /// `modal`: it gets `open`, a modal one joins the top layer, and the
-    /// focus goes into it. Showing one already shown the same way does
+    /// focus goes into it. A modal one closes the open `auto` popovers that
+    /// are not its ancestors. Showing one already shown the same way does
     /// nothing; `InvalidArgument` for an element that is not a dialog, one
     /// shown the other way, an open popover, or a modal one outside the
     /// document.
     pub(crate) fn show_dialog(&mut self, node: u64, modal: bool) -> Result<(), Status> {
         let id = self.node(node)?;
+        self.show_dialog_now(id, modal, false).map(drop)
+    }
+
+    /// Show dialog `id` (see [`Page::show_dialog`]). With `events`, the
+    /// user showed it (a button's command, whose plan closed the popovers
+    /// first): the events of the focus and of popovers closing now come
+    /// back. The host's own change sends none.
+    pub(crate) fn show_dialog_now(
+        &mut self,
+        id: NodeId,
+        modal: bool,
+        events: bool,
+    ) -> Result<Vec<Event>, Status> {
         if !self.is_dialog(id) {
             return Err(Status::InvalidArgument);
         }
         if self.has_open(id) {
             return if self.doc.is_modal(id) == modal {
-                Ok(())
+                Ok(Vec::new())
             } else {
                 Err(Status::InvalidArgument)
             };
@@ -55,6 +70,13 @@ impl Page {
         {
             return Err(Status::InvalidArgument);
         }
+        let mut out = Vec::new();
+        if modal {
+            let ancestor = self.popover_ancestor(id);
+            for popover in self.autos_above(ancestor).into_iter().rev() {
+                out.extend(self.close_popover(popover, false));
+            }
+        }
         self.journal.touch(&self.doc, id);
         self.doc.set_attr(id, "open", "").map_err(status)?;
         if modal {
@@ -63,12 +85,12 @@ impl Page {
         }
         let focus = self.focus.filter(|focus| !self.inside(*focus, id));
         self.remember_focus(id, focus);
-        // The host's own change: no focus events. It shows unless the
-        // user's last input was the pointer's.
+        // It shows unless the user's last input was the pointer's, as a
+        // focus a script moves does in browsers.
         let control = self.focus_delegate(id).unwrap_or(id);
         let visible = !self.pointer_last;
-        self.move_focus(Some(control), Modifiers::default(), visible);
-        Ok(())
+        out.extend(self.move_focus(Some(control), Modifiers::default(), visible));
+        Ok(if events { out } else { Vec::new() })
     }
 
     /// Where the focus goes in a dialog that opens (HTML's dialog focusing

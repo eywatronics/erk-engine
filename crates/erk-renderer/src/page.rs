@@ -11,6 +11,7 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+mod command;
 mod dialog;
 mod popover;
 
@@ -1744,6 +1745,8 @@ impl Page {
             y,
             modifiers,
             key: None,
+            command: None,
+            source: None,
         }
     }
 
@@ -1823,10 +1826,13 @@ impl Page {
             if let Some(details) = self.details_of_summary(current) {
                 break details;
             }
-            // A link or a control does what it does itself: a popover's
-            // button opens or closes it.
+            // A link or a control does what it does itself: a button runs
+            // its command, or opens or closes its popover.
             if self.interactive(current) {
-                return self.invoke_popover(current).unwrap_or_default();
+                return self
+                    .invoke_command(current)
+                    .or_else(|| self.invoke_popover(current))
+                    .unwrap_or_default();
             }
             node = self.doc.node(current).and_then(|found| found.parent());
         };
@@ -1878,8 +1884,8 @@ impl Page {
 
     /// Click the elements a `<meta name="erk-press" content="id …">` names,
     /// in order, as DOM's `click()` does: what each click does by default,
-    /// with nothing prevented, and no focus moved. `show-modal:id` shows
-    /// that dialog as DOM's `showModal()` does instead. What the
+    /// with nothing prevented and the events that follow dispatched
+    /// alike, and no focus moved by the click itself. What the
     /// render_html family draws a page with a popover or a dialog open
     /// from; the reference tests do the same in Chrome.
     pub(crate) fn press_from_meta(&mut self) {
@@ -1900,28 +1906,31 @@ impl Page {
             }
         }
         for token in ids {
-            if let Some(id) = token.strip_prefix("show-modal:") {
-                if let Some(dialog) = self.element_with_id(id) {
-                    let _ = self.show_dialog(dialog.to_bits(), true);
-                }
-                continue;
-            }
             let Some(target) = self.element_with_id(&token) else {
                 continue;
             };
             let mut queue: Vec<Event> = self.click_default(target);
             queue.reverse();
             while let Some(event) = queue.pop() {
-                if event.kind != EventKind::BeforeToggle {
-                    continue;
-                }
-                let Some(at) = NodeId::from_bits(event.target) else {
-                    continue;
-                };
-                let mut follow = self.after_before_toggle(at, false);
+                let mut follow = self.follow(&event, false);
                 follow.reverse();
                 queue.extend(follow);
             }
+        }
+    }
+
+    /// What follows `event` once the host dispatched it (see
+    /// [`crate::Engine::follow`]).
+    pub(crate) fn follow(&mut self, event: &Event, prevented: bool) -> Vec<Event> {
+        let Some(target) = NodeId::from_bits(event.target) else {
+            return Vec::new();
+        };
+        match event.kind {
+            EventKind::Click if !prevented => self.click_default(target),
+            EventKind::BeforeToggle => self.after_before_toggle(target, prevented),
+            EventKind::Cancel => self.after_cancel(target, prevented),
+            EventKind::Command => self.after_command(target, prevented),
+            _ => Vec::new(),
         }
     }
 

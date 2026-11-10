@@ -228,19 +228,12 @@ impl Engine {
     /// the events that follow the same way, each before the next. A click
     /// not prevented does what it does by default: a press in a
     /// `details`' summary opens or closes it, a popover's button opens or
-    /// closes its popover (M5.9). A popover's `beforetoggle` lets it open,
-    /// unless prevented, or close.
+    /// closes its popover, a button with `commandfor` sends a `command`
+    /// (M5.9). A popover's `beforetoggle` lets it open, unless prevented,
+    /// or close; a dialog's `cancel` lets it close, a `command` its
+    /// built-in command run.
     pub fn follow(&mut self, event: &Event, prevented: bool) -> Vec<Event> {
-        use crate::messages::EventKind;
-        let Some(target) = NodeId::from_bits(event.target) else {
-            return Vec::new();
-        };
-        let events = match event.kind {
-            EventKind::Click if !prevented => self.page.click_default(target),
-            EventKind::BeforeToggle => self.page.after_before_toggle(target, prevented),
-            EventKind::Cancel => self.page.after_cancel(target, prevented),
-            _ => Vec::new(),
-        };
+        let events = self.page.follow(event, prevented);
         self.changed |= !events.is_empty();
         events
     }
@@ -4109,5 +4102,339 @@ mod tests {
         engine.show_modal_dialog(d).unwrap();
         checked_frame(&mut engine);
         assert_eq!(engine.inspect_at(10.0, 10.0), Some(d));
+    }
+
+    /// The kinds and targets of the `command`, `beforetoggle`, `toggle`,
+    /// `cancel` and `close` events among `events`: what commands did.
+    fn commands(events: &[Event]) -> Vec<(EventKind, u64)> {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    EventKind::Command
+                        | EventKind::BeforeToggle
+                        | EventKind::Toggle
+                        | EventKind::Cancel
+                        | EventKind::Close
+                )
+            })
+            .map(|event| (event.kind, event.target))
+            .collect()
+    }
+
+    /// The `command` event among `events`.
+    fn command_event(events: &[Event]) -> &Event {
+        events
+            .iter()
+            .find(|event| event.kind == EventKind::Command)
+            .unwrap_or_else(|| panic!("a command event"))
+    }
+
+    /// A press on `id`, dispatched by a host that prevents the events of
+    /// kind `prevent` and nothing else: every event, in order.
+    fn press_preventing(engine: &mut Engine, id: u64, prevent: EventKind) -> Vec<Event> {
+        fn deliver_preventing(engine: &mut Engine, event: Event, prevent: EventKind) -> Vec<Event> {
+            let follow = engine.follow(&event, event.kind == prevent);
+            let mut events = vec![event];
+            for next in follow {
+                events.extend(deliver_preventing(engine, next, prevent));
+            }
+            events
+        }
+        let (x, y) = middle_of(engine, id);
+        let mut events = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            for event in engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            }) {
+                events.extend(deliver_preventing(engine, event, prevent));
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn a_buttons_command_opens_and_closes_popovers_after_a_command_event() {
+        let mut engine = popover_page(
+            "<style>#menu, #alt, #note { inset: auto; margin: 0; left: 0; width: 80px; \
+             height: 20px; padding: 0 } #menu { top: 100px } #alt { top: 130px } \
+             #note { top: 160px }</style>\
+             <button id=t commandfor=menu command=toggle-popover>t</button>\
+             <button id=s commandfor=note command=SHOW-Popover>s</button>\
+             <button id=h commandfor=note command=hide-popover>h</button>\
+             <div id=menu popover><button id=sub commandfor=alt command=toggle-popover>\
+             sub</button></div><div id=alt popover>alt</div><div id=note popover=manual>n</div>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (t, s, h, sub) = (id("t"), id("s"), id("h"), id("sub"));
+        let (menu, alt, note) = (id("menu"), id("alt"), id("note"));
+        let (body, html) = (
+            engine.query(None, "body").unwrap().unwrap(),
+            engine.query(None, "html").unwrap().unwrap(),
+        );
+        // The command event first, telling the command and its button; then
+        // the popover opens as one its own button opens.
+        let events = press_on(&mut engine, t);
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::Command, menu),
+                (EventKind::BeforeToggle, menu),
+                (EventKind::Toggle, menu)
+            ]
+        );
+        let command = command_event(&events);
+        assert_eq!(command.command.as_deref(), Some("toggle-popover"));
+        assert_eq!(command.source, Some(t));
+        assert_eq!(command.path, [menu, body, html]);
+        checked_frame(&mut engine);
+        // A button in the menu opens another above it, which keeps it.
+        press_on(&mut engine, sub);
+        assert_eq!(open_popovers(&engine), [menu, alt]);
+        checked_frame(&mut engine);
+        // A press on the menu's button counts as one in the menu: what is
+        // above it closes, then the command closes it, and it stays closed.
+        let events = press_on(&mut engine, t);
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::BeforeToggle, alt),
+                (EventKind::Toggle, alt),
+                (EventKind::Command, menu),
+                (EventKind::BeforeToggle, menu),
+                (EventKind::Toggle, menu)
+            ]
+        );
+        checked_frame(&mut engine);
+        // A keyword in any case; the event names it as HTML does. Showing an
+        // open one tells the host and does nothing else.
+        let events = press_on(&mut engine, s);
+        assert_eq!(open_popovers(&engine), [note]);
+        assert_eq!(
+            command_event(&events).command.as_deref(),
+            Some("show-popover")
+        );
+        assert_eq!(
+            commands(&press_on(&mut engine, s)),
+            [(EventKind::Command, note)]
+        );
+        assert_eq!(open_popovers(&engine), [note]);
+        checked_frame(&mut engine);
+        let events = press_on(&mut engine, h);
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::Command, note),
+                (EventKind::BeforeToggle, note),
+                (EventKind::Toggle, note)
+            ]
+        );
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_command_prevented_custom_or_unknown_does_nothing_but_tell() {
+        let mut engine = popover_page(
+            "<button id=custom commandfor=p command=--Yenile>c</button>\
+             <button id=unknown commandfor=p command=ac popovertarget=p>u</button>\
+             <button id=wrong commandfor=d command=toggle-popover>w</button>\
+             <button id=none commandfor=p>n</button>\
+             <button id=t commandfor=p command=toggle-popover>t</button>\
+             <form><button id=submit type=submit commandfor=p command=toggle-popover>s\
+             </button><button id=auto commandfor=p command=toggle-popover>a</button></form>\
+             <div id=p popover>p</div><dialog id=d>d</dialog>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (custom, unknown, wrong, none, t) = (
+            id("custom"),
+            id("unknown"),
+            id("wrong"),
+            id("none"),
+            id("t"),
+        );
+        let (submit, auto, p) = (id("submit"), id("auto"), id("p"));
+        // A custom command is the host's: the event, as written, and no more.
+        let events = press_on(&mut engine, custom);
+        assert_eq!(commands(&events), [(EventKind::Command, p)]);
+        let command = command_event(&events);
+        assert_eq!(command.command.as_deref(), Some("--Yenile"));
+        assert_eq!(command.source, Some(custom));
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        // One HTML does not know, or none, does nothing, and the button's
+        // `popovertarget` is not used either; a popover command at a
+        // dialog without `popover` sends no event.
+        for button in [unknown, none, wrong] {
+            assert_eq!(commands(&press_on(&mut engine, button)), []);
+        }
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        // Prevented, a built-in command does not run.
+        let events = press_preventing(&mut engine, t, EventKind::Command);
+        assert_eq!(commands(&events), [(EventKind::Command, p)]);
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        // A form's submit button submits; one without a type is a plain
+        // button when it has `commandfor`.
+        assert_eq!(commands(&press_on(&mut engine, submit)), []);
+        press_on(&mut engine, auto);
+        assert_eq!(open_popovers(&engine), [p]);
+        checked_frame(&mut engine);
+        // Nor does its `popovertarget` make a press on it one in that
+        // popover: it is outside, and light dismiss closes the popover.
+        press_on(&mut engine, unknown);
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_buttons_command_shows_closes_and_asks_to_close_a_dialog() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } #menu { inset: auto; top: 150px; left: 0; margin: 0; \
+             width: 60px; height: 20px; padding: 0 }</style>\
+             <button id=open commandfor=d command=show-modal>o</button>\
+             <button id=pm popovertarget=menu>m</button><div id=menu popover>\
+             <button id=inner commandfor=d command=show-modal>i</button></div>\
+             <dialog id=d><button id=yes commandfor=d command=close value=evet>y</button>\
+             <button id=ask commandfor=d command=request-close value=belki>a</button>\
+             <button id=keep commandfor=d command=close>k</button></dialog>\
+             <dialog id=fixed closedby=none><button id=go commandfor=fixed \
+             command=request-close>g</button></dialog>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (open, pm, menu, d) = (id("open"), id("pm"), id("menu"), id("d"));
+        let inner = id("inner");
+        let (yes, ask, keep, fixed, go) = (id("yes"), id("ask"), id("keep"), id("fixed"), id("go"));
+        press_on(&mut engine, pm);
+        assert_eq!(open_popovers(&engine), [menu]);
+        checked_frame(&mut engine);
+        // Showing it as modal from a button in a popover (no light dismiss)
+        // closes the popover first, which tells; the focus goes in, with
+        // its events.
+        let events = press_on(&mut engine, inner);
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::Command, d),
+                (EventKind::BeforeToggle, menu),
+                (EventKind::Toggle, menu)
+            ]
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == EventKind::Focus && event.target == yes)
+        );
+        assert_eq!(engine.query_all(None, ":modal").unwrap(), [d]);
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        assert_eq!(focused(&mut engine), Some(yes));
+        checked_frame(&mut engine);
+        press_on(&mut engine, yes);
+        checked_frame(&mut engine);
+        // Closing it with the button's value: a close, the focus back.
+        press_on(&mut engine, open);
+        checked_frame(&mut engine);
+        assert_eq!(focused(&mut engine), Some(yes));
+        let events = press_on(&mut engine, yes);
+        assert_eq!(
+            commands(&events),
+            [(EventKind::Command, d), (EventKind::Close, d)]
+        );
+        assert_eq!(engine.dialog_return_value(d).unwrap(), "evet");
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        assert_eq!(focused(&mut engine), Some(open));
+        checked_frame(&mut engine);
+        // Asking first: a cancel the host can prevent.
+        press_on(&mut engine, open);
+        checked_frame(&mut engine);
+        let events = press_preventing(&mut engine, ask, EventKind::Cancel);
+        assert_eq!(
+            commands(&events),
+            [(EventKind::Command, d), (EventKind::Cancel, d)]
+        );
+        assert_eq!(engine.query_all(None, ":modal").unwrap(), [d]);
+        let events = press_on(&mut engine, ask);
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::Command, d),
+                (EventKind::Cancel, d),
+                (EventKind::Close, d)
+            ]
+        );
+        assert_eq!(engine.dialog_return_value(d).unwrap(), "belki");
+        checked_frame(&mut engine);
+        // A button without a value keeps the last.
+        press_on(&mut engine, open);
+        checked_frame(&mut engine);
+        press_on(&mut engine, keep);
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        assert_eq!(engine.dialog_return_value(d).unwrap(), "belki");
+        // Escape cannot close one with `closedby=none`, but its button can
+        // ask; a dialog shown without modal takes the commands too.
+        engine.show_dialog(fixed).unwrap();
+        checked_frame(&mut engine);
+        let events = press_on(&mut engine, go);
+        assert_eq!(
+            commands(&events),
+            [
+                (EventKind::Command, fixed),
+                (EventKind::Cancel, fixed),
+                (EventKind::Close, fixed)
+            ]
+        );
+        assert_eq!(engine.attr(fixed, "open"), Ok(None));
+        checked_frame(&mut engine);
+        // The host showing it as modal closes the popovers too, telling
+        // nothing.
+        press_on(&mut engine, pm);
+        assert_eq!(open_popovers(&engine), [menu]);
+        engine.show_modal_dialog(d).unwrap();
+        assert_eq!(open_popovers(&engine), Vec::<u64>::new());
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_command_at_an_element_taken_out_of_the_document_meanwhile_does_not_run() {
+        let mut engine = popover_page(
+            "<button id=c commandfor=d command=close>c</button>\
+             <div id=box><dialog id=d open>d</dialog></div>",
+        );
+        let (c, d, holder) = (
+            query_id(&engine, "c"),
+            query_id(&engine, "d"),
+            query_id(&engine, "box"),
+        );
+        let (x, y) = middle_of(&engine, c);
+        let mut kinds = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            let mut queue = engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            });
+            queue.reverse();
+            while let Some(event) = queue.pop() {
+                kinds.push(event.kind);
+                // A subscription moves the dialog's box out of the document.
+                if event.kind == EventKind::Command {
+                    let outside = engine.create_element("div").unwrap();
+                    engine.insert(outside, holder, None).unwrap();
+                }
+                let mut next = engine.follow(&event, false);
+                next.reverse();
+                queue.extend(next);
+            }
+        }
+        assert!(kinds.contains(&EventKind::Command));
+        assert!(!kinds.contains(&EventKind::Close));
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+        checked_frame(&mut engine);
     }
 }
