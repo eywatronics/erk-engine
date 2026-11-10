@@ -78,6 +78,12 @@ impl Frame {
 /// Parse, style, lay out and paint `html` in a `width` × `height` viewport
 /// at one device pixel per CSS pixel. No resource is loaded: images render
 /// as missing.
+///
+/// The render_html family draws a page as it loads, but for one thing a
+/// still picture cannot get otherwise: the page may name, in a
+/// `<meta name="erk-press" content="id …">`, elements clicked in order
+/// before it is drawn, as DOM's `click()` would, so that a popover shows
+/// open. The reference tests click the same in Chrome.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
     render_document(
         html,
@@ -207,7 +213,15 @@ pub(crate) fn render_document(
     resources: &mut Resources,
     tables: &mut tables::Tables,
 ) -> (Frame, Vec<ResourceRequest>) {
-    Page::parse(html).render(width, height, scale, resources, tables)
+    reference_page(html).render(width, height, scale, resources, tables)
+}
+
+/// `html`'s page with the elements its `erk-press` meta names clicked (see
+/// [`render_html`]).
+fn reference_page(html: &str) -> Page {
+    let mut page = Page::parse(html);
+    page.press_from_meta();
+    page
 }
 
 /// The border box of every element of `html`'s body that generates a box,
@@ -221,7 +235,7 @@ pub fn element_boxes(
     provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
 ) -> Vec<ElementBox> {
     let (w, h) = (f32::from(width), f32::from(height));
-    let doc = Document::parse_html(html);
+    let doc = reference_page(html).into_document();
     let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
     let mut resources = Resources::default();
     let requests = resources.requests(&doc, &styles);
@@ -260,7 +274,7 @@ pub fn text_boxes(
     provide: &mut dyn FnMut(&ResourceRequest) -> Option<ResourceResponse>,
 ) -> Vec<TextBox> {
     let (w, h) = (f32::from(width), f32::from(height));
-    let doc = Document::parse_html(html);
+    let doc = reference_page(html).into_document();
     let styles = StyleEngine::with_font_metrics(w, h, Arc::new(EmbeddedFontMetrics)).style(&doc);
     let mut resources = Resources::default();
     let requests = resources.requests(&doc, &styles);

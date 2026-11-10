@@ -514,6 +514,16 @@ gerekçeli bir daraltma:
   varsayılan işidir: tıklama aboneliklerinden biri onu iptal ederse
   (`erk_event_prevent_default`) açılmaz. Host `open`'ı kendisi koyarsa
   olay yoktur.
+- **v0.16 (M5.9):** `ERK_EVENT_BEFORETOGGLE` (10): bir popover açılmadan
+  ya da kapanmadan önce ona gelir, kabarcıklanmaz; ardından
+  `ERK_EVENT_TOGGLE`. Açılırken `erk_event_prevent_default` açılmayı
+  durdurur; kapanırken iptal edilemez, abonelik popover'ı hâlâ açık
+  görür. Olaylar teker teker dağıtılır: bir olayın abonelikleri bitmeden
+  arkasından gelen iş yapılmaz (`beforetoggle` iptal edilmediyse açılış,
+  sonra `toggle`). Popover'ı yalnızca düğmeleri, dışarıya basış ve
+  Escape açıp kapatır; host'un açıp kapatması `<dialog>`'un C-ABI'siyle
+  gelir. Host popover'ı taşır, siler ya da `popover` durumunu
+  değiştirirse popover olaysız kapanır.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -1,0 +1,17 @@
+0 body block 0 20 800 256
+1 div block 20 20 556 256
+2 button inline-block 38 34 62.609375 30
+3 button inline-block 110.515625 34 47.890625 30
+4 button inline-block 168.3125 34 106.96875 30
+5 p block 38 85 520 40
+6 div block 38 140 520 36
+7 p block 38 191 520 20
+8 div block 38 226 520 36
+9 button inline-block 38 226 65.046875 30
+10 div block 30 380 317.1875 36
+11 div block 300.21875 261.25 199.5625 77.5
+12 p block 306.96875 272 186.0625 20
+13 button inline-block 306.96875 296 85.796875 30
+14 div block 244.5 150 365.5 44
+15 div block 30 512 246 58
+16 div none 0 0 0 0

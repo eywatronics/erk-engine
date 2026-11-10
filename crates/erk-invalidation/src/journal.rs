@@ -33,6 +33,10 @@ pub struct State {
     /// What an input method is composing in a text field, also drawn in
     /// it.
     composition: Option<Composition>,
+    /// Where the element is in the top layer, counted from the bottom: an
+    /// open popover is drawn above the page and laid out against the
+    /// viewport (M5.9).
+    layer: Option<usize>,
 }
 
 impl State {
@@ -59,6 +63,7 @@ impl State {
             children: doc.children(id).collect(),
             value: doc.value_set(id).map(str::to_owned),
             composition: doc.composition(id).cloned(),
+            layer: doc.top_layer().iter().position(|entry| *entry == id),
         }
     }
 }
@@ -90,12 +95,18 @@ pub struct Changes {
     /// Form controls whose value was set to another, or text fields whose
     /// composition changed: what the field shows.
     pub values: Vec<NodeId>,
+    /// Elements that joined or left the top layer, or moved in it.
+    pub layers: Vec<NodeId>,
 }
 
 impl Changes {
     /// How many changes there are.
     pub fn count(&self) -> usize {
-        self.text.len() + self.attrs.len() + self.children.len() + self.values.len()
+        self.text.len()
+            + self.attrs.len()
+            + self.children.len()
+            + self.values.len()
+            + self.layers.len()
     }
 
     /// The changes between `before` and `after`, for one node.
@@ -125,6 +136,9 @@ impl Changes {
         if before.value != after.value || before.composition != after.composition {
             self.values.push(id);
         }
+        if before.layer != after.layer {
+            self.layers.push(id);
+        }
     }
 
     fn sort(&mut self) {
@@ -132,6 +146,7 @@ impl Changes {
         self.attrs.sort_by_key(|change| change.node.index());
         self.children.sort_by_key(|id| id.index());
         self.values.sort_by_key(|id| id.index());
+        self.layers.sort_by_key(|id| id.index());
     }
 }
 
@@ -164,8 +179,8 @@ impl Journal {
         }
     }
 
-    /// `id` is about to change: its text, its attributes, its children or
-    /// its value.
+    /// `id` is about to change: its text, its attributes, its children,
+    /// its value or its place in the top layer.
     /// The first touch this frame keeps its state before.
     pub fn touch(&mut self, doc: &Document, id: NodeId) {
         self.recorded += 1;
@@ -434,5 +449,36 @@ mod tests {
             assert_eq!(changes.values, [t]);
             assert_eq!(changes, difference(&before, &doc));
         }
+    }
+
+    #[test]
+    fn joining_leaving_or_moving_in_the_top_layer_is_a_change_of_the_element() {
+        let mut doc = doc("<div id=a></div><div id=b></div>");
+        let (a, b) = (find(&doc, "a"), find(&doc, "b"));
+        let mut journal = Journal::default();
+        let before = snapshot(&doc);
+        journal.touch(&doc, a);
+        doc.add_to_top_layer(a).unwrap();
+        journal.touch(&doc, b);
+        doc.add_to_top_layer(b).unwrap();
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.layers, [a, b]);
+        assert_eq!(changes.count(), 2);
+        assert_eq!(changes, difference(&before, &doc));
+        // A goes, then comes back on top: B moved down, A up.
+        let before = snapshot(&doc);
+        journal.touch(&doc, a);
+        journal.touch(&doc, b);
+        doc.remove_from_top_layer(a);
+        doc.add_to_top_layer(a).unwrap();
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.layers, [a, b]);
+        assert_eq!(changes, difference(&before, &doc));
+        // Out and back in where it was: nothing.
+        journal.touch(&doc, b);
+        journal.touch(&doc, a);
+        doc.remove_from_top_layer(a);
+        doc.add_to_top_layer(a).unwrap();
+        assert_eq!(journal.take(&doc).0, Changes::default());
     }
 }

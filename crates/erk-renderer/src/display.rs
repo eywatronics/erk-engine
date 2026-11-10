@@ -386,7 +386,13 @@ impl Content {
             extents: cull.and_then(|cull| cull.extents),
             transformed: std::cell::Cell::new(0),
         };
-        let items = stacking_context(&walk, doc.root());
+        let mut items = stacking_context(&walk, doc.root());
+        // The top layer above everything, the last added on top, each
+        // element its own stacking context outside its ancestors' (CSS
+        // Position 4 §3): no ancestor's opacity or transform applies.
+        for id in doc.top_layer() {
+            items.extend(stacking_context(&walk, *id));
+        }
         let (items, moves) = clipped(items, scrolling);
         let content = Self {
             canvas: list.canvas,
@@ -906,6 +912,10 @@ fn scroll_bars(scrolling: &Scrolling, index: usize) -> impl Iterator<Item = Disp
 /// children's. A positioned element other than the context's own root
 /// becomes a layer instead.
 fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: bool) {
+    // Painted after the page, in the top layer.
+    if !context_root && walk.doc.in_top_layer(id) {
+        return;
+    }
     let Some(layout) = walk.layouts.get(id) else {
         // An element without a box (an inline element) can contain one
         // that has a box (an atomic inline), positioned relative to the

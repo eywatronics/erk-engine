@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 15
+#define ERK_ABI_VERSION 16
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -135,9 +135,16 @@
 
 /*
  A `details` element opened or closed because the user pressed its
- summary (not when the host sets `open`); it does not bubble.
+ summary, or a popover opened or closed (not when the host sets `open`
+ or `popover`); it does not bubble.
  */
 #define ERK_EVENT_TOGGLE 9
+
+/*
+ A popover is about to open or close; it does not bubble.
+ `erk_event_prevent_default` keeps one that was opening closed.
+ */
+#define ERK_EVENT_BEFORETOGGLE 10
 
 #define ERK_PHASE_CAPTURE 1
 

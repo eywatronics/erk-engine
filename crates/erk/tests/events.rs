@@ -543,3 +543,56 @@ fn a_summary_opens_its_details_with_a_toggle_that_does_not_bubble() {
     assert_eq!(app.attr(d, "open"), Ok(Some(String::new())));
     assert_eq!(*log.borrow(), ["details Target"]);
 }
+
+#[test]
+fn a_popover_asks_with_a_beforetoggle_the_host_can_cancel_and_neither_event_bubbles() {
+    let mut app = app("<body style='margin: 0'><button id=b popovertarget=p \
+         style='display: inline-block; height: 20px'>b</button><div id=p popover>p</div>");
+    let p = node(&app, "#p");
+    let log: Log = Rc::default();
+    for (at, name) in [(p, "popover"), (node(&app, "body"), "body")] {
+        for kind in [EventKind::BeforeToggle, EventKind::Toggle] {
+            let log = log.clone();
+            app.on(at, kind, move |_, event| {
+                log.borrow_mut()
+                    .push(format!("{name} {:?} {:?}", event.kind, event.phase));
+            })
+            .unwrap();
+        }
+    }
+    let open = |app: &App| app.query_all(None, ":popover-open").unwrap();
+    // Cancelled: asked, and it stays closed.
+    let cancel = app
+        .on(p, EventKind::BeforeToggle, |cx, _| cx.prevent_default())
+        .unwrap();
+    app.click(5.0, 5.0);
+    assert!(open(&app).is_empty());
+    assert_eq!(*log.borrow(), ["popover BeforeToggle Target"]);
+    // Let through: asked, then opened, the host seeing it closed when
+    // asked; neither reaches the body.
+    app.off(cancel).unwrap();
+    log.borrow_mut().clear();
+    let seen: Rc<RefCell<Vec<usize>>> = Rc::default();
+    let watch = {
+        let seen = seen.clone();
+        app.on(p, EventKind::BeforeToggle, move |cx, _| {
+            seen.borrow_mut()
+                .push(cx.query_all(None, ":popover-open").unwrap().len());
+        })
+        .unwrap()
+    };
+    app.click(5.0, 5.0);
+    assert_eq!(open(&app), [p]);
+    assert_eq!(
+        *log.borrow(),
+        ["popover BeforeToggle Target", "popover Toggle Target"]
+    );
+    // Closing cannot be cancelled; the host sees it still open when told.
+    let _cancel = app
+        .on(p, EventKind::BeforeToggle, |cx, _| cx.prevent_default())
+        .unwrap();
+    app.click(5.0, 5.0);
+    assert!(open(&app).is_empty());
+    assert_eq!(*seen.borrow(), [0, 1]);
+    app.off(watch).unwrap();
+}

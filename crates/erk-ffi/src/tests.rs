@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_15() {
-    assert_eq!(erk_abi_version(), 15);
+fn the_abi_version_is_0_16() {
+    assert_eq!(erk_abi_version(), 16);
 }
 
 #[test]
@@ -1295,5 +1295,83 @@ fn a_toggle_reaches_c_when_a_summary_is_pressed() {
         assert_eq!(erk_app_input(app, &press), ERK_OK);
     }
     assert_eq!(last.kind.load(Ordering::SeqCst), ERK_EVENT_TOGGLE);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[allow(unsafe_code)] // SAFETY: a C callback; reads nothing through its pointers.
+unsafe extern "C" fn cancel(_: *mut c_void, app: *mut ErkApp, _: *const ErkEvent) {
+    let _ = erk_event_prevent_default(app);
+}
+
+#[test]
+fn a_beforetoggle_reaches_c_and_cancelled_keeps_a_popover_closed() {
+    let app = app_with(
+        "<body style='margin: 0'><button popovertarget=p \
+         style='display: inline-block; height: 20px'>b</button><div id=p popover>p</div>",
+    );
+    let p = query(app, "#p");
+    let (asked, told) = (LastKey::default(), LastKey::default());
+    let mut subscription = 0;
+    for (kind, last) in [(ERK_EVENT_BEFORETOGGLE, &asked), (ERK_EVENT_TOGGLE, &told)] {
+        assert_eq!(
+            erk_on(
+                app,
+                p,
+                kind,
+                Some(remember_key),
+                std::ptr::from_ref(last).cast_mut().cast(),
+                None,
+                &mut subscription
+            ),
+            ERK_OK
+        );
+    }
+    let mut cancelling = 0;
+    assert_eq!(
+        erk_on(
+            app,
+            p,
+            ERK_EVENT_BEFORETOGGLE,
+            Some(cancel),
+            std::ptr::null_mut(),
+            None,
+            &mut cancelling
+        ),
+        ERK_OK
+    );
+    let press = |app| {
+        for kind in [ERK_INPUT_POINTER_DOWN, ERK_INPUT_POINTER_UP] {
+            let input = ErkInput {
+                struct_size: size_of::<ErkInput>() as u32,
+                kind,
+                x: 5.0,
+                y: 5.0,
+                dx: 0.0,
+                dy: 0.0,
+                button: ERK_BUTTON_PRIMARY,
+                key: 0,
+                text: s(""),
+                modifiers: 0,
+                caret: 0,
+            };
+            assert_eq!(erk_app_input(app, &input), ERK_OK);
+        }
+    };
+    let open = |app| {
+        let mut found = ERK_NODE_NONE;
+        assert_eq!(
+            erk_query(app, ERK_NODE_NONE, s(":popover-open"), &mut found),
+            ERK_OK
+        );
+        found
+    };
+    press(app);
+    assert_eq!(asked.kind.load(Ordering::SeqCst), ERK_EVENT_BEFORETOGGLE);
+    assert_eq!(told.kind.load(Ordering::SeqCst), 0);
+    assert_eq!(open(app), ERK_NODE_NONE);
+    assert_eq!(erk_off(app, cancelling), ERK_OK);
+    press(app);
+    assert_eq!(told.kind.load(Ordering::SeqCst), ERK_EVENT_TOGGLE);
+    assert_eq!(open(app), p);
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }

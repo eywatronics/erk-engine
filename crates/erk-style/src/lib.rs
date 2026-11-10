@@ -390,7 +390,8 @@ fn primary(slot: &Slot) -> Option<Arc<ComputedValues>> {
 }
 
 /// Each arena slot's element state: a link's, an open `details` or
-/// `dialog`'s (`:open`, from its `open` attribute), and what `interaction`
+/// `dialog`'s (`:open`, from its `open` attribute), an open popover's
+/// (`:popover-open`: one in the top layer), and what `interaction`
 /// puts on the element under the pointer, the pressed one and the focused
 /// one and on their ancestors.
 fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
@@ -412,6 +413,15 @@ fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
                 *state = ElementState::OPEN;
             }
             _ => {}
+        }
+    }
+    for id in doc.top_layer() {
+        let popover = doc
+            .node(*id)
+            .and_then(|node| node.as_element())
+            .is_some_and(|element| element.attr(&local_name!("popover")).is_some());
+        if popover {
+            states[id.index() as usize] |= ElementState::POPOVER_OPEN;
         }
     }
     let mut mark = |node: Option<NodeId>, own: ElementState, inherited: ElementState| {

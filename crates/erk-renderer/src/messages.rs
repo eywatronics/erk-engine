@@ -227,8 +227,13 @@ pub enum EventKind {
     /// `target` lost the focus.
     Blur = 8,
     /// A `details` element opened or closed because the user pressed its
-    /// summary; not when the host sets `open` (M5.9). It does not bubble.
+    /// summary, or a popover opened or closed (M5.9); not when the host
+    /// sets `open` or `popover`. It does not bubble.
     Toggle = 9,
+    /// A popover is about to open or close, at the popover; it does not
+    /// bubble. Preventing its default keeps one that was opening closed;
+    /// one that is closing closes anyway (M5.9).
+    BeforeToggle = 10,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

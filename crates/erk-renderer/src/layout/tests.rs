@@ -113,6 +113,17 @@ fn display_none_generates_no_box() {
 }
 
 #[test]
+fn an_out_of_flow_element_with_display_none_generates_no_box() {
+    // Between blocks and inside a line: a closed popover is both fixed and
+    // display: none.
+    let (doc, layouts) = lay_out(
+        r#"<div style="position: fixed; display: none"></div><p>a<b>c<span style="position: absolute; display: none"></span></b>b</p>"#,
+    );
+    assert!(layouts.get(all(&doc, &local_name!("div"))[0]).is_none());
+    assert!(layouts.get(all(&doc, &local_name!("span"))[0]).is_none());
+}
+
+#[test]
 fn calc_widths_resolve_against_the_container() {
     let (doc, layouts) = lay_out(r#"<div style="width: calc(50% - 20px); height: 10px"></div>"#);
     assert_eq!(divs(&doc, &layouts)[0].size.width, WIDTH / 2.0 - 20.0);
