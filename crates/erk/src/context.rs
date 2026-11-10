@@ -252,6 +252,54 @@ impl Context {
         Ok(self.engine.set_attr(self.inward(node), name, value)?)
     }
 
+    /// Show dialog `node` as DOM's `show()` does (M5.9): it gets `open`
+    /// and the focus goes into it. Nothing for one already shown so;
+    /// `InvalidArgument` for an element that is not a dialog, or a modal
+    /// one. No event follows: the host knows what it did.
+    pub fn show_dialog(&mut self, node: Node) -> Result<(), Status> {
+        Ok(self.engine.show_dialog(self.inward(node))?)
+    }
+
+    /// Show dialog `node` as DOM's `showModal()` does (M5.9): in the top
+    /// layer, a backdrop behind it, the page behind it inert, the focus
+    /// inside it. Escape then asks it to close: a `Cancel` event, whose
+    /// default closes it, then `Close`. Nothing for a modal one;
+    /// `InvalidArgument` for an element that is not a dialog, one shown
+    /// otherwise, an open popover, or one outside the document. No event.
+    pub fn show_modal_dialog(&mut self, node: Node) -> Result<(), Status> {
+        Ok(self.engine.show_modal_dialog(self.inward(node))?)
+    }
+
+    /// Close dialog `node` as DOM's `close()` does, its return value
+    /// becoming `value` if given (M5.9); the focus goes back where it
+    /// was. Nothing for a closed one; `InvalidArgument` for an element that
+    /// is not a dialog. No event.
+    pub fn close_dialog(&mut self, node: Node, value: Option<&str>) -> Result<(), Status> {
+        Ok(self.engine.close_dialog(self.inward(node), value)?)
+    }
+
+    /// Dialog `node`'s return value, DOM's `returnValue`: what it was last
+    /// closed with, empty until then (M5.9). `InvalidArgument` for an
+    /// element that is not a dialog.
+    pub fn dialog_return_value(&self, node: Node) -> Result<String, Status> {
+        Ok(self.engine.dialog_return_value(self.inward(node))?)
+    }
+
+    /// Show popover `node` as DOM's `showPopover()` does, with no event
+    /// (M5.9): an `auto` one closes the `auto` popovers that are not its
+    /// ancestors. Nothing for an open one; `InvalidArgument` for an element
+    /// without `popover`, or one that cannot open.
+    pub fn show_popover(&mut self, node: Node) -> Result<(), Status> {
+        Ok(self.engine.show_popover(self.inward(node))?)
+    }
+
+    /// Hide popover `node` as DOM's `hidePopover()` does, with no event
+    /// (M5.9). Nothing for a closed one; `InvalidArgument` for an element
+    /// without `popover`.
+    pub fn hide_popover(&mut self, node: Node) -> Result<(), Status> {
+        Ok(self.engine.hide_popover(self.inward(node))?)
+    }
+
     /// Element `node`'s value as DOM's `value` reads it: what was set, or
     /// else what the markup says (an `input`'s `value` attribute, a
     /// `textarea`'s text, a `select`'s selected option). `None` for an

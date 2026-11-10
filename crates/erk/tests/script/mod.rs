@@ -16,7 +16,7 @@ use erk::{
 
 const TAGS: &[&str] = &[
     "div", "p", "span", "ul", "li", "button", "a", "template", "table", "tr", "td", "img", "br",
-    "section", "input", "A b", "", "svg", "-x",
+    "section", "input", "A b", "", "svg", "-x", "dialog",
 ];
 
 const NAMES: &[&str] = &[
@@ -99,6 +99,11 @@ const PAGES: &[&str] = &[
     // Popovers in the top layer, one inside another and one manual, and
     // a details (M5.9).
     "<button popovertarget=a>a</button><button popovertarget=b>b</button>     <div id=a popover><button popovertarget=c>c</button><p>in a</p></div>     <div id=c popover style='transform: scale(2)'>c</div><div id=b popover=manual>b</div>     <details><summary>s</summary>d</details>",
+    // Dialogs, one inside a transformed box, one that Escape cannot close
+    // (M5.9).
+    "<button>b</button><div style='transform: scale(2)'><dialog id=a><input>\
+     <button popovertarget=p>p</button><div id=p popover>p</div></dialog></div>\
+     <dialog id=b closedby=none open>b</dialog>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of
@@ -313,7 +318,7 @@ pub fn run(app: &mut App, script: &[u8]) {
             }
             8 => {
                 let node = state.node(&mut bytes);
-                match bytes.below(7) {
+                match bytes.below(10) {
                     0 | 1 => {
                         let class = bytes.pick(VALUES);
                         let _ = if bytes.byte().is_multiple_of(2) {
@@ -336,8 +341,30 @@ pub fn run(app: &mut App, script: &[u8]) {
                     5 => {
                         let _ = app.set_value(node, bytes.pick(VALUES));
                     }
-                    _ => {
+                    6 => {
                         let _ = app.set_checked(node, bytes.byte().is_multiple_of(2));
+                    }
+                    // Dialogs and popovers the host opens and closes (M5.9).
+                    7 => {
+                        let _ = match bytes.below(3) {
+                            0 => app.show_dialog(node),
+                            1 => app.show_modal_dialog(node),
+                            _ => {
+                                let value =
+                                    bytes.byte().is_multiple_of(2).then(|| bytes.pick(VALUES));
+                                app.close_dialog(node, value)
+                            }
+                        };
+                    }
+                    8 => {
+                        let _ = if bytes.byte().is_multiple_of(2) {
+                            app.show_popover(node)
+                        } else {
+                            app.hide_popover(node)
+                        };
+                    }
+                    _ => {
+                        let _ = app.dialog_return_value(node);
                     }
                 }
             }

@@ -524,6 +524,16 @@ gerekçeli bir daraltma:
   Escape açıp kapatır; host'un açıp kapatması `<dialog>`'un C-ABI'siyle
   gelir. Host popover'ı taşır, siler ya da `popover` durumunu
   değiştirirse popover olaysız kapanır.
+- **v0.17 (M5.9):** Diyaloglar ve host'un popover'ları: `erk_dialog_show`,
+  `erk_dialog_show_modal`, `erk_dialog_close` (dönüş değeri; boş
+  işaretçi değeri olduğu gibi bırakır), `erk_dialog_return_value`,
+  `erk_popover_show`, `erk_popover_hide`. Host'un yaptığı hiçbir olay
+  doğurmaz, taşıdığı odak da odak olayı göndermez. `ERK_EVENT_CANCEL`
+  (11): kullanıcı Escape'le modal bir diyalogu kapatmak ister;
+  `erk_event_prevent_default` açık tutar. `ERK_EVENT_CLOSE` (12):
+  kullanıcının kapattığı diyalog kapandı. İkisi de kabarcıklanmaz.
+  Modal diyalog açıkken sayfanın geri kalanı etkisizdir: basış diyaloga
+  gider, odak içinde kalır.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

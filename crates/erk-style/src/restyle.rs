@@ -178,7 +178,8 @@ impl Restyler {
         }
 
         let stylist = self.stylist.as_mut().expect("made above");
-        self.engine
+        let backdrops = self
+            .engine
             .traverse(stylist, doc, &self.slots, &frame.snapshots);
         // Rule nodes no style uses any more wait in the rule tree until it
         // collects them; a stylist that lives for the document's whole life
@@ -207,6 +208,7 @@ impl Restyler {
             }
         }
         Styles {
+            backdrops,
             computed: self.computed.clone(),
             reacts: reacts(stylist),
             styled,

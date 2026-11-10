@@ -238,6 +238,7 @@ impl Engine {
         let events = match event.kind {
             EventKind::Click if !prevented => self.page.click_default(target),
             EventKind::BeforeToggle => self.page.after_before_toggle(target, prevented),
+            EventKind::Cancel => self.page.after_cancel(target, prevented),
             _ => Vec::new(),
         };
         self.changed |= !events.is_empty();
@@ -399,6 +400,62 @@ impl Engine {
     /// Set attribute `name` of element `node` to `value`.
     pub fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
         self.page.set_attr(node, name, value)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Show dialog `node` as DOM's `show()` does (M5.9): it gets `open`,
+    /// and the focus goes into it. Nothing for one already shown so;
+    /// `InvalidArgument` for an element that is not a dialog, or a modal
+    /// one. No event: the host knows what it did.
+    pub fn show_dialog(&mut self, node: u64) -> Result<(), Status> {
+        self.page.show_dialog(node, false)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Show dialog `node` as DOM's `showModal()` does (M5.9): it gets
+    /// `open` and joins the top layer, with a backdrop behind it, the page
+    /// behind it inert, and the focus inside it. Nothing for a modal one;
+    /// `InvalidArgument` for an element that is not a dialog, one shown
+    /// otherwise, an open popover, or one outside the document. No event.
+    pub fn show_modal_dialog(&mut self, node: u64) -> Result<(), Status> {
+        self.page.show_dialog(node, true)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Close dialog `node` as DOM's `close()` does, its return value
+    /// becoming `value` if given (M5.9); the focus goes back where it
+    /// was. Nothing for a closed one; `InvalidArgument` for an element
+    /// that is not a dialog. No event.
+    pub fn close_dialog(&mut self, node: u64, value: Option<&str>) -> Result<(), Status> {
+        self.page.close_dialog(node, value)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Dialog `node`'s return value: what it was last closed with, empty
+    /// until then (M5.9).
+    pub fn dialog_return_value(&self, node: u64) -> Result<String, Status> {
+        self.page.dialog_return_value(node)
+    }
+
+    /// Show popover `node` as DOM's `showPopover()` does, with no event
+    /// (M5.9): an `auto` one closes the `auto` popovers that are not its
+    /// ancestors. Nothing for an open one; `InvalidArgument` for an element
+    /// without `popover`, or one that cannot open.
+    pub fn show_popover(&mut self, node: u64) -> Result<(), Status> {
+        self.page.show_popover(node)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Hide popover `node` as DOM's `hidePopover()` does, with no event
+    /// (M5.9). Nothing for a closed one; `InvalidArgument` for an element
+    /// without `popover`.
+    pub fn hide_popover(&mut self, node: u64) -> Result<(), Status> {
+        self.page.hide_popover(node)?;
         self.changed = true;
         Ok(())
     }
@@ -3749,5 +3806,308 @@ mod tests {
         );
         assert_eq!(open_popovers(&engine), [b]);
         checked_frame(&mut engine);
+    }
+
+    /// The kinds of `events` but key and pointer ones: what dialogs and
+    /// the focus did.
+    fn dialog_kinds(events: &[Event]) -> Vec<(EventKind, u64)> {
+        events
+            .iter()
+            .filter(|event| !matches!(event.kind, EventKind::KeyDown | EventKind::KeyUp))
+            .map(|event| (event.kind, event.target))
+            .collect()
+    }
+
+    /// The colour of every rectangle filling the whole 300 × 200 viewport.
+    fn viewport_fills(prepared: &Prepared) -> Vec<crate::color::Rgba> {
+        prepared
+            .list
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::list::DisplayItem::Rect {
+                    width,
+                    height,
+                    color,
+                    ..
+                } if *width >= 300.0 && *height >= 200.0 => Some(*color),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_modal_dialog_shows_above_an_inert_page_with_its_backdrop() {
+        use crate::messages::Key;
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } dialog::backdrop { background: rgb(0, 0, 255) } \
+             #cover { position: relative; z-index: 9; height: 200px; background: red }</style>\
+             <button id=outer>outer</button><div id=cover></div>\
+             <dialog id=d><input id=field><button id=ok>ok</button></dialog>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (outer, d, field, ok) = (id("outer"), id("d"), id("field"), id("ok"));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(outer));
+        engine.show_modal_dialog(d).unwrap();
+        assert_eq!(engine.query_all(None, ":modal").unwrap(), [d]);
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+        // The focus goes to the first element in it that Tab visits.
+        assert_eq!(focused(&mut engine), Some(field));
+        let prepared = checked_frame(&mut engine);
+        // In the middle of the viewport, above the cover, with the
+        // backdrop under it, over the page.
+        // (Boxes snap to whole pixels: a margin of 69.5 comes out 70.)
+        let found = engine.node_box(d).unwrap().unwrap();
+        assert!(
+            (found.x * 2.0 + found.width - 300.0).abs() <= 1.0,
+            "{found:?}"
+        );
+        assert!(
+            (found.y * 2.0 + found.height - 200.0).abs() <= 1.0,
+            "{found:?}"
+        );
+        assert_eq!(viewport_fills(&prepared).last(), Some(&[0, 0, 255, 255]));
+        // The page behind is inert: a press on it is the dialog's, and
+        // takes the focus nowhere outside.
+        let events = press_at(&mut engine, (5.0, 5.0));
+        let click = events
+            .iter()
+            .find(|event| event.kind == EventKind::Click)
+            .unwrap();
+        assert_eq!(click.target, d);
+        assert_eq!(engine.inspect_at(5.0, 5.0), Some(d));
+        assert_ne!(focused(&mut engine), Some(outer));
+        // Tab goes round inside it.
+        press_on(&mut engine, field);
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(ok));
+        press(&mut engine, Key::Tab);
+        assert_eq!(focused(&mut engine), Some(field));
+        // Closed by the host with a value: no backdrop, the page live, the
+        // focus back on the button that had it.
+        engine.close_dialog(d, Some("tamam")).unwrap();
+        assert_eq!(engine.dialog_return_value(d), Ok("tamam".to_owned()));
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        assert_eq!(focused(&mut engine), Some(outer));
+        let prepared = checked_frame(&mut engine);
+        assert!(
+            viewport_fills(&prepared)
+                .iter()
+                .all(|fill| *fill != [0, 0, 255, 255])
+        );
+        assert_eq!(engine.node_box(d), Ok(None));
+        assert_eq!(engine.inspect_at(5.0, 5.0), Some(outer));
+        // Closed again without a value: the value stays.
+        engine.show_modal_dialog(d).unwrap();
+        engine.close_dialog(d, None).unwrap();
+        assert_eq!(engine.dialog_return_value(d), Ok("tamam".to_owned()));
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn escape_asks_a_modal_dialog_to_close_with_a_cancel_the_host_can_prevent() {
+        let mut engine = popover_page(
+            "<button id=b>b</button><dialog id=d><button id=p popovertarget=menu>menu</button>\
+             <div id=menu popover>m</div></dialog><dialog id=fixed closedby=none>f</dialog>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (d, p, menu, fixed) = (id("d"), id("p"), id("menu"), id("fixed"));
+        engine.show_modal_dialog(d).unwrap();
+        checked_frame(&mut engine);
+        // Prevented: asked, and it stays.
+        let mut seen = Vec::new();
+        for state in [
+            crate::messages::KeyState::Down,
+            crate::messages::KeyState::Up,
+        ] {
+            let input = KeyInput {
+                key: crate::messages::Key::Escape,
+                state,
+                modifiers: Modifiers::default(),
+            };
+            for event in engine.key_default(&input) {
+                seen.push(event.kind);
+                let prevented = event.kind == EventKind::Cancel;
+                for next in engine.follow(&event, prevented) {
+                    seen.push(next.kind);
+                }
+            }
+        }
+        assert_eq!(seen, [EventKind::Cancel]);
+        assert_eq!(engine.query_all(None, ":modal").unwrap(), [d]);
+        // A popover opened in it is closed first.
+        press_on(&mut engine, p);
+        checked_frame(&mut engine);
+        assert_eq!(open_popovers(&engine), [menu]);
+        assert_eq!(
+            toggles(&escape(&mut engine)),
+            [(EventKind::BeforeToggle, menu), (EventKind::Toggle, menu)]
+        );
+        // Then the dialog: cancel, the focus leaves it, close.
+        let events = escape(&mut engine);
+        let kinds = dialog_kinds(&events);
+        assert_eq!(kinds.first(), Some(&(EventKind::Cancel, d)));
+        assert_eq!(kinds.last(), Some(&(EventKind::Close, d)));
+        assert!(engine.query_all(None, ":modal").unwrap().is_empty());
+        assert_eq!(engine.attr(d, "open"), Ok(None));
+        checked_frame(&mut engine);
+        // One with `closedby=none` does not listen.
+        engine.show_modal_dialog(fixed).unwrap();
+        assert!(
+            escape(&mut engine)
+                .iter()
+                .all(|event| !matches!(event.kind, EventKind::Cancel | EventKind::Close))
+        );
+        assert_eq!(engine.query_all(None, ":modal").unwrap(), [fixed]);
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_dialog_shown_without_modal_stays_in_the_page_and_leaves_it_live() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } p { margin: 0; height: 50px }</style>\
+             <p>önce</p><dialog id=d><button id=in>in</button></dialog>\
+             <button id=after>after</button><div id=plain>x</div>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (d, inner, after, plain) = (id("d"), id("in"), id("after"), id("plain"));
+        engine.show_dialog(d).unwrap();
+        assert_eq!(focused(&mut engine), Some(inner));
+        // No input yet: the focus the host moved shows, as a script's
+        // does in browsers.
+        assert_eq!(engine.query_all(None, ":focus-visible").unwrap(), [inner]);
+        checked_frame(&mut engine);
+        assert!(engine.query_all(None, ":modal").unwrap().is_empty());
+        // Where it would have been, across the page's width; nothing
+        // inert, no backdrop.
+        let found = engine.node_box(d).unwrap().unwrap();
+        assert_eq!(found.y, 50.0);
+        assert!(
+            (found.x * 2.0 + found.width - 300.0).abs() < 1.0,
+            "{found:?}"
+        );
+        press_on(&mut engine, after);
+        assert_eq!(focused(&mut engine), Some(after));
+        // Escape does not close it.
+        assert!(dialog_kinds(&escape(&mut engine)).is_empty());
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+        // Shown the other way, or not a dialog: refused.
+        assert_eq!(engine.show_modal_dialog(d), Err(Status::InvalidArgument));
+        assert_eq!(engine.show_dialog(d), Ok(()));
+        assert_eq!(engine.show_dialog(plain), Err(Status::InvalidArgument));
+        assert_eq!(
+            engine.close_dialog(plain, None),
+            Err(Status::InvalidArgument)
+        );
+        assert_eq!(
+            engine.dialog_return_value(plain),
+            Err(Status::InvalidArgument)
+        );
+        engine.close_dialog(d, None).unwrap();
+        // After a press, it does not.
+        press_on(&mut engine, after);
+        engine.show_modal_dialog(d).unwrap();
+        assert_eq!(focused(&mut engine), Some(inner));
+        assert!(engine.query_all(None, ":focus-visible").unwrap().is_empty());
+        assert_eq!(engine.show_dialog(d), Err(Status::InvalidArgument));
+        checked_frame(&mut engine);
+        // Outside the document: refused.
+        let loose = engine.create_element("dialog").unwrap();
+        assert_eq!(
+            engine.show_modal_dialog(loose),
+            Err(Status::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn a_modal_dialog_the_host_takes_open_from_or_moves_leaves_the_top_layer() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 }</style><button id=b>b</button>\
+             <div id=box><dialog id=d>d</dialog></div>",
+        );
+        let (b, d) = (query_id(&engine, "b"), query_id(&engine, "d"));
+        engine.show_modal_dialog(d).unwrap();
+        checked_frame(&mut engine);
+        engine.remove_attr(d, "open").unwrap();
+        assert!(engine.query_all(None, ":modal").unwrap().is_empty());
+        checked_frame(&mut engine);
+        assert_eq!(engine.inspect_at(5.0, 5.0), Some(b));
+        // Moved: out of the top layer, but still open in its new place.
+        engine.show_modal_dialog(d).unwrap();
+        checked_frame(&mut engine);
+        let body = engine.parent(query_id(&engine, "box")).unwrap().unwrap();
+        engine.insert(body, d, None).unwrap();
+        assert!(engine.query_all(None, ":modal").unwrap().is_empty());
+        assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
+        checked_frame(&mut engine);
+        assert_eq!(engine.inspect_at(5.0, 5.0), Some(b));
+    }
+
+    #[test]
+    fn the_host_shows_and_hides_popovers_without_events() {
+        let mut engine = popover_page(
+            "<div id=a popover>a<div id=inner popover>i</div></div><div id=b popover>b</div>\
+             <div id=m popover=manual>m</div><p id=plain>p</p><dialog id=d popover>d</dialog>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (a, inner, b, m, plain, d) =
+            (id("a"), id("inner"), id("b"), id("m"), id("plain"), id("d"));
+        engine.show_popover(m).unwrap();
+        engine.show_popover(a).unwrap();
+        // Its ancestor stays open.
+        engine.show_popover(inner).unwrap();
+        assert_eq!(open_popovers(&engine), [a, inner, m]);
+        checked_frame(&mut engine);
+        // Another auto one closes the others but the manual one.
+        engine.show_popover(b).unwrap();
+        assert_eq!(open_popovers(&engine), [b, m]);
+        engine.show_popover(b).unwrap();
+        checked_frame(&mut engine);
+        // Hiding `a` again with `inner` open closes `inner` too.
+        engine.show_popover(a).unwrap();
+        engine.show_popover(inner).unwrap();
+        engine.hide_popover(a).unwrap();
+        assert_eq!(open_popovers(&engine), [m]);
+        engine.hide_popover(a).unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(engine.show_popover(plain), Err(Status::InvalidArgument));
+        assert_eq!(engine.hide_popover(plain), Err(Status::InvalidArgument));
+        // An open dialog cannot open as a popover; a modal one is not one.
+        engine.show_dialog(d).unwrap();
+        assert_eq!(engine.show_popover(d), Err(Status::InvalidArgument));
+        engine.close_dialog(d, None).unwrap();
+        engine.show_modal_dialog(d).unwrap();
+        assert_eq!(engine.show_popover(d), Err(Status::InvalidArgument));
+        assert_eq!(open_popovers(&engine), [m]);
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_dialog_focuses_what_has_autofocus_and_a_later_popover_stays_live() {
+        let mut engine = popover_page(
+            "<style>body { margin: 0 } #menu { inset: auto; top: 0; left: 0; margin: 0; \
+             width: 60px; height: 30px; padding: 0 }</style>\
+             <dialog id=d><button id=first>first</button><button id=chosen autofocus>c</button>\
+             </dialog><div id=menu popover=manual><button id=item>item</button></div>",
+        );
+        let id = |name: &str| query_id(&engine, name);
+        let (d, chosen, menu, item) = (id("d"), id("chosen"), id("menu"), id("item"));
+        engine.show_modal_dialog(d).unwrap();
+        assert_eq!(focused(&mut engine), Some(chosen));
+        // A popover opened after the dialog is above it, and not inert:
+        // a press reaches it, and its button takes the focus.
+        engine.show_popover(menu).unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(engine.inspect_at(10.0, 10.0), Some(item));
+        press_on(&mut engine, item);
+        assert_eq!(focused(&mut engine), Some(item));
+        // Below the dialog it would be inert.
+        engine.hide_popover(menu).unwrap();
+        engine.close_dialog(d, None).unwrap();
+        engine.show_popover(menu).unwrap();
+        engine.show_modal_dialog(d).unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(engine.inspect_at(10.0, 10.0), Some(d));
     }
 }

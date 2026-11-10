@@ -17,6 +17,8 @@ pub struct Document {
     pub(crate) composition: Option<(NodeId, Composition)>,
     /// The elements drawn above the page, the top one last (top_layer.rs).
     pub(crate) top_layer: Vec<NodeId>,
+    /// Those of them shown as modal dialogs.
+    pub(crate) modal: Vec<NodeId>,
 }
 
 impl Default for Document {
@@ -37,6 +39,7 @@ impl Document {
             controls: HashMap::new(),
             composition: None,
             top_layer: Vec::new(),
+            modal: Vec::new(),
         }
     }
 
@@ -304,6 +307,7 @@ impl Document {
         self.controls.clear();
         self.composition = None;
         self.top_layer.clear();
+        self.modal.clear();
         let root = self.get_mut(self.root);
         root.first_child = None;
         root.last_child = None;

@@ -596,3 +596,52 @@ fn a_popover_asks_with_a_beforetoggle_the_host_can_cancel_and_neither_event_bubb
     assert_eq!(*seen.borrow(), [0, 1]);
     app.off(watch).unwrap();
 }
+
+#[test]
+fn escape_sends_a_modal_dialog_a_cancel_then_a_close_neither_bubbling() {
+    let mut app = app("<body style='margin: 0'><dialog id=d><input></dialog>");
+    let d = node(&app, "#d");
+    let log: Log = Rc::default();
+    for (at, name) in [(d, "dialog"), (node(&app, "body"), "body")] {
+        for kind in [EventKind::Cancel, EventKind::Close] {
+            let log = log.clone();
+            app.on(at, kind, move |_, event| {
+                log.borrow_mut()
+                    .push(format!("{name} {:?} {:?}", event.kind, event.phase));
+            })
+            .unwrap();
+        }
+    }
+    let escape = |app: &mut App| {
+        for state in [KeyState::Down, KeyState::Up] {
+            app.input(Input::Key(KeyInput {
+                key: erk::Key::Escape,
+                state,
+                modifiers: Modifiers::default(),
+            }));
+        }
+    };
+    app.show_modal_dialog(d).unwrap();
+    // Prevented: asked, and it stays open.
+    let keep = app
+        .on(d, EventKind::Cancel, |cx, _| cx.prevent_default())
+        .unwrap();
+    escape(&mut app);
+    assert_eq!(*log.borrow(), ["dialog Cancel Target"]);
+    assert_eq!(app.attr(d, "open"), Ok(Some(String::new())));
+    // Let through: it closes; the body hears neither.
+    app.off(keep).unwrap();
+    log.borrow_mut().clear();
+    escape(&mut app);
+    assert_eq!(
+        *log.borrow(),
+        ["dialog Cancel Target", "dialog Close Target"]
+    );
+    assert_eq!(app.attr(d, "open"), Ok(None));
+    // What the host does itself raises no event.
+    log.borrow_mut().clear();
+    app.show_modal_dialog(d).unwrap();
+    app.close_dialog(d, Some("x")).unwrap();
+    assert!(log.borrow().is_empty());
+    assert_eq!(app.dialog_return_value(d), Ok("x".to_owned()));
+}

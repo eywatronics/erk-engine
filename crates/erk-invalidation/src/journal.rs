@@ -33,10 +33,10 @@ pub struct State {
     /// What an input method is composing in a text field, also drawn in
     /// it.
     composition: Option<Composition>,
-    /// Where the element is in the top layer, counted from the bottom: an
-    /// open popover is drawn above the page and laid out against the
-    /// viewport (M5.9).
-    layer: Option<usize>,
+    /// Where the element is in the top layer, counted from the bottom, and
+    /// whether as a modal dialog: an open popover or dialog is drawn
+    /// above the page and laid out against the viewport (M5.9).
+    layer: Option<(usize, bool)>,
 }
 
 impl State {
@@ -63,7 +63,11 @@ impl State {
             children: doc.children(id).collect(),
             value: doc.value_set(id).map(str::to_owned),
             composition: doc.composition(id).cloned(),
-            layer: doc.top_layer().iter().position(|entry| *entry == id),
+            layer: doc
+                .top_layer()
+                .iter()
+                .position(|entry| *entry == id)
+                .map(|at| (at, doc.is_modal(id))),
         }
     }
 }
@@ -155,6 +159,10 @@ struct Slot {
     id: NodeId,
     /// Made this frame: all of it is new, nothing to compare.
     created: bool,
+    /// In the document at the first touch, so at the last frame too: a
+    /// node that joins the document this frame is new there, and one
+    /// outside it is touched only when it is.
+    in_document: bool,
     /// Its state before the first touch.
     before: State,
 }
@@ -199,6 +207,7 @@ impl Journal {
                 self.slots[at] = Some(Slot {
                     id,
                     created: false,
+                    in_document: connected(doc, id),
                     before: State::of(doc, id),
                 });
             }
@@ -218,13 +227,27 @@ impl Journal {
         self.slots[at] = Some(Slot {
             id,
             created: true,
+            in_document: false,
             before: State::default(),
         });
     }
 
+    /// `id` and everything in it are about to leave the document, to wait
+    /// outside it: what they are now is what the last frame had, if they
+    /// come back this frame.
+    pub fn leaving(&mut self, doc: &Document, id: NodeId) {
+        let mut stack = vec![id];
+        while let Some(node) = stack.pop() {
+            stack.extend(doc.children(node));
+            self.touch(doc, node);
+        }
+    }
+
     /// `id` and everything in it are joining the document: new to it,
     /// whenever they were made. A node made in an earlier frame and kept
-    /// outside the document was never in a frame to compare with.
+    /// outside the document was never in a frame to compare with; one
+    /// that left it this frame ([`Journal::leaving`]) was, and is compared
+    /// with what it was then.
     pub fn arrived(&mut self, doc: &Document, id: NodeId) {
         let mut stack = vec![id];
         while let Some(node) = stack.pop() {
@@ -233,12 +256,19 @@ impl Journal {
             if self.slots.len() <= at {
                 self.slots.resize_with(at + 1, || None);
             }
+            if self.slots[at]
+                .as_ref()
+                .is_some_and(|slot| slot.id == node && !slot.created && slot.in_document)
+            {
+                continue;
+            }
             if self.slots[at].is_none() {
                 self.touched.push(at);
             }
             self.slots[at] = Some(Slot {
                 id: node,
                 created: true,
+                in_document: false,
                 before: State::default(),
             });
         }
@@ -452,15 +482,55 @@ mod tests {
     }
 
     #[test]
+    fn a_node_that_leaves_and_comes_back_in_one_frame_is_compared_with_the_last() {
+        // Found by the mutations fuzzer: the node came back as new, and
+        // what changed in it while it was out went unseen.
+        let mut doc = doc("<div id=a><p id=p>bir</p></div><div id=out></div>");
+        let (a, p) = (find(&doc, "a"), find(&doc, "p"));
+        let out = doc.create_element("div").unwrap();
+        let before = snapshot(&doc);
+        let mut journal = Journal::default();
+        // Out, into an element that is not in the document.
+        journal.touch(&doc, a);
+        journal.leaving(&doc, p);
+        doc.insert(out, p, None).unwrap();
+        // Changed while out: its text replaced.
+        journal.touch(&doc, p);
+        doc.set_text(p, "iki").unwrap();
+        let text = doc.children(p).next().unwrap();
+        journal.created(text);
+        // Back.
+        journal.touch(&doc, a);
+        doc.insert(a, p, None).unwrap();
+        journal.arrived(&doc, p);
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.children, [p]);
+        assert_eq!(changes, difference(&before, &doc));
+        // One outside the document at the last frame, touched while out,
+        // then joining it, is new: nothing to compare.
+        let before = snapshot(&doc);
+        journal.touch(&doc, out);
+        let child = doc.create_element("i").unwrap();
+        journal.created(child);
+        doc.insert(out, child, None).unwrap();
+        journal.touch(&doc, a);
+        doc.insert(a, out, None).unwrap();
+        journal.arrived(&doc, out);
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.children, [a]);
+        assert_eq!(changes, difference(&before, &doc));
+    }
+
+    #[test]
     fn joining_leaving_or_moving_in_the_top_layer_is_a_change_of_the_element() {
         let mut doc = doc("<div id=a></div><div id=b></div>");
         let (a, b) = (find(&doc, "a"), find(&doc, "b"));
         let mut journal = Journal::default();
         let before = snapshot(&doc);
         journal.touch(&doc, a);
-        doc.add_to_top_layer(a).unwrap();
+        doc.add_to_top_layer(a, false).unwrap();
         journal.touch(&doc, b);
-        doc.add_to_top_layer(b).unwrap();
+        doc.add_to_top_layer(b, false).unwrap();
         let (changes, _) = journal.take(&doc);
         assert_eq!(changes.layers, [a, b]);
         assert_eq!(changes.count(), 2);
@@ -470,7 +540,7 @@ mod tests {
         journal.touch(&doc, a);
         journal.touch(&doc, b);
         doc.remove_from_top_layer(a);
-        doc.add_to_top_layer(a).unwrap();
+        doc.add_to_top_layer(a, false).unwrap();
         let (changes, _) = journal.take(&doc);
         assert_eq!(changes.layers, [a, b]);
         assert_eq!(changes, difference(&before, &doc));
@@ -478,7 +548,16 @@ mod tests {
         journal.touch(&doc, b);
         journal.touch(&doc, a);
         doc.remove_from_top_layer(a);
-        doc.add_to_top_layer(a).unwrap();
+        doc.add_to_top_layer(a, false).unwrap();
         assert_eq!(journal.take(&doc).0, Changes::default());
+        // Back in where it was, but modal: a change.
+        let before = snapshot(&doc);
+        journal.touch(&doc, b);
+        journal.touch(&doc, a);
+        doc.remove_from_top_layer(a);
+        doc.add_to_top_layer(a, true).unwrap();
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.layers, [a]);
+        assert_eq!(changes, difference(&before, &doc));
     }
 }

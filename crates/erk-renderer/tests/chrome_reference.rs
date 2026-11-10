@@ -224,7 +224,16 @@ fn press_in(engine: &mut erk_renderer::Engine, html: &str) {
             deliver(engine, &next);
         }
     }
-    for id in pressed_ids(html) {
+    for token in pressed_ids(html) {
+        if let Some(id) = token.strip_prefix("show-modal:") {
+            let dialog = engine
+                .query(None, &format!("#{id}"))
+                .unwrap()
+                .expect("a dialog with the id");
+            engine.show_modal_dialog(dialog).unwrap();
+            continue;
+        }
+        let id = token;
         let target = engine
             .query(None, &format!("#{id}"))
             .unwrap()
@@ -243,9 +252,10 @@ fn press_in(engine: &mut erk_renderer::Engine, html: &str) {
 }
 
 /// A copy of `html` that clicks, as it loads, the elements its
-/// `<meta name="erk-press" content="id …">` names, in order: Erk draws the
-/// page with the same clicks (`erk_renderer::render_html`), so a popover
-/// shows open in both. The script runs before the page's `load`, so before
+/// `<meta name="erk-press" content="id …">` names, in order, and shows
+/// as modal the dialogs it names `show-modal:id`: Erk draws the page with
+/// the same (`erk_renderer::render_html`), so a popover or a dialog shows
+/// open in both. The script runs before the page's `load`, so before
 /// the screenshot and the measuring scripts. Erk never runs it.
 fn pressed(html: &str) -> String {
     let ids = pressed_ids(html);
@@ -254,8 +264,11 @@ fn pressed(html: &str) -> String {
     }
     let list: Vec<String> = ids.iter().map(|id| format!("'{id}'")).collect();
     let script = format!(
-        "<script id=\"erk-press-script\">for (const id of [{}]) \
-         document.getElementById(id).click();</script>\n",
+        "<script id=\"erk-press-script\">for (const token of [{}]) {{ \
+         const [action, id] = token.startsWith('show-modal:') \
+         ? ['show-modal', token.slice(11)] : ['click', token]; \
+         const e = document.getElementById(id); \
+         if (action === 'show-modal') e.showModal(); else e.click(); }}</script>\n",
         list.join(", ")
     );
     let end = html

@@ -124,9 +124,10 @@ impl StyleEngine {
             .collect();
         let mut stylist = self.stylist(&sheets);
         let slots = fresh_slots(doc, &self.url, &self.guard, &states(doc, interaction));
-        self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new());
+        let backdrops = self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new());
         let computed: Vec<_> = slots.iter().map(primary).collect();
         Styles {
+            backdrops,
             reacts: reacts(&stylist),
             styled: computed.iter().flatten().count(),
             damage: Vec::new(),
@@ -155,18 +156,21 @@ impl StyleEngine {
     /// the elements without style, those with a restyle hint and those a
     /// snapshot in `snapshots` invalidates, and goes down only where an
     /// element has dirty descendants.
+    /// Style what `slots` say needs it, and return the `::backdrop` style
+    /// of each modal dialog: Stylo computes it when asked (a lazy
+    /// pseudo-element), from the dialog's style, every frame.
     fn traverse(
         &self,
         stylist: &mut Stylist,
         doc: &Document,
         slots: &[Slot],
         snapshots: &SnapshotMap,
-    ) {
+    ) -> Vec<(NodeId, Arc<ComputedValues>)> {
         let tree = StyledTree::new(doc, &self.guard, slots);
         tree.link();
         let Some(root) = TDocument::as_node(&ErkNode::new(&tree, doc.root())).first_element_child()
         else {
-            return;
+            return Vec::new();
         };
 
         let read = self.guard.read();
@@ -194,7 +198,30 @@ impl StyleEngine {
             // proven safe to share across threads.
             style::driver::traverse_dom(&RecalcStyle::new(context), token, None);
         }
+        let guards = StylesheetGuards {
+            author: &read,
+            ua_or_user: &read,
+        };
+        let backdrops = doc
+            .top_layer()
+            .iter()
+            .filter(|id| doc.is_modal(**id))
+            .filter_map(|id| {
+                let dialog = slots.get(id.index() as usize).and_then(primary)?;
+                let backdrop = stylist.lazily_compute_pseudo_element_style(
+                    &guards,
+                    ErkNode::new(&tree, *id),
+                    &style::selector_parser::PseudoElement::Backdrop,
+                    style::stylist::RuleInclusion::All,
+                    &dialog,
+                    false,
+                    None,
+                )?;
+                Some((*id, backdrop))
+            })
+            .collect();
         thread_state::exit(ThreadState::LAYOUT);
+        backdrops
     }
 
     fn device(&self) -> Device {
@@ -302,6 +329,8 @@ pub struct Interaction {
 #[derive(Default)]
 pub struct Styles {
     computed: Vec<Option<Arc<ComputedValues>>>,
+    /// Each modal dialog's `::backdrop` style.
+    backdrops: Vec<(NodeId, Arc<ComputedValues>)>,
     reacts: Reacts,
     /// How many elements were styled.
     styled: usize,
@@ -345,6 +374,15 @@ impl Styles {
     /// `id` must come from the document these styles were computed for.
     pub fn computed(&self, id: NodeId) -> Option<Arc<ComputedValues>> {
         self.computed.get(id.index() as usize)?.clone()
+    }
+
+    /// The `::backdrop` style of modal dialog `id` (M5.9); `None` for an
+    /// element that is not one.
+    pub fn backdrop(&self, id: NodeId) -> Option<Arc<ComputedValues>> {
+        self.backdrops
+            .iter()
+            .find(|(dialog, _)| *dialog == id)
+            .map(|(_, style)| style.clone())
     }
 
     /// How many elements were styled: all of them when styling from
@@ -391,7 +429,8 @@ fn primary(slot: &Slot) -> Option<Arc<ComputedValues>> {
 
 /// Each arena slot's element state: a link's, an open `details` or
 /// `dialog`'s (`:open`, from its `open` attribute), an open popover's
-/// (`:popover-open`: one in the top layer), and what `interaction`
+/// (`:popover-open`: one in the top layer), a modal dialog's (`:modal`),
+/// and what `interaction`
 /// puts on the element under the pointer, the pressed one and the focused
 /// one and on their ancestors.
 fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
@@ -416,6 +455,10 @@ fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
         }
     }
     for id in doc.top_layer() {
+        if doc.is_modal(*id) {
+            states[id.index() as usize] |= ElementState::MODAL;
+            continue;
+        }
         let popover = doc
             .node(*id)
             .and_then(|node| node.as_element())

@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 16
+#define ERK_ABI_VERSION 17
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -145,6 +145,18 @@
  `erk_event_prevent_default` keeps one that was opening closed.
  */
 #define ERK_EVENT_BEFORETOGGLE 10
+
+/*
+ The user asked a modal dialog to close (Escape); it does not bubble.
+ `erk_event_prevent_default` keeps it open.
+ */
+#define ERK_EVENT_CANCEL 11
+
+/*
+ A dialog the user closed closed (not one the host closes); it does not
+ bubble.
+ */
+#define ERK_EVENT_CLOSE 12
 
 #define ERK_PHASE_CAPTURE 1
 
@@ -665,6 +677,55 @@ ErkStatus erk_node_insert_before(ErkApp *app, ErkNodeId parent, ErkNodeId child,
 ErkStatus erk_node_remove(ErkApp *app, ErkNodeId node_id);
 
 ErkStatus erk_node_set_attr(ErkApp *app, ErkNodeId node_id, ErkStr name, ErkStr value);
+
+/*
+ Show dialog `node` as DOM's `show()` does: it gets `open` and the
+ focus goes into it. `ERK_ERR_INVALID_ARGUMENT` for an element that is
+ not a dialog, or a modal one. No event.
+ */
+ErkStatus erk_dialog_show(ErkApp *app, ErkNodeId node_id);
+
+/*
+ Show dialog `node` as DOM's `showModal()` does: in the top layer, a
+ backdrop behind it, the page behind it inert, the focus inside it;
+ Escape then sends `ERK_EVENT_CANCEL`, whose default closes it, then
+ `ERK_EVENT_CLOSE`. `ERK_ERR_INVALID_ARGUMENT` for an element that is
+ not a dialog, one shown otherwise, an open popover, or one outside the
+ document. No event.
+ */
+ErkStatus erk_dialog_show_modal(ErkApp *app, ErkNodeId node_id);
+
+/*
+ Close dialog `node` as DOM's `close()` does; its return value becomes
+ `return_value`, or stays as it was when `return_value.ptr` is null.
+ The focus goes back where it was. `ERK_ERR_INVALID_ARGUMENT` for an
+ element that is not a dialog. No event.
+ */
+ErkStatus erk_dialog_close(ErkApp *app, ErkNodeId node_id, ErkStr return_value);
+
+/*
+ Dialog `node`'s return value (DOM's `returnValue`), into the caller's
+ buffer as `erk_node_attr` does: empty until it is closed with one.
+ `ERK_ERR_INVALID_ARGUMENT` for an element that is not a dialog.
+ */
+ErkStatus erk_dialog_return_value(ErkApp *app,
+                                  ErkNodeId node_id,
+                                  char *buf,
+                                  size_t cap,
+                                  size_t *len);
+
+/*
+ Show popover `node` as DOM's `showPopover()` does, with no event.
+ `ERK_ERR_INVALID_ARGUMENT` for an element without `popover`, or one
+ that cannot open.
+ */
+ErkStatus erk_popover_show(ErkApp *app, ErkNodeId node_id);
+
+/*
+ Hide popover `node` as DOM's `hidePopover()` does, with no event.
+ `ERK_ERR_INVALID_ARGUMENT` for an element without `popover`.
+ */
+ErkStatus erk_popover_hide(ErkApp *app, ErkNodeId node_id);
 
 /*
  Remove attribute `name`; `ERK_ERR_NOT_FOUND` if there was none.
