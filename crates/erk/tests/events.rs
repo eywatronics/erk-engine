@@ -645,3 +645,41 @@ fn escape_sends_a_modal_dialog_a_cancel_then_a_close_neither_bubbling() {
     assert!(log.borrow().is_empty());
     assert_eq!(app.dialog_return_value(d), Ok("x".to_owned()));
 }
+
+#[test]
+fn a_buttons_command_goes_to_its_target_with_its_source_not_bubbling() {
+    let mut app = app(
+        "<body style='margin: 0'><button id=b commandfor=p command=--kaydet \
+         style='display: block; width: 40px; height: 20px; padding: 0'>b</button>\
+         <div id=p popover>p</div>",
+    );
+    let (b, p) = (node(&app, "#b"), node(&app, "#p"));
+    let log: Log = Rc::default();
+    for (at, name) in [(p, "popover"), (node(&app, "body"), "body")] {
+        let log = log.clone();
+        app.on(at, EventKind::Command, move |_, event| {
+            log.borrow_mut().push(format!(
+                "{name} {:?} {} {}",
+                event.phase,
+                event.command.as_deref().unwrap_or("-"),
+                event.source == Some(b)
+            ));
+        })
+        .unwrap();
+    }
+    // A custom command: the host hears it, at the target alone.
+    app.click(5.0, 5.0);
+    assert_eq!(*log.borrow(), ["popover Target --kaydet true"]);
+    assert!(app.query_all(None, ":popover-open").unwrap().is_empty());
+    // A built-in one runs unless prevented.
+    app.set_attr(b, "command", "toggle-popover").unwrap();
+    app.tick(0);
+    let keep = app
+        .on(p, EventKind::Command, |cx, _| cx.prevent_default())
+        .unwrap();
+    app.click(5.0, 5.0);
+    assert!(app.query_all(None, ":popover-open").unwrap().is_empty());
+    app.off(keep).unwrap();
+    app.click(5.0, 5.0);
+    assert_eq!(app.query_all(None, ":popover-open").unwrap(), [p]);
+}

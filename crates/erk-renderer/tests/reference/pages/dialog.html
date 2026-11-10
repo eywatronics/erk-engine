@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="erk-press" content="show-modal:soru">
+<meta name="erk-press" content="ac-soru">
 <title>Diyaloglar</title>
 <style>
   body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
@@ -13,6 +13,7 @@
   #soru p { margin: 0 0 12px; }
   button { display: inline-block; font: inherit; color: #1f2933; background: #e2e8f0;
            border: 1px solid #94a3b8; padding: 4px 10px; margin-right: 6px; }
+  #ac-soru { background: #fecaca; border-color: #f87171; }
   #soru::backdrop { background: rgba(15, 23, 42, 0.5); }
   /* Erk draws no focus ring yet; the dialog focuses its first button. */
   :focus-visible { outline: none; }
@@ -20,6 +21,7 @@
 </head>
 <body>
   <div class="kutu">
+    <button id="ac-soru" commandfor="soru" command="show-modal">Kaydet…</button>
     <p>Modal bir diyalog sayfanın üstündeki katmanda, ortada açılır;
     arkasındaki her şey bir perdeyle örtülür ve etkisiz kalır.</p>
     <div class="renkli">Perdenin altında kalan renkli bir kutu</div>

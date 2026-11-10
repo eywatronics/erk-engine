@@ -34,6 +34,8 @@ const NAMES: &[&str] = &[
     "popover",
     "popovertarget",
     "open",
+    "commandfor",
+    "command",
 ];
 
 const VALUES: &[&str] = &[
@@ -51,6 +53,10 @@ const VALUES: &[&str] = &[
     "width: calc(100% - 1e30px)",
     "görev ✓",
     "url(\"file:///etc/passwd\")",
+    "show-modal",
+    "toggle-popover",
+    "request-close",
+    "--x",
 ];
 
 /// What an input method composes or commits: kana, Turkish, a line break,
@@ -104,6 +110,14 @@ const PAGES: &[&str] = &[
     "<button>b</button><div style='transform: scale(2)'><dialog id=a><input>\
      <button popovertarget=p>p</button><div id=p popover>p</div></dialog></div>\
      <dialog id=b closedby=none open>b</dialog>",
+    // Buttons' commands: a modal dialog, its own closing buttons, popovers
+    // and a custom command (M5.9).
+    "<button id=m commandfor=a command=show-modal>m</button>\
+     <button commandfor=p command=toggle-popover>t</button><dialog id=a>\
+     <button commandfor=a command=request-close value=v>r</button>\
+     <button commandfor=a command=close>c</button>\
+     <button commandfor=p command=show-popover>s</button></dialog>\
+     <div id=p popover><button commandfor=m command=--x>x</button></div>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of
@@ -214,6 +228,11 @@ const KINDS: &[EventKind] = &[
     EventKind::Input,
     EventKind::Change,
     EventKind::Submit,
+    EventKind::Toggle,
+    EventKind::BeforeToggle,
+    EventKind::Cancel,
+    EventKind::Close,
+    EventKind::Command,
 ];
 
 /// What a callback does to the document while the event is on its way.

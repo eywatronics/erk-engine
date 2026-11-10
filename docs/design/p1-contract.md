@@ -534,6 +534,17 @@ gerekçeli bir daraltma:
   kullanıcının kapattığı diyalog kapandı. İkisi de kabarcıklanmaz.
   Modal diyalog açıkken sayfanın geri kalanı etkisizdir: basış diyaloga
   gider, odak içinde kalır.
+- **v0.18 (M5.9):** `ERK_EVENT_COMMAND` (13): `commandfor`'lu bir
+  düğmeye basılınca adlandırdığı öğeye gelir, kabarcıklanmaz; komut
+  ondan sonra çalışır. `ErkEvent`'in sonuna `command` (komut: yerleşik
+  olan HTML'in adıyla, özel `--ad` düğmenin yazdığı gibi; başka olaylarda
+  boş) ve `source` (düğme; başka olaylarda 0) eklendi; `struct_size`
+  onları içerir. `erk_event_prevent_default` yerleşik komutu durdurur;
+  özel komut yalnızca host'a söylenir. `ERK_EVENT_CANCEL` artık
+  `request-close` komutunda da gelir (`closedby=none` olsa da). Modal
+  açılan diyalog, ataları olmayan açık `auto` popover'ları kapatır:
+  komutla açılınca her biri `beforetoggle` ve `toggle` ile, host
+  açınca olaysız.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

@@ -685,6 +685,8 @@ impl Context {
             y: event.y,
             modifiers: event.modifiers,
             key: event.key.clone(),
+            command: event.command.clone(),
+            source: event.source.and_then(|source| self.outward(source)),
         };
         for id in self.listeners.at(node, event.kind, capture) {
             // Ended by an earlier callback: not called (DOM's removed flag).

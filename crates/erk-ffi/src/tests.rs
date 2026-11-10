@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_17() {
-    assert_eq!(erk_abi_version(), 17);
+fn the_abi_version_is_0_18() {
+    assert_eq!(erk_abi_version(), 18);
 }
 
 #[test]
@@ -1457,5 +1457,72 @@ fn c_opens_and_closes_dialogs_and_popovers_and_hears_cancel_and_close() {
     assert_eq!(erk_popover_hide(app, p), ERK_OK);
     assert_eq!(first(app, ":popover-open"), ERK_NODE_NONE);
     assert_eq!(erk_popover_show(app, x), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+/// The last `ERK_EVENT_COMMAND` a subscription heard.
+#[derive(Default)]
+struct LastCommand {
+    command: std::sync::Mutex<String>,
+    source: std::sync::atomic::AtomicU64,
+}
+
+#[allow(unsafe_code)] // SAFETY: a C callback; dereferences the test's LastCommand and Erk's event.
+unsafe extern "C" fn remember_command(
+    user_data: *mut c_void,
+    _: *mut ErkApp,
+    event: *const ErkEvent,
+) {
+    // SAFETY: the test passes a live LastCommand and Erk a live event whose
+    // command it lends for the call.
+    let (last, event) = unsafe { (&*user_data.cast::<LastCommand>(), &*event) };
+    // SAFETY: as above.
+    let command =
+        unsafe { std::slice::from_raw_parts(event.command.ptr.cast::<u8>(), event.command.len) };
+    assert_eq!(event.kind, ERK_EVENT_COMMAND);
+    *last.command.lock().unwrap() = String::from_utf8(command.to_vec()).unwrap();
+    last.source.store(event.source, Ordering::SeqCst);
+}
+
+#[test]
+fn c_hears_a_buttons_command_with_its_name_and_source() {
+    let app = app_with(
+        "<body style='margin: 0'><button id=b commandfor=p command=--kaydet \
+         style='display: block; width: 40px; height: 20px; padding: 0'>b</button>\
+         <div id=p popover>p</div>",
+    );
+    let (b, p) = (query(app, "#b"), query(app, "#p"));
+    let last = LastCommand::default();
+    let mut subscription = 0;
+    assert_eq!(
+        erk_on(
+            app,
+            p,
+            ERK_EVENT_COMMAND,
+            Some(remember_command),
+            std::ptr::from_ref(&last).cast_mut().cast(),
+            None,
+            &mut subscription
+        ),
+        ERK_OK
+    );
+    for kind in [ERK_INPUT_POINTER_DOWN, ERK_INPUT_POINTER_UP] {
+        let press = ErkInput {
+            struct_size: size_of::<ErkInput>() as u32,
+            kind,
+            x: 5.0,
+            y: 5.0,
+            dx: 0.0,
+            dy: 0.0,
+            button: ERK_BUTTON_PRIMARY,
+            key: 0,
+            text: s(""),
+            modifiers: 0,
+            caret: 0,
+        };
+        assert_eq!(erk_app_input(app, &press), ERK_OK);
+    }
+    assert_eq!(*last.command.lock().unwrap(), "--kaydet");
+    assert_eq!(last.source.load(Ordering::SeqCst), b);
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }

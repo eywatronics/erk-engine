@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="erk-press" content="ac-onay evet ac-onay vazgec ac-menu ac-alt ac-not ac-ipucu gizle-ipucu ozel bilinmeyen">
+<title>Komutlar</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .kutu { margin: 20px; padding: 12px 16px; width: 520px; border: 2px solid #cbd5e1; }
+  button { display: inline-block; font: inherit; color: #1f2933; background: #e2e8f0;
+           border: 1px solid #94a3b8; padding: 4px 10px; margin: 0 6px 6px 0; }
+  #menu { min-width: 200px; }
+  #menu p { margin: 4px 0; }
+  #alt { inset: auto; top: 160px; right: 170px; margin: 0; background: #bbf7d0;
+         border: 2px solid #059669; padding: 10px 14px; }
+  #not { inset: auto; left: 30px; bottom: 30px; margin: 0; background: #fde68a;
+         border: 1px solid #d97706; padding: 8px 12px; width: 220px; }
+  #onay { border: 0; padding: 16px 20px; background: #ffffff; width: 300px; }
+  #onay p { margin: 0 0 12px; }
+  /* Erk draws no focus ring yet. */
+  :focus-visible { outline: none; }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <button id="ac-menu" commandfor="menu" command="toggle-popover">Menü</button>
+    <button id="ac-not" commandfor="not" command="show-popover">Not</button>
+    <button id="ac-onay" commandfor="onay" command="show-modal">Sil…</button>
+    <button id="ozel" commandfor="menu" command="--yenile">Yenile</button>
+    <button id="bilinmeyen" commandfor="kapali" command="ac">Bilinmeyen</button>
+    <p>Bir düğme, commandfor'un adlandırdığı öğede komutunu çalıştırır:
+    açılır pencereleri açıp kapatır, diyalogu modal açar, kapatır ya da
+    kapanmasını ister. Özel bir komut yalnızca host'a gider.</p>
+    <button id="ac-ipucu" commandfor="ipucu" command="show-popover">İpucu</button>
+    <button id="gizle-ipucu" commandfor="ipucu" command="hide-popover">İpucunu gizle</button>
+  </div>
+  <div id="menu" popover>
+    <p>Komutla açılan menü</p>
+    <button id="ac-alt" commandfor="alt" command="toggle-popover">Alt menü</button>
+  </div>
+  <div id="alt" popover>Menüdeki düğmeyle açıldı</div>
+  <div id="not" popover="manual">Elle açılan not: komutla açıldı</div>
+  <div id="ipucu" popover="manual">Görünmez: açılıp gizlendi</div>
+  <div id="kapali" popover>Görünmez: bilinmeyen komut</div>
+  <dialog id="onay">
+    <p>Seçilenler silinsin mi?</p>
+    <button id="evet" commandfor="onay" command="close" value="evet">Evet</button>
+    <button id="vazgec" commandfor="onay" command="request-close">Vazgeç</button>
+  </dialog>
+</body>
+</html>

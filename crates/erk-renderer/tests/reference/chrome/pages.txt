@@ -1,8 +1,9 @@
 blocks 34d6fbfbe2573fa3
 borders 1dc4702396b718e8
 canvas-alpha 719508b93c27ff29
+command 518c55fce72fc2e0
 details 7d7f3d5b04b38020
-dialog 74455266ee655c0c
+dialog 1cb29d62c3c6512c
 flex-form 45ec6c193e17318d
 gradients 5cd2d4496be4a7b1
 hidpi 9b87a96568f76016

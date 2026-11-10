@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 17;
+pub const ERK_ABI_VERSION: u32 = 18;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -278,12 +278,18 @@ pub const ERK_EVENT_TOGGLE: u32 = 9;
 /// A popover is about to open or close; it does not bubble.
 /// `erk_event_prevent_default` keeps one that was opening closed.
 pub const ERK_EVENT_BEFORETOGGLE: u32 = 10;
-/// The user asked a modal dialog to close (Escape); it does not bubble.
+/// The user asked a dialog to close (Escape at a modal one, or a
+/// `request-close` command); it does not bubble.
 /// `erk_event_prevent_default` keeps it open.
 pub const ERK_EVENT_CANCEL: u32 = 11;
 /// A dialog the user closed closed (not one the host closes); it does not
 /// bubble.
 pub const ERK_EVENT_CLOSE: u32 = 12;
+/// A button's command at the element its `commandfor` names, before the
+/// command runs; `command` and `source` say which and whose. It does not
+/// bubble. `erk_event_prevent_default` keeps a built-in command from
+/// running; a custom one (`--name`) does nothing else.
+pub const ERK_EVENT_COMMAND: u32 = 13;
 
 pub const ERK_PHASE_CAPTURE: u32 = 1;
 pub const ERK_PHASE_TARGET: u32 = 2;
@@ -308,6 +314,12 @@ pub struct ErkEvent {
     pub text: ErkStr,
     /// Key events: `ERK_KEY_*`.
     pub key: u32,
+    /// `ERK_EVENT_COMMAND`: the command, a built-in one as HTML names it
+    /// (`show-modal`), a custom one (`--name`) as the button wrote it;
+    /// empty for other events.
+    pub command: ErkStr,
+    /// `ERK_EVENT_COMMAND`: the button that sent it; 0 for other events.
+    pub source: ErkNodeId,
 }
 
 // ---- Mutations ---------------------------------------------------------------
@@ -1758,6 +1770,7 @@ fn kind_of(kind: u32) -> Result<EventKind, ErkStatus> {
         ERK_EVENT_BEFORETOGGLE => Ok(EventKind::BeforeToggle),
         ERK_EVENT_CANCEL => Ok(EventKind::Cancel),
         ERK_EVENT_CLOSE => Ok(EventKind::Close),
+        ERK_EVENT_COMMAND => Ok(EventKind::Command),
         _ => Err(ERK_ERR_INVALID_ARGUMENT),
     }
 }
@@ -1830,6 +1843,8 @@ fn subscribe(
                     Some(Key::End) => ERK_KEY_END,
                     Some(Key::Character(_)) => ERK_KEY_CHARACTER,
                 },
+                command: lent(event.command.as_deref().unwrap_or("")),
+                source: event.source.map_or(0, Node::to_raw),
             };
             #[allow(unsafe_code)] // SAFETY: the app outlives its subscriptions.
             let shared = unsafe { &*target.1 };
