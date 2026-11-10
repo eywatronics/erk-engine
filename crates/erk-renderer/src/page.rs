@@ -11,6 +11,7 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+mod dialog;
 mod popover;
 
 use std::cell::RefCell;
@@ -53,6 +54,9 @@ pub(crate) struct Page {
     /// Whether the focused element shows it (`:focus-visible`): the
     /// keyboard moved the focus there, or it takes typing.
     focus_visible: bool,
+    /// Whether the user's last input was the pointer's: a focus the host
+    /// moves shows unless it was, as browsers show one a script moves.
+    pointer_last: bool,
     /// The node the developer tools highlight.
     highlight: Option<NodeId>,
     /// The focused text field's caret: a byte offset in its value (M5.8).
@@ -111,6 +115,8 @@ pub(crate) struct Page {
     touched: layout::Touched,
     /// The popovers' plan and memory (M5.9).
     popovers: popover::Popovers,
+    /// Each dialog's return value, once it has one.
+    dialogs: Vec<(NodeId, String)>,
 }
 
 /// What earlier frames left for a frame to build on: the last frame's
@@ -296,6 +302,7 @@ impl Page {
             pressed: None,
             focus: None,
             focus_visible: false,
+            pointer_last: false,
             highlight: None,
             caret: None,
             anchor: 0,
@@ -319,6 +326,7 @@ impl Page {
             shapes: (ShapeCache::default(), 0),
             touched: layout::Touched::default(),
             popovers: popover::Popovers::default(),
+            dialogs: Vec::new(),
         }
     }
 
@@ -878,6 +886,14 @@ impl Page {
             .find(|hit| hit.contains((x, y)))
             .map(|hit| (hit.node, hit.text));
         let in_viewport = x >= 0.0 && y >= 0.0 && x < self.viewport.0 && y < self.viewport.1;
+        // Behind a modal dialog the page is inert: a press there is the
+        // dialog's (its backdrop's).
+        if let Some(modal) = self.blocking_modal() {
+            return match hit {
+                Some((node, text)) if !self.inert(node) => Some((node, text)),
+                _ => in_viewport.then_some((modal, false)),
+            };
+        }
         hit.or_else(|| {
             in_viewport
                 .then(|| {
@@ -970,6 +986,7 @@ impl Page {
         };
         match (input.kind, input.button) {
             (PointerKind::Down, PointerButton::Primary) => {
+                self.pointer_last = true;
                 self.pressed = target;
                 self.popover_press_down(target);
                 // The focus goes to the focusable element pressed, or away
@@ -1059,6 +1076,9 @@ impl Page {
     /// Enter on a focused link or button and Space released on a focused
     /// button click it, as browsers do. Keyboard clicks are at 0, 0.
     pub(crate) fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
+        if input.state == KeyState::Down {
+            self.pointer_last = false;
+        }
         let focused = self.focus.filter(|node| self.doc.node(*node).is_some());
         // In a text field, a key edits or moves the caret (M5.8).
         if input.state == KeyState::Down
@@ -1095,7 +1115,7 @@ impl Page {
                 self.move_focus(Some(order[next]), input.modifiers, true)
             }
             // A close request: the top `auto` popover closes.
-            (Key::Escape, KeyState::Down) => self.popover_escape().unwrap_or_default(),
+            (Key::Escape, KeyState::Down) => self.close_request().unwrap_or_default(),
             (Key::Enter, KeyState::Down) | (Key::Space, KeyState::Up) => {
                 let Some(node) = focused else {
                     return Vec::new();
@@ -1777,7 +1797,10 @@ impl Page {
                 || (*name == local_name!("a") && element.attr(&local_name!("href")).is_some())
                 || self.details_of_summary(node).is_some()
         };
-        shown && focusable && !crate::layout::hidden_in_details(&self.doc, node)
+        shown
+            && focusable
+            && !crate::layout::hidden_in_details(&self.doc, node)
+            && !self.inert(node)
     }
 
     /// The `details` element `node` is the summary of, if it is one.
@@ -1855,9 +1878,10 @@ impl Page {
 
     /// Click the elements a `<meta name="erk-press" content="id …">` names,
     /// in order, as DOM's `click()` does: what each click does by default,
-    /// with nothing prevented, and no focus moved. What the render_html
-    /// family draws a page with a popover open from; the reference tests
-    /// click the same in Chrome.
+    /// with nothing prevented, and no focus moved. `show-modal:id` shows
+    /// that dialog as DOM's `showModal()` does instead. What the
+    /// render_html family draws a page with a popover or a dialog open
+    /// from; the reference tests do the same in Chrome.
     pub(crate) fn press_from_meta(&mut self) {
         let mut ids = Vec::new();
         let mut stack = vec![self.doc.root()];
@@ -1875,8 +1899,14 @@ impl Page {
                 ids.extend(content.split_ascii_whitespace().map(str::to_owned));
             }
         }
-        for id in ids {
-            let Some(target) = self.element_with_id(&id) else {
+        for token in ids {
+            if let Some(id) = token.strip_prefix("show-modal:") {
+                if let Some(dialog) = self.element_with_id(id) {
+                    let _ = self.show_dialog(dialog.to_bits(), true);
+                }
+                continue;
+            }
+            let Some(target) = self.element_with_id(&token) else {
                 continue;
             };
             let mut queue: Vec<Event> = self.click_default(target);
@@ -2183,6 +2213,11 @@ impl Page {
         }
         self.journal.touch(&self.doc, parent);
         let joins = !erk_invalidation::journal::connected(&self.doc, child);
+        // Into an element outside the document: it may come back this
+        // frame, to be compared with what it was.
+        if !joins && !erk_invalidation::journal::connected(&self.doc, parent) {
+            self.journal.leaving(&self.doc, child);
+        }
         // A popover moved closes (HTML's removing steps).
         self.touch_top_layer(None);
         self.doc.insert(parent, child, before).map_err(status)?;
@@ -2215,6 +2250,7 @@ impl Page {
         let before = self.popover_kind(node);
         self.doc.set_attr(node, name, value).map_err(status)?;
         self.popover_attribute_changed(node, name, before);
+        self.dialog_attribute_changed(node, name);
         Ok(())
     }
 
@@ -2225,6 +2261,7 @@ impl Page {
         let before = self.popover_kind(node);
         let had = self.doc.remove_attr(node, name).map_err(status)?;
         self.popover_attribute_changed(node, name, before);
+        self.dialog_attribute_changed(node, name);
         Ok(had)
     }
 
@@ -2311,6 +2348,7 @@ impl Page {
     fn forget_gone_nodes(&mut self) {
         let doc = &self.doc;
         self.offsets.retain(|id, _| doc.node(*id).is_some());
+        self.dialogs.retain(|(id, _)| doc.node(*id).is_some());
     }
 
     /// The node `bits` names: 0 and other numbers no id has are invalid, an

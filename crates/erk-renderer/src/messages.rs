@@ -234,6 +234,12 @@ pub enum EventKind {
     /// bubble. Preventing its default keeps one that was opening closed;
     /// one that is closing closes anyway (M5.9).
     BeforeToggle = 10,
+    /// The user asked a modal dialog to close (Escape); preventing its
+    /// default keeps it open. It does not bubble (M5.9).
+    Cancel = 11,
+    /// A dialog the user closed closed; not one the host closes. It does
+    /// not bubble (M5.9).
+    Close = 12,
 }
 
 /// What a resource is for (p1-contract §6): the host may serve one URL in

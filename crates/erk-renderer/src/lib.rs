@@ -83,7 +83,8 @@ impl Frame {
 /// still picture cannot get otherwise: the page may name, in a
 /// `<meta name="erk-press" content="id …">`, elements clicked in order
 /// before it is drawn, as DOM's `click()` would, so that a popover shows
-/// open. The reference tests click the same in Chrome.
+/// open; `show-modal:id` shows that dialog as DOM's `showModal()` would.
+/// The reference tests do the same in Chrome.
 pub fn render_html(html: &str, width: u16, height: u16) -> Frame {
     render_document(
         html,

@@ -31,6 +31,7 @@ use std::fmt::Write as _;
 
 use erk_dom::{Document, NodeId, local_name};
 use erk_style::style::computed_values::visibility::T as Visibility;
+use erk_style::style::values::computed::Display as StyleDisplay;
 use erk_style::{ComputedValues, Styles};
 use parley::PositionedLayoutItem;
 
@@ -389,8 +390,26 @@ impl Content {
         let mut items = stacking_context(&walk, doc.root());
         // The top layer above everything, the last added on top, each
         // element its own stacking context outside its ancestors' (CSS
-        // Position 4 §3): no ancestor's opacity or transform applies.
+        // Position 4 §3): no ancestor's opacity or transform applies. A
+        // modal dialog's backdrop goes right under it, over the viewport
+        // (only what `background` and `box-shadow` paint).
         for id in doc.top_layer() {
+            if let Some(backdrop) = styles
+                .backdrop(*id)
+                .filter(|style| style.get_box().clone_display() != StyleDisplay::None)
+            {
+                let mut decoration = Vec::new();
+                box_decoration(
+                    &backdrop,
+                    scrolling.viewport(),
+                    [0.0; 4],
+                    true,
+                    resources,
+                    &mut decoration,
+                );
+                let scope = scrolling.scope(*id);
+                items.extend(decoration.into_iter().map(|item| (scope, item)));
+            }
             items.extend(stacking_context(&walk, *id));
         }
         let (items, moves) = clipped(items, scrolling);

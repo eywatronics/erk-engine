@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 16;
+pub const ERK_ABI_VERSION: u32 = 17;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -278,6 +278,12 @@ pub const ERK_EVENT_TOGGLE: u32 = 9;
 /// A popover is about to open or close; it does not bubble.
 /// `erk_event_prevent_default` keeps one that was opening closed.
 pub const ERK_EVENT_BEFORETOGGLE: u32 = 10;
+/// The user asked a modal dialog to close (Escape); it does not bubble.
+/// `erk_event_prevent_default` keeps it open.
+pub const ERK_EVENT_CANCEL: u32 = 11;
+/// A dialog the user closed closed (not one the host closes); it does not
+/// bubble.
+pub const ERK_EVENT_CLOSE: u32 = 12;
 
 pub const ERK_PHASE_CAPTURE: u32 = 1;
 pub const ERK_PHASE_TARGET: u32 = 2;
@@ -1279,6 +1285,93 @@ pub extern "C" fn erk_node_set_attr(
     })
 }
 
+/// Show dialog `node` as DOM's `show()` does: it gets `open` and the
+/// focus goes into it. `ERK_ERR_INVALID_ARGUMENT` for an element that is
+/// not a dialog, or a modal one. No event.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_dialog_show(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().show_dialog(node(node_id)?).abi()
+    })
+}
+
+/// Show dialog `node` as DOM's `showModal()` does: in the top layer, a
+/// backdrop behind it, the page behind it inert, the focus inside it;
+/// Escape then sends `ERK_EVENT_CANCEL`, whose default closes it, then
+/// `ERK_EVENT_CLOSE`. `ERK_ERR_INVALID_ARGUMENT` for an element that is
+/// not a dialog, one shown otherwise, an open popover, or one outside the
+/// document. No event.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_dialog_show_modal(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().show_modal_dialog(node(node_id)?).abi()
+    })
+}
+
+/// Close dialog `node` as DOM's `close()` does; its return value becomes
+/// `return_value`, or stays as it was when `return_value.ptr` is null.
+/// The focus goes back where it was. `ERK_ERR_INVALID_ARGUMENT` for an
+/// element that is not a dialog. No event.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_dialog_close(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    return_value: ErkStr,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let value = if return_value.ptr.is_null() && return_value.len == 0 {
+            None
+        } else {
+            Some(text(return_value)?)
+        };
+        app.cx()
+            .close_dialog(node(node_id)?, value.as_deref())
+            .abi()
+    })
+}
+
+/// Dialog `node`'s return value (DOM's `returnValue`), into the caller's
+/// buffer as `erk_node_attr` does: empty until it is closed with one.
+/// `ERK_ERR_INVALID_ARGUMENT` for an element that is not a dialog.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_dialog_return_value(
+    app: *mut ErkApp,
+    node_id: ErkNodeId,
+    buf: *mut c_char,
+    cap: usize,
+    len: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let value = app.cx().dialog_return_value(node(node_id)?).abi()?;
+        put_text(&value, buf, cap, len)
+    })
+}
+
+/// Show popover `node` as DOM's `showPopover()` does, with no event.
+/// `ERK_ERR_INVALID_ARGUMENT` for an element without `popover`, or one
+/// that cannot open.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_popover_show(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().show_popover(node(node_id)?).abi()
+    })
+}
+
+/// Hide popover `node` as DOM's `hidePopover()` does, with no event.
+/// `ERK_ERR_INVALID_ARGUMENT` for an element without `popover`.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_popover_hide(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        app.cx().hide_popover(node(node_id)?).abi()
+    })
+}
+
 /// Remove attribute `name`; `ERK_ERR_NOT_FOUND` if there was none.
 #[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
 #[unsafe(no_mangle)]
@@ -1663,6 +1756,8 @@ fn kind_of(kind: u32) -> Result<EventKind, ErkStatus> {
         ERK_EVENT_BLUR => Ok(EventKind::Blur),
         ERK_EVENT_TOGGLE => Ok(EventKind::Toggle),
         ERK_EVENT_BEFORETOGGLE => Ok(EventKind::BeforeToggle),
+        ERK_EVENT_CANCEL => Ok(EventKind::Cancel),
+        ERK_EVENT_CLOSE => Ok(EventKind::Close),
         _ => Err(ERK_ERR_INVALID_ARGUMENT),
     }
 }

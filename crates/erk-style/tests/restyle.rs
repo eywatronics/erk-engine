@@ -251,7 +251,7 @@ fn a_popover_shows_while_it_is_in_the_top_layer() {
     let display = |s: &mut Session| s.frame().computed(p).unwrap().clone_display();
     assert_eq!(display(&mut s), Display::None);
     s.journal.touch(&s.doc, p);
-    s.doc.add_to_top_layer(p).unwrap();
+    s.doc.add_to_top_layer(p, false).unwrap();
     let open = s.frame().computed(p).unwrap();
     assert_eq!(open.clone_display(), Display::Block);
     assert_eq!(open.clone_position(), Position::Fixed);
@@ -261,7 +261,7 @@ fn a_popover_shows_while_it_is_in_the_top_layer() {
     );
     // Only a popover matches: another element in the top layer does not.
     s.journal.touch(&s.doc, plain);
-    s.doc.add_to_top_layer(plain).unwrap();
+    s.doc.add_to_top_layer(plain, false).unwrap();
     let styles = s.frame();
     assert_ne!(
         styles.computed(plain).unwrap().get_inherited_text().color,
@@ -270,6 +270,55 @@ fn a_popover_shows_while_it_is_in_the_top_layer() {
     s.journal.touch(&s.doc, p);
     s.doc.remove_from_top_layer(p);
     assert_eq!(display(&mut s), Display::None);
+}
+
+#[test]
+fn a_modal_dialog_matches_modal_and_has_a_backdrop() {
+    use erk_style::style::computed_values::display::T as Display;
+    use erk_style::style::computed_values::position::T as Position;
+    let mut s = Session::new(
+        "<style>dialog::backdrop { background-color: rgb(0, 0, 255) }          :modal { color: rgb(0, 128, 0) }</style><dialog id=d>d</dialog>",
+    );
+    let d = s.find("d");
+    let full = |s: &Session| StyleEngine::new(800.0, 600.0).style_with(&s.doc, &s.interaction);
+    assert_eq!(
+        s.frame().computed(d).unwrap().clone_display(),
+        Display::None
+    );
+    // Open, not modal: in the flow's place, no backdrop.
+    s.set_attr(d, "open", "");
+    let styles = s.frame();
+    let open = styles.computed(d).unwrap();
+    assert_eq!(open.clone_position(), Position::Absolute);
+    assert!(styles.backdrop(d).is_none());
+    // Modal: fixed, `:modal`, and a backdrop, as a full style has it.
+    s.journal.touch(&s.doc, d);
+    s.doc.add_to_top_layer(d, true).unwrap();
+    let styles = s.frame();
+    let modal = styles.computed(d).unwrap();
+    assert_eq!(modal.clone_position(), Position::Fixed);
+    assert_eq!(
+        modal.get_inherited_text().color,
+        erk_style::style::color::AbsoluteColor::srgb_legacy(0, 128, 0, 1.0)
+    );
+    let backdrop = styles.backdrop(d).expect("a backdrop");
+    assert!(same_style(&backdrop, &full(&s).backdrop(d).unwrap()));
+    assert_eq!(
+        format!("{:?}", backdrop.get_background().background_color),
+        format!(
+            "{:?}",
+            full(&s)
+                .backdrop(d)
+                .unwrap()
+                .get_background()
+                .background_color
+        )
+    );
+    assert!(format!("{:?}", backdrop.get_background().background_color).contains("0.0, 0.0, 1.0"));
+    // Out of the top layer: no backdrop.
+    s.journal.touch(&s.doc, d);
+    s.doc.remove_from_top_layer(d);
+    assert!(s.frame().backdrop(d).is_none());
 }
 
 #[test]

@@ -30,3 +30,4 @@ vertical-align 68.11
 white-space 92.35
 details 84.10
 popover 87.32
+dialog 93.80

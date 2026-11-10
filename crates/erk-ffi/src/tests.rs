@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_16() {
-    assert_eq!(erk_abi_version(), 16);
+fn the_abi_version_is_0_17() {
+    assert_eq!(erk_abi_version(), 17);
 }
 
 #[test]
@@ -1373,5 +1373,89 @@ fn a_beforetoggle_reaches_c_and_cancelled_keeps_a_popover_closed() {
     press(app);
     assert_eq!(told.kind.load(Ordering::SeqCst), ERK_EVENT_TOGGLE);
     assert_eq!(open(app), p);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+#[test]
+fn c_opens_and_closes_dialogs_and_popovers_and_hears_cancel_and_close() {
+    let app = app_with(
+        "<body style='margin: 0'><dialog id=d>d</dialog><div id=p popover>p</div><p id=x>x</p>",
+    );
+    let (d, p, x) = (query(app, "#d"), query(app, "#p"), query(app, "#x"));
+    let (cancelled, closed) = (LastKey::default(), LastKey::default());
+    let mut subscription = 0;
+    for (kind, last) in [(ERK_EVENT_CANCEL, &cancelled), (ERK_EVENT_CLOSE, &closed)] {
+        assert_eq!(
+            erk_on(
+                app,
+                d,
+                kind,
+                Some(remember_key),
+                std::ptr::from_ref(last).cast_mut().cast(),
+                None,
+                &mut subscription
+            ),
+            ERK_OK
+        );
+    }
+    let first = |app, selector: &str| {
+        let mut found = ERK_NODE_NONE;
+        assert_eq!(
+            erk_query(app, ERK_NODE_NONE, s(selector), &mut found),
+            ERK_OK
+        );
+        found
+    };
+    assert_eq!(erk_dialog_show_modal(app, d), ERK_OK);
+    assert_eq!(first(app, ":modal"), d);
+    assert_eq!(erk_dialog_show(app, d), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(erk_dialog_show(app, x), ERK_ERR_INVALID_ARGUMENT);
+    for state in [ERK_INPUT_KEY_DOWN, ERK_INPUT_KEY_UP] {
+        let escape = ErkInput {
+            struct_size: size_of::<ErkInput>() as u32,
+            kind: state,
+            x: 0.0,
+            y: 0.0,
+            dx: 0.0,
+            dy: 0.0,
+            button: 0,
+            key: ERK_KEY_ESCAPE,
+            text: s(""),
+            modifiers: 0,
+            caret: 0,
+        };
+        assert_eq!(erk_app_input(app, &escape), ERK_OK);
+    }
+    assert_eq!(cancelled.kind.load(Ordering::SeqCst), ERK_EVENT_CANCEL);
+    assert_eq!(closed.kind.load(Ordering::SeqCst), ERK_EVENT_CLOSE);
+    assert_eq!(first(app, ":modal"), ERK_NODE_NONE);
+    // A return value set, then kept by a close without one.
+    let value = || {
+        let mut buf = [0u8; 16];
+        let mut len = 0;
+        assert_eq!(
+            erk_dialog_return_value(app, d, buf.as_mut_ptr().cast(), buf.len(), &mut len),
+            ERK_OK
+        );
+        String::from_utf8(buf[..len].to_vec()).unwrap()
+    };
+    assert_eq!(value(), "");
+    assert_eq!(erk_dialog_show(app, d), ERK_OK);
+    assert_eq!(erk_dialog_close(app, d, s("evet")), ERK_OK);
+    assert_eq!(value(), "evet");
+    assert_eq!(erk_dialog_show(app, d), ERK_OK);
+    let none = ErkStr {
+        ptr: std::ptr::null(),
+        len: 0,
+    };
+    assert_eq!(erk_dialog_close(app, d, none), ERK_OK);
+    assert_eq!(value(), "evet");
+    assert_eq!(erk_dialog_close(app, x, none), ERK_ERR_INVALID_ARGUMENT);
+    // Popovers.
+    assert_eq!(erk_popover_show(app, p), ERK_OK);
+    assert_eq!(first(app, ":popover-open"), p);
+    assert_eq!(erk_popover_hide(app, p), ERK_OK);
+    assert_eq!(first(app, ":popover-open"), ERK_NODE_NONE);
+    assert_eq!(erk_popover_show(app, x), ERK_ERR_INVALID_ARGUMENT);
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }
