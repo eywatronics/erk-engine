@@ -1794,13 +1794,13 @@ css/css-position/multicol/vrl-rtl-rtl-in-multicols.html FAIL
 css/css-position/nested-inline-abspos-child-with-siblings.html FAIL
 css/css-position/nested-inline-abspos-child.html FAIL
 css/css-position/overlay/author-overlay-top-layer-removal.html PASS
-css/css-position/overlay/overlay-button-appearance.html FAIL
+css/css-position/overlay/overlay-button-appearance.html PASS
 css/css-position/overlay/overlay-transition-backdrop-entry.html PASS
 css/css-position/overlay/overlay-transition-backdrop.html FAIL
 css/css-position/overlay/overlay-transition-dialog.html PASS
 css/css-position/overlay/overlay-transition-finished.html FAIL
 css/css-position/overlay/overlay-transition-in-rendering.html FAIL
-css/css-position/overlay/overlay-transition-out-rendering.html FAIL
+css/css-position/overlay/overlay-transition-out-rendering.html PASS
 css/css-position/position-absolute-center-001.html FAIL
 css/css-position/position-absolute-center-002.html FAIL
 css/css-position/position-absolute-center-003.html PASS
