@@ -1,0 +1,15 @@
+0 body block 24 24 752 280
+1 section block 24 24 420 60
+2 a inline 24 24 420 60
+3 div block 24 24 324 60
+4 section block 24 100 420 66
+5 span inline 24 98 420 70
+6 div block 24 122 220 22
+7 section block 24 182 420 66
+8 span inline 24 182 420 66
+9 b inline 24 182 420 66
+10 span inline 24 182 420 66
+11 div block 24 204 220 22
+12 section block 24 264 420 40
+13 span inline 24 264 420 40
+14 div block 24 264 40 40
