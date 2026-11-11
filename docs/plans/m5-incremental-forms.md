@@ -1063,3 +1063,27 @@ Dördüncü PR: `commandfor`/`command`; M5.9'un son PR'ı.
 | Fuzz | Yorumlayıcının sözlüğüne `commandfor`, `command` ve komut değerleri, abonelik türlerine `toggle`, `beforetoggle`, `cancel`, `close`, `command` (geri çağrılar olay sırasında belgeyi değiştirebiliyor) ve komutlu bir sayfa eklendi. Yerelde 3000 betik temiz. Başka bir tohumla 10 000 betik eski bir yerleşim açığı buldu, `main`'de de var: aynı karede belgeye giren bir `img`'ye eklenen çocuk, artımlı yerleşimde ona kutu veriyor (kare 48 × 44, kâhin 0 × 0). Komutlarla ilgisi yok; ayrı bir düzeltme PR'ında |
 | Sınırlar | Diyalogun `beforetoggle`/`toggle` olayları, `interestfor` yok. Düğmeler hâlâ yazar stiliyle (M5.10) |
 | Mutasyonlar | 27 mutasyonun 27'si yakalandı: `command` olayının gitmemesi, iptalin ve belgeden çıkan hedefin yok sayılması, özel komutun olay göndermemesi, anahtar sözcüğün harf duyarlı okunması, olayın komutu yazıldığı gibi ve kaynaksız taşıması, düğmenin kendi popover'ında sayılmaması, Auto türünün ve formdaki gönder düğmesinin komut çalıştırması, diyaloga popover komutunun olay göndermesi, modal açılışın (komutla ve host'la) popover'ları kapatmaması, `close` ve `request-close`'un düğmenin değerini kaybetmesi, `request-close`'un yalnızca modalda çalışması, komutla açılışın odak olaylarını yutması, `show-modal`'ın modal açmaması, `follow`'un komutu düşürmesi, basış düzeninin yalnızca `beforetoggle`'ı izlemesi, boş Chrome kutusunun atlanmaması, C-ABI'nin komutu, kaynağı ve aboneliği, `erk`'in kaynağı kaybetmesi, `command`'ın kabarcıklanması. İlk turda biri kaçtı: `popovertarget`'ın `commandfor`'a üstün gelmesi yalnızca dışarıya basışta fark ediyor (tıklamada komut yolu zaten önce); açık popover'ı adlandıran böyle bir düğmeye basışın onu kapattığı test edildi |
+
+M5.9'un fuzz'ının bulduğu iki hatanın düzeltme PR'ı. İkisi de `main`'de
+vardı; ilki giderilince aynı tohum (`0x0bad_c0de_1234_5678`) ikincisini
+buldu. İkisi giderilince o tohumda da varsayılan tohumda da 10 000 betik
+temiz.
+
+Birinci hata: `img`'nin çocukları.
+
+| Konu | Not |
+|---|---|
+| Hata | Host'un bir `img`'ye taşıdığı eleman artımlı karede eski kutusuyla, eski yerinde çiziliyordu; kâhinde kutusu yok. Neden: `img` Taffy'de yaprak (replaced), çocuklarına hiç inmiyor; artımlı yol taşınan elemanın kutusunu son ağaçtan olduğu gibi alıyordu, yerleşimi de önceki kareden kalıyordu. Tam yolda aynı kutu hiç yerleşmediği için sıfırdı. Fuzz'ın bulduğu biçim (`img` aynı karede belgeye giriyor) yalnızca bir örnek: araya kare girse de, blok çocuk (`ul`, `div`) olsa da aynı. Satır içi çocukta görünmüyordu |
+| Düzeltme | Replaced eleman, metin alanı gibi, çocuklarına kutu vermiyor (`Builder::build` erken dönüyor): HTML de `img`'nin içeriğini çizmez. Çocukların eski kutuları hiçbir yere bağlanmadığı için ağaçtan düşüyor |
+| Test | `what_a_host_moves_into_an_img_has_no_box`: kare arada olsa da olmasa da kâhinle aynı, taşınan listenin kutusu yok, sonraki paragraf baştan yüklenen `<img><p>` belgesindeki yerinde. Bulunan betik `FOUND`'a girmedi: test hatanın genel biçimini daha küçük tutuyor |
+| Mutasyonlar | İkisi de yakalandı: düzeltmenin kalkması ve yalnızca artımlı yolda çalışması (tam yol çocuklara yine kutu veriyor, kâhin ayrılıyor) |
+
+İkinci hata: `display: none`'dan çıkan eleman.
+
+| Konu | Not |
+|---|---|
+| Hata | `display: none` bir alt ağacın içinden (gizli `div`, `hidden`, kapalı popover) görünen bir yere taşınan eleman artımlı karede hiç çizilmiyordu; kâhinde var. Satır içi, blok, düğme fark etmiyor. Fuzz'da kapalı bir popover'ın düğmesi açık bir düğmenin içine taşınıyordu |
+| Neden | Başka ebeveyne taşınan eleman `restyle_subtree` ipucu alıyor, ama ipucu yalnızca Stylo verisi olan elemana yazılıyordu. `display: none` altında hiç stillenmemiş elemanın verisi yok: ipucu sessizce düşüyor, stil geçişi ona hiç ulaşmıyor, stili olmayan eleman kutu almıyor |
+| Düzeltme | Verisi olmayan taşınmış eleman, yeni bir eleman gibi geçişin ulaşacakları listesine giriyor (`restyle.rs`); Stylo onu ve stilsiz torunlarını ilk kez stilliyor |
+| Test | `what_moves_out_of_display_none_is_styled_and_shown`: üç gizleme biçiminde iç içe bir alt ağaç taşınıyor; kare kâhinle aynı, elemanın kutusu var ve torununun sınıf kuralından gelen rengi hesaplanmış |
+| Mutasyon | Yakalandı: yeni dalın kalkması |

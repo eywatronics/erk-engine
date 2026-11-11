@@ -1022,6 +1022,59 @@ mod tests {
         stats.laid_out > 0
     }
 
+    /// Found by fuzzing: an element a host moved into an `img` kept the box
+    /// it had before, painted where it was, while the oracle gave it none.
+    #[test]
+    fn what_a_host_moves_into_an_img_has_no_box() {
+        for frame_between in [false, true] {
+            let mut engine = verifying("<ul id=a><li>bir</ul><p id=p>iki</p>");
+            let (body, a, p) = (
+                engine.query(None, "body").unwrap().unwrap(),
+                engine.query(None, "#a").unwrap().unwrap(),
+                engine.query(None, "#p").unwrap().unwrap(),
+            );
+            let img = engine.create_element("img").unwrap();
+            engine.insert(body, img, Some(a)).unwrap();
+            if frame_between {
+                assert!(laid_out(&mut engine));
+            }
+            engine.insert(img, a, None).unwrap();
+            assert!(laid_out(&mut engine), "{frame_between}");
+            assert_eq!(engine.node_box(a), Ok(None), "{frame_between}");
+            // The paragraph after it is where it is under an empty `img`.
+            let fresh = verifying("<img><p id=p>iki</p>");
+            let expected = fresh.node_box(fresh.query(None, "#p").unwrap().unwrap());
+            assert_eq!(engine.node_box(p), expected, "{frame_between}");
+        }
+    }
+
+    /// Found by fuzzing: an element moved out of a `display: none` subtree
+    /// was never styled, so the frame left it out; the oracle showed it.
+    #[test]
+    fn what_moves_out_of_display_none_is_styled_and_shown() {
+        for hidden in [
+            "<div style='display: none'>",
+            "<div hidden>",
+            "<div popover>",
+        ] {
+            let mut engine = verifying(&format!(
+                "<style>.k {{ color: rgb(0, 0, 255) }}</style>\
+                 <p id=x>a</p>{hidden}<div id=y><p>c <b class=k>d</b></p></div></div>"
+            ));
+            let (x, y) = (query_id(&engine, "x"), query_id(&engine, "y"));
+            assert_eq!(engine.node_box(y), Ok(None), "{hidden}");
+            engine.insert(x, y, None).unwrap();
+            assert!(laid_out(&mut engine), "{hidden}");
+            assert!(engine.node_box(y).unwrap().is_some(), "{hidden}");
+            let b = engine.query(Some(y), "b").unwrap().unwrap();
+            let style = engine.computed_style(b).unwrap().unwrap_or_default();
+            assert!(
+                style.contains("color: rgb(0, 0, 255);"),
+                "{hidden}: {style}"
+            );
+        }
+    }
+
     #[test]
     fn a_paragraph_is_shaped_again_only_when_its_content_changes() {
         let items: String = (0..50)

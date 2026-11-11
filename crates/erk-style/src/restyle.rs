@@ -168,6 +168,11 @@ impl Restyler {
             if let Some(mut data) = slot.mutate_data() {
                 data.hint.insert(hint);
                 frame.reach.push(id);
+            } else if frame.moved.contains(&id) {
+                // Never styled: it was inside `display: none`. It has no
+                // data to hold the hint, so styling reaches it as it
+                // reaches a new element.
+                frame.reach.push(id);
             }
         }
         for opaque in frame.snapshots.keys() {
