@@ -388,6 +388,90 @@ impl Document {
         selected.split_off(selected.len().saturating_sub(1))
     }
 
+    /// Whether element `id` is disabled, as HTML's "actually disabled" and
+    /// `:disabled` say (HTML §4.10.18.2): a `button`, `input`, `select`,
+    /// `textarea` or `fieldset` with a `disabled` attribute or inside a
+    /// `fieldset` with one, but not in that fieldset's first `legend`; an
+    /// `optgroup` with the attribute; an `option` with it or in an
+    /// `optgroup` with it. `None` for an element that cannot be disabled.
+    pub fn disabled(&self, id: NodeId) -> Option<bool> {
+        let element = self.node(id)?.as_element()?;
+        if element.name.ns != ns!(html) {
+            return None;
+        }
+        let own = element.attr(&local_name!("disabled")).is_some();
+        match element.name.local {
+            local_name!("optgroup") => return Some(own),
+            local_name!("option") => {
+                let in_disabled_group = self
+                    .node(id)?
+                    .parent()
+                    .and_then(|parent| self.node(parent)?.as_element())
+                    .is_some_and(|parent| {
+                        parent.name.local == local_name!("optgroup")
+                            && parent.attr(&local_name!("disabled")).is_some()
+                    });
+                return Some(own || in_disabled_group);
+            }
+            local_name!("button")
+            | local_name!("input")
+            | local_name!("select")
+            | local_name!("textarea")
+            | local_name!("fieldset") => {}
+            _ => return None,
+        }
+        if own {
+            return Some(true);
+        }
+        let mut child = id;
+        while let Some(parent) = self.node(child).and_then(|node| node.parent()) {
+            let disabled_fieldset = self
+                .node(parent)
+                .and_then(|node| node.as_element())
+                .is_some_and(|parent| {
+                    parent.name.ns == ns!(html)
+                        && parent.name.local == local_name!("fieldset")
+                        && parent.attr(&local_name!("disabled")).is_some()
+                });
+            if disabled_fieldset && Some(child) != self.first_legend(parent) {
+                return Some(true);
+            }
+            child = parent;
+        }
+        Some(false)
+    }
+
+    /// `fieldset`'s first `legend` child, which its being disabled leaves
+    /// alone.
+    fn first_legend(&self, fieldset: NodeId) -> Option<NodeId> {
+        self.children(fieldset).find(|child| {
+            self.node(*child)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| {
+                    element.name.ns == ns!(html) && element.name.local == local_name!("legend")
+                })
+        })
+    }
+
+    /// The controls whose checkedness checking or unchecking `id` can
+    /// change ([`Document::set_checked`]): `id`, the other radio buttons
+    /// of its group, or the other options of its list. A change journal
+    /// notes them before. Empty for any other element.
+    pub fn checked_with(&self, id: NodeId) -> Vec<NodeId> {
+        match self.kind(id) {
+            Ok(Some(Kind::Check)) => {
+                let mut with = vec![id];
+                with.extend(self.radio_group(id));
+                with
+            }
+            Ok(Some(Kind::Option)) => match self.select_of(id) {
+                Some(select) => self.options(select),
+                None => vec![id],
+            },
+            _ => Vec::new(),
+        }
+    }
+
     /// The other radio buttons of `id`'s group, if it is a radio button
     /// with a name.
     fn radio_group(&self, id: NodeId) -> Vec<NodeId> {
@@ -679,6 +763,65 @@ mod tests {
         assert_eq!(doc.checked(k), Ok(Some(true)));
         assert_eq!(doc.value(k), Ok(Some("evet".to_owned())));
         assert_eq!(doc.value(a), Ok(Some("on".to_owned())));
+        // What a change of each can change.
+        let sorted = |mut ids: Vec<crate::NodeId>| {
+            ids.sort_by_key(|id| id.index());
+            ids
+        };
+        assert_eq!(sorted(doc.checked_with(b)), sorted(vec![a, b]));
+        assert_eq!(doc.checked_with(c), [c]);
+        assert_eq!(doc.checked_with(k), [k]);
+    }
+
+    #[test]
+    fn a_control_is_disabled_by_its_attribute_or_a_fieldset_but_not_in_its_legend() {
+        let doc = Document::parse_html(
+            "<input id=own disabled><button id=free>b</button><p id=p>p</p>\
+             <fieldset id=f disabled>\
+               <legend><input id=in-legend><fieldset id=inner><input id=deep></fieldset></legend>\
+               <legend><input id=second-legend></legend>\
+               <input id=held><fieldset id=nested><legend><input id=nested-legend></legend></fieldset>\
+             </fieldset>\
+             <select><optgroup id=g disabled><option id=o1>1</optgroup>\
+             <option id=o2>2<option id=o3 disabled>3</select>",
+        );
+        let disabled = |id: &str| doc.disabled(find(&doc, id));
+        assert_eq!(disabled("own"), Some(true));
+        assert_eq!(disabled("free"), Some(false));
+        assert_eq!(disabled("p"), None);
+        assert_eq!(disabled("f"), Some(true));
+        // The first legend's content is the fieldset's exception, however
+        // deep; a second legend is not.
+        assert_eq!(disabled("in-legend"), Some(false));
+        assert_eq!(disabled("inner"), Some(false));
+        assert_eq!(disabled("deep"), Some(false));
+        assert_eq!(disabled("second-legend"), Some(true));
+        assert_eq!(disabled("held"), Some(true));
+        // A fieldset inside a disabled one is disabled with all it holds,
+        // its own legend too.
+        assert_eq!(disabled("nested"), Some(true));
+        assert_eq!(disabled("nested-legend"), Some(true));
+        assert_eq!(disabled("g"), Some(true));
+        assert_eq!(disabled("o1"), Some(true));
+        assert_eq!(disabled("o2"), Some(false));
+        assert_eq!(disabled("o3"), Some(true));
+    }
+
+    #[test]
+    fn what_selecting_an_option_can_change_is_its_lists_options() {
+        let doc = Document::parse_html(
+            "<select><option id=a>a<optgroup><option id=b>b</optgroup></select>\
+             <option id=c>c</option><p id=p>p</p>",
+        );
+        let (a, b, c, p) = (
+            find(&doc, "a"),
+            find(&doc, "b"),
+            find(&doc, "c"),
+            find(&doc, "p"),
+        );
+        assert_eq!(doc.checked_with(b), [a, b]);
+        assert_eq!(doc.checked_with(c), [c]);
+        assert!(doc.checked_with(p).is_empty());
     }
 
     #[test]

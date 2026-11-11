@@ -16,7 +16,7 @@ use erk::{
 
 const TAGS: &[&str] = &[
     "div", "p", "span", "ul", "li", "button", "a", "template", "table", "tr", "td", "img", "br",
-    "section", "input", "A b", "", "svg", "-x", "dialog",
+    "section", "input", "A b", "", "svg", "-x", "dialog", "label", "fieldset", "legend",
 ];
 
 const NAMES: &[&str] = &[
@@ -36,6 +36,11 @@ const NAMES: &[&str] = &[
     "open",
     "commandfor",
     "command",
+    "type",
+    "disabled",
+    "for",
+    "checked",
+    "name",
 ];
 
 const VALUES: &[&str] = &[
@@ -57,6 +62,8 @@ const VALUES: &[&str] = &[
     "toggle-popover",
     "request-close",
     "--x",
+    "checkbox",
+    "radio",
 ];
 
 /// What an input method composes or commits: kana, Turkish, a line break,
@@ -66,7 +73,16 @@ const COMPOSED: &[&str] = &["か", "かな", "ş", "\n", "e\u{301}", "ab", ""];
 /// Inline style properties and values, CSSOM style (M5.3): known and
 /// unknown names, shorthands, custom properties, values that do and do not
 /// fit.
-const PROPERTIES: &[&str] = &["color", "margin", "display", "width", "--x", "colour", ""];
+const PROPERTIES: &[&str] = &[
+    "color",
+    "margin",
+    "display",
+    "width",
+    "--x",
+    "colour",
+    "",
+    "appearance",
+];
 
 const PROPERTY_VALUES: &[&str] = &[
     "",
@@ -124,6 +140,13 @@ const PAGES: &[&str] = &[
     "<a href=# style='background: #eee'>önce <div class=a>kart</div> sonra</a>\
      <span style='border: 1px solid; padding: 0 4px'><p>p</p><div>d</div></span>\
      <label><input type=checkbox style='display: block'> etiket</label>",
+    // Checkboxes and radio buttons, labelled, one drawn by the page, and
+    // a disabled fieldset with a legend (M5.10).
+    "<label id=a><input type=checkbox id=c> c</label><label for=c>for</label>\
+     <input type=radio name=r id=r1 checked><input type=radio name=r>\
+     <input type=checkbox checked style='appearance: none; width: 9px'>\
+     <fieldset disabled><legend><input type=radio name=r></legend>\
+     <label><input type=checkbox checked> d</label></fieldset>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of

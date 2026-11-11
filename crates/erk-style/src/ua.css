@@ -199,6 +199,40 @@ input[type=hidden i] {
   display: none;
 }
 
+/* 15.3.13 The fieldset and legend elements (M5.10): a block with a frame.
+ * The legend is a block of its own, not drawn into the frame's top edge
+ * as browsers draw it; ThreeDFace is Chrome's grey. */
+fieldset {
+  display: block;
+  margin-inline: 2px;
+  border: 2px groove rgb(192, 192, 192);
+  padding-block: 0.35em 0.625em;
+  padding-inline: 0.75em;
+}
+
+legend {
+  padding-inline: 2px;
+}
+
+/* 15.5.17 Checkboxes and radio buttons (M5.10): small inline-block boxes,
+ * at Chrome's size and margins. With appearance: auto Erk draws its own
+ * look over the box (M5 plan, decision 4); appearance: none leaves the
+ * box to the page. */
+input[type=checkbox i],
+input[type=radio i] {
+  appearance: auto;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  margin: 3px 3px 3px 4px;
+  cursor: default;
+}
+
+input[type=radio i] {
+  margin: 3px 3px 0 5px;
+}
+
 /* 15.5.4 The details and summary elements (M5.9): a closed details shows
  * only its first summary, which layout sees to (bare text too). The
  * disclosure marker is drawn by Erk, inside the summary's first line. */

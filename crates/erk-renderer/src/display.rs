@@ -1044,6 +1044,7 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
                 });
             }
         }
+        decoration.extend(control_look(walk.doc, id, style, frame));
         decoration.retain(|item| ink(item).is_none_or(|ink| walk.shows(ink)));
         context.backgrounds.extend(tag(decoration, scope));
     }
@@ -1230,6 +1231,120 @@ fn inline_content(
         disclosure_marker(shaped, origin, block_color)
             .filter(|item| ink(item).is_none_or(|ink| walk.shows(ink))),
     );
+    items
+}
+
+/// The blue of a checked control, Chrome's default accent.
+const ACCENT: Rgba = [0, 117, 255, 255];
+/// The grey of an unchecked control's edge, Chrome's.
+const CONTROL_EDGE: Rgba = [118, 118, 118, 255];
+/// A disabled control's edge and fill.
+const DISABLED_EDGE: Rgba = [118, 118, 118, 128];
+const DISABLED_FILL: Rgba = [118, 118, 118, 77];
+
+/// A checkbox's or radio button's own look (M5.10; Erk's own, M5 plan
+/// decision 4), over its border box `frame`, unless its style says
+/// `appearance: none`: a white box with a grey edge, blue when checked,
+/// with a white check mark or a white ring around a blue dot; greyed when
+/// disabled. Nothing for any other element.
+fn control_look(
+    doc: &Document,
+    id: NodeId,
+    style: &ComputedValues,
+    frame: Frame,
+) -> Vec<DisplayItem> {
+    if !crate::layout::is_check_control(doc, id, style) || frame.width <= 0.0 || frame.height <= 0.0
+    {
+        return Vec::new();
+    }
+    let radio = doc
+        .node(id)
+        .and_then(|node| node.as_element())
+        .and_then(|element| element.attr(&erk_dom::local_name!("type")))
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("radio"));
+    let checked = doc.checked(id) == Ok(Some(true));
+    let disabled = doc.disabled(id) == Some(true);
+    let size = frame.width.min(frame.height);
+    let round = |r: f32| [(r, r); 4];
+    let radius = if radio {
+        size / 2.0
+    } else {
+        2.0_f32.min(size / 4.0)
+    };
+    let (fill, edge) = match (checked, disabled) {
+        (_, true) => (if checked { DISABLED_EDGE } else { WHITE }, DISABLED_EDGE),
+        (true, false) => (ACCENT, ACCENT),
+        (false, false) => (WHITE, CONTROL_EDGE),
+    };
+    let edge_width = 1.0_f32.min(size / 4.0);
+    let mut items = vec![
+        DisplayItem::RoundedRect {
+            frame,
+            radii: round(radius),
+            color: if disabled && !checked {
+                DISABLED_FILL
+            } else {
+                fill
+            },
+        },
+        DisplayItem::Border {
+            frame,
+            widths: [edge_width; 4],
+            colors: [edge; 4],
+            radii: round(radius),
+        },
+    ];
+    if !checked {
+        return items;
+    }
+    let (cx, cy) = (frame.x + frame.width / 2.0, frame.y + frame.height / 2.0);
+    if radio {
+        // A white ring between the edge and a dot half the size.
+        let ring = size * 0.38;
+        let dot = size * 0.24;
+        for (r, color) in [(ring, WHITE), (dot, fill)] {
+            items.push(DisplayItem::RoundedRect {
+                frame: Frame {
+                    x: cx - r,
+                    y: cy - r,
+                    width: 2.0 * r,
+                    height: 2.0 * r,
+                },
+                radii: round(r),
+                color,
+            });
+        }
+        return items;
+    }
+    // The mark: the right and bottom edges of a narrow box, turned a
+    // quarter of a turn's half about its middle, its corner down.
+    let stroke = (size * 0.14).max(1.5);
+    let (mark_w, mark_h) = (size * 0.3, size * 0.58);
+    let (mx, my) = (cx, cy - size * 0.06);
+    let (cos, sin) = (
+        std::f32::consts::FRAC_1_SQRT_2,
+        std::f32::consts::FRAC_1_SQRT_2,
+    );
+    items.push(DisplayItem::PushTransform([
+        cos,
+        sin,
+        -sin,
+        cos,
+        mx - cos * mx + sin * my,
+        my - sin * mx - cos * my,
+    ]));
+    items.push(DisplayItem::Border {
+        frame: Frame {
+            x: mx - mark_w / 2.0,
+            y: my - mark_h / 2.0,
+            width: mark_w,
+            height: mark_h,
+        },
+        widths: [0.0, stroke, stroke, 0.0],
+        colors: [WHITE; 4],
+        radii: round(0.0),
+    });
+    items.push(DisplayItem::PopTransform);
     items
 }
 

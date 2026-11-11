@@ -126,10 +126,17 @@ impl Listeners {
 }
 
 /// Whether `kind` goes back up the path after its target. Focus and blur
-/// do not bubble (UI Events §5.2.2); clicks and keys do.
+/// do not bubble (UI Events §5.2.2); clicks and keys do, and so do a
+/// control's input and change and a form's submit (HTML §4.10.5.5,
+/// §4.10.21.3): a form hears all its controls with one subscription.
 pub(crate) fn bubbles(kind: EventKind) -> bool {
     matches!(
         kind,
-        EventKind::Click | EventKind::KeyDown | EventKind::KeyUp
+        EventKind::Click
+            | EventKind::KeyDown
+            | EventKind::KeyUp
+            | EventKind::Input
+            | EventKind::Change
+            | EventKind::Submit
     )
 }

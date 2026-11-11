@@ -612,6 +612,9 @@ struct LayoutNode {
     /// A textarea's content height when its own is auto: `rows` lines of
     /// its line height (HTML §15.5.16), whatever it holds.
     field_height: Option<f32>,
+    /// Whether the box is a checkbox's or radio button's Erk draws: its
+    /// baseline is its border box's bottom, as Chrome sets it (M5.10).
+    check_control: bool,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -1327,6 +1330,10 @@ impl<'a> Builder<'a> {
                 if is_replaced(doc, id) {
                     self.replace(id, resources);
                 }
+                self.nodes[index].check_control = self.nodes[index]
+                    .style_source
+                    .as_ref()
+                    .is_some_and(|style| is_check_control(doc, id, style));
             }
             // Anchors in lines: their paragraph is the static position.
             let anchors: Vec<usize> = self.nodes[index]
@@ -1445,6 +1452,7 @@ impl<'a> Builder<'a> {
                     && node.style == then.style
                     && node.paragraph == then.paragraph
                     && node.field_height == then.field_height
+                    && node.check_control == then.check_control
                     && match (&node.replaced, &then.replaced) {
                         (Some(now), Some(then)) => match (&now.image, &then.image) {
                             (Some(now), Some(then)) => Arc::ptr_eq(now, then),
@@ -1773,6 +1781,24 @@ pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
         },
         _ => None,
     }
+}
+
+/// Whether element `id`, styled `style`, is a checkbox or radio button
+/// whose look Erk draws (`appearance` not `none`, M5.10).
+pub(crate) fn is_check_control(doc: &Document, id: NodeId, style: &ComputedValues) -> bool {
+    use erk_style::style::values::computed::Appearance;
+    style.get_box().clone_appearance() != Appearance::None
+        && doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .filter(|element| {
+                element.name.ns == erk_dom::ns!(html)
+                    && element.name.local == erk_dom::local_name!("input")
+            })
+            .and_then(|element| element.attr(&erk_dom::local_name!("type")))
+            .is_some_and(|kind| {
+                kind.eq_ignore_ascii_case("checkbox") || kind.eq_ignore_ascii_case("radio")
+            })
 }
 
 /// Whether element `id` is a replaced element Erk lays out: `<img>`.
@@ -2213,7 +2239,11 @@ impl<'t> LayoutTree<'t> {
             let baseline = visible
                 .then(|| output.baselines.last.or(output.baselines.first))
                 .flatten();
-            let above = baseline.map_or(outer_height, |baseline| margin.top + baseline);
+            let above = if self.nodes[atom].check_control {
+                margin.top + output.size.height
+            } else {
+                baseline.map_or(outer_height, |baseline| margin.top + baseline)
+            };
             sizes.push(AtomBox {
                 width: (margin.left + output.size.width + margin.right).max(0.0),
                 above,

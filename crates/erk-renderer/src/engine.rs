@@ -234,7 +234,9 @@ impl Engine {
     /// built-in command run.
     pub fn follow(&mut self, event: &Event, prevented: bool) -> Vec<Event> {
         let events = self.page.follow(event, prevented);
-        self.changed |= !events.is_empty();
+        // A checkbox a prevented click put back (M5.10).
+        let edited = self.page.take_edited();
+        self.changed |= edited || !events.is_empty();
         events
     }
 
@@ -495,7 +497,9 @@ impl Engine {
     /// others of its group, an option selected in a single-choice list the
     /// other options. `InvalidArgument` for any other element.
     pub fn set_checked(&mut self, node: u64, checked: bool) -> Result<(), Status> {
-        self.page.set_checked(node, checked)
+        self.page.set_checked(node, checked)?;
+        self.changed = true;
+        Ok(())
     }
 
     /// Set property `name` of element `node`'s inline style to `value`
@@ -3178,9 +3182,10 @@ mod tests {
         // Not on a checkbox.
         let e = engine.query(None, "#e").unwrap().unwrap();
         let style = engine.computed_style(e).unwrap().unwrap();
-        // Its own width line, not `min-width`'s.
+        // Its own width line, not `min-width`'s: the user agent's, not
+        // forty characters (M5.10).
         assert!(
-            style.lines().any(|line| line.trim() == "width: auto;"),
+            style.lines().any(|line| line.trim() == "width: 13px;"),
             "{style}"
         );
         // A textarea: `cols` characters wide, `rows` lines high.
@@ -4561,5 +4566,311 @@ mod tests {
         assert!(!kinds.contains(&EventKind::Close));
         assert_eq!(engine.attr(d, "open"), Ok(Some(String::new())));
         checked_frame(&mut engine);
+    }
+
+    /// The kinds of `events` that a click on a control makes, in order.
+    fn control_kinds(events: &[Event]) -> Vec<EventKind> {
+        events
+            .iter()
+            .map(|event| event.kind)
+            .filter(|kind| {
+                matches!(
+                    kind,
+                    EventKind::Click | EventKind::Input | EventKind::Change
+                )
+            })
+            .collect()
+    }
+
+    /// Whether the display list paints the blue of a checked control.
+    fn paints_accent(prepared: &Prepared) -> bool {
+        prepared.list.items.iter().any(|item| {
+            matches!(item, crate::list::DisplayItem::RoundedRect { color, .. } if *color == [0, 117, 255, 255])
+        })
+    }
+
+    #[test]
+    fn a_click_checks_a_checkbox_before_the_host_sees_it_then_tells_input_and_change() {
+        let mut engine = verifying(
+            "<style>input:checked + span { color: rgb(0, 128, 0) }</style>\
+             <input type=checkbox id=c><span id=s>etiket</span>",
+        );
+        let (c, s) = (query_id(&engine, "c"), query_id(&engine, "s"));
+        // The host's click callback reads the new checkedness.
+        let (x, y) = middle_of(&engine, c);
+        let mut seen = None;
+        let mut events = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            for event in engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            }) {
+                if event.kind == EventKind::Click {
+                    seen = Some(engine.checked(c));
+                }
+                events.extend(deliver(&mut engine, event));
+            }
+        }
+        assert_eq!(seen, Some(Ok(Some(true))));
+        assert_eq!(
+            control_kinds(&events),
+            [EventKind::Click, EventKind::Input, EventKind::Change]
+        );
+        assert!(
+            events
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::Input | EventKind::Change))
+                .all(|e| e.target == c)
+        );
+        assert!(engine.needs_frame());
+        assert!(paints_accent(&checked_frame(&mut engine)));
+        let style = engine.computed_style(s).unwrap().unwrap();
+        assert!(style.contains("color: rgb(0, 128, 0);"), "{style}");
+        // Prevented: it goes back, and tells nothing more.
+        let events = press_preventing(&mut engine, c, EventKind::Click);
+        assert_eq!(control_kinds(&events), [EventKind::Click]);
+        assert_eq!(engine.checked(c), Ok(Some(true)));
+        // Not prevented again: unchecked.
+        press_on(&mut engine, c);
+        assert_eq!(engine.checked(c), Ok(Some(false)));
+        assert!(engine.needs_frame());
+        assert!(!paints_accent(&checked_frame(&mut engine)));
+        let style = engine.computed_style(s).unwrap().unwrap();
+        assert!(!style.contains("color: rgb(0, 128, 0);"), "{style}");
+    }
+
+    #[test]
+    fn a_prevented_click_puts_the_checkbox_back_in_the_next_frame() {
+        let mut engine = verifying("<input type=checkbox id=c>");
+        let c = query_id(&engine, "c");
+        press_preventing(&mut engine, c, EventKind::Click);
+        assert_eq!(engine.checked(c), Ok(Some(false)));
+        // Checked and put back between frames: a frame all the same, the
+        // same as the last.
+        assert!(engine.needs_frame());
+        assert!(!paints_accent(&checked_frame(&mut engine)));
+        // A host that awaits before it dispatches the click: a frame
+        // shows the box checked meanwhile, and putting it back asks for
+        // another.
+        let (x, y) = middle_of(&engine, c);
+        let mut clicks = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            clicks.extend(
+                engine
+                    .pointer(&PointerInput {
+                        kind,
+                        x,
+                        y,
+                        button: PointerButton::Primary,
+                        modifiers: Modifiers::default(),
+                    })
+                    .into_iter()
+                    .filter(|event| event.kind == EventKind::Click),
+            );
+        }
+        assert!(paints_accent(&checked_frame(&mut engine)));
+        assert!(!engine.needs_frame());
+        assert!(engine.follow(&clicks[0], true).is_empty());
+        assert!(engine.needs_frame());
+        assert!(!paints_accent(&checked_frame(&mut engine)));
+    }
+
+    #[test]
+    fn a_radio_button_clicked_unchecks_its_group_and_tells_only_when_it_changes() {
+        let mut engine =
+            verifying("<input type=radio name=r id=a checked><input type=radio name=r id=b>");
+        let (a, b) = (query_id(&engine, "a"), query_id(&engine, "b"));
+        let events = press_on(&mut engine, b);
+        assert_eq!(
+            control_kinds(&events),
+            [EventKind::Click, EventKind::Input, EventKind::Change]
+        );
+        assert_eq!(
+            (engine.checked(a), engine.checked(b)),
+            (Ok(Some(false)), Ok(Some(true)))
+        );
+        checked_frame(&mut engine);
+        // Checked already: nothing changes, nothing is told.
+        let events = press_on(&mut engine, b);
+        assert_eq!(control_kinds(&events), [EventKind::Click]);
+        // Prevented: the group is as it was.
+        press_preventing(&mut engine, a, EventKind::Click);
+        assert_eq!(
+            (engine.checked(a), engine.checked(b)),
+            (Ok(Some(false)), Ok(Some(true)))
+        );
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn a_label_clicks_its_control_and_a_disabled_control_takes_no_click() {
+        let mut engine = verifying(
+            "<style>label { display: block; padding-left: 60px }</style>\
+             <label id=l1><input type=checkbox id=c1> bir</label>\
+             <label id=l2 for=c2>iki</label><input type=checkbox id=c2>\
+             <label id=l3>üç <input type=checkbox id=d disabled></label>\
+             <fieldset disabled><input type=checkbox id=f></fieldset>",
+        );
+        let [l1, c1, l2, c2, l3, d, f] =
+            ["l1", "c1", "l2", "c2", "l3", "d", "f"].map(|id| query_id(&engine, id));
+        for (label, control) in [(l1, c1), (l2, c2)] {
+            let events = press_on(&mut engine, label);
+            assert_eq!(
+                control_kinds(&events),
+                [
+                    EventKind::Click,
+                    EventKind::Click,
+                    EventKind::Input,
+                    EventKind::Change
+                ]
+            );
+            let clicks: Vec<u64> = events
+                .iter()
+                .filter(|e| e.kind == EventKind::Click)
+                .map(|e| e.target)
+                .collect();
+            assert_eq!(clicks[1], control);
+            assert_eq!(engine.checked(control), Ok(Some(true)));
+            // The label focused its control, as browsers do.
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e.kind == EventKind::Focus && e.target == control),
+                "{events:?}"
+            );
+        }
+        checked_frame(&mut engine);
+        // A disabled control takes no click, from itself or its label.
+        for at in [d, f, l3] {
+            let events = press_on(&mut engine, at);
+            assert!(
+                events
+                    .iter()
+                    .all(|e| e.target != d && e.target != f && e.kind != EventKind::Input),
+                "{events:?}"
+            );
+        }
+        assert_eq!(
+            (engine.checked(d), engine.checked(f)),
+            (Ok(Some(false)), Ok(Some(false)))
+        );
+    }
+
+    #[test]
+    fn space_checks_the_focused_checkbox_and_enter_does_not() {
+        use crate::messages::Key;
+        let mut engine = verifying("<input type=checkbox id=c>");
+        let c = query_id(&engine, "c");
+        press(&mut engine, Key::Tab);
+        let mut kinds = Vec::new();
+        for key in [Key::Enter, Key::Space] {
+            for state in [
+                crate::messages::KeyState::Down,
+                crate::messages::KeyState::Up,
+            ] {
+                let input = KeyInput {
+                    key: key.clone(),
+                    state,
+                    modifiers: Modifiers::default(),
+                };
+                engine.key(&input);
+                for event in engine.key_default(&input) {
+                    kinds.extend(control_kinds(&deliver(&mut engine, event)));
+                }
+            }
+            if key == Key::Enter {
+                assert_eq!(engine.checked(c), Ok(Some(false)));
+            }
+        }
+        assert_eq!(
+            kinds,
+            [EventKind::Click, EventKind::Input, EventKind::Change]
+        );
+        assert_eq!(engine.checked(c), Ok(Some(true)));
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn disabled_and_enabled_follow_a_fieldset_and_the_host_checks_too() {
+        let mut engine = verifying(
+            "<style>input:disabled { color: rgb(1, 2, 3) } input:enabled { color: rgb(4, 5, 6) }\
+             input:checked { color: rgb(7, 8, 9) }</style>\
+             <fieldset id=fs><legend><input type=checkbox id=in-legend></legend>\
+             <input type=checkbox id=held></fieldset>",
+        );
+        let (fs, in_legend, held) = (
+            query_id(&engine, "fs"),
+            query_id(&engine, "in-legend"),
+            query_id(&engine, "held"),
+        );
+        let color = |engine: &Engine, id| {
+            let style = engine.computed_style(id).unwrap().unwrap();
+            style
+                .lines()
+                .find(|line| line.trim_start().starts_with("color:"))
+                .map(|line| line.trim().to_owned())
+        };
+        assert_eq!(
+            color(&engine, held).as_deref(),
+            Some("color: rgb(4, 5, 6);")
+        );
+        engine.set_attr(fs, "disabled", "").unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(
+            color(&engine, held).as_deref(),
+            Some("color: rgb(1, 2, 3);")
+        );
+        assert_eq!(
+            color(&engine, in_legend).as_deref(),
+            Some("color: rgb(4, 5, 6);")
+        );
+        // The host checks: a frame, and `:checked`.
+        engine.set_checked(in_legend, true).unwrap();
+        assert!(engine.needs_frame());
+        checked_frame(&mut engine);
+        assert_eq!(
+            color(&engine, in_legend).as_deref(),
+            Some("color: rgb(7, 8, 9);")
+        );
+    }
+
+    #[test]
+    fn appearance_none_leaves_the_checkbox_to_the_page() {
+        let mut engine = verifying(
+            "<input type=checkbox id=c checked style='appearance: none; width: 20px; \
+             height: 20px; background: rgb(250, 0, 0)'>",
+        );
+        let c = query_id(&engine, "c");
+        engine.set_attr(c, "title", "x").unwrap();
+        assert!(!paints_accent(&checked_frame(&mut engine)));
+        assert_eq!(engine.node_box(c).unwrap().unwrap().width, 20.0);
+        engine.remove_attr(c, "style").unwrap();
+        assert!(paints_accent(&checked_frame(&mut engine)));
+        assert_eq!(engine.node_box(c).unwrap().unwrap().width, 13.0);
+    }
+
+    #[test]
+    fn a_drawn_checkbox_sits_on_the_line_by_its_border_box_and_one_left_to_the_page_by_its_margin()
+    {
+        let page = |appearance: &str| {
+            format!(
+                "<p>a <input type=checkbox id=c style='appearance: {appearance}; \
+                 margin: 0 0 10px 0; width: 13px; height: 13px'></p>"
+            )
+        };
+        let y = |engine: &Engine| engine.node_box(query_id(engine, "c")).unwrap().unwrap().y;
+        let (drawn, own) = (verifying(&page("auto")), verifying(&page("none")));
+        // The bottom margin hangs below the line for the drawn one, as
+        // Chrome sets it; the page's sits on it, raising the box.
+        assert!(y(&own) < y(&drawn), "{} {}", y(&own), y(&drawn));
+        // Only `appearance` changing moves it: the box is laid out again.
+        let mut engine = verifying(&page("auto"));
+        let c = query_id(&engine, "c");
+        engine.set_style_property(c, "appearance", "none").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(y(&engine), y(&own));
     }
 }

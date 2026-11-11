@@ -683,3 +683,50 @@ fn a_buttons_command_goes_to_its_target_with_its_source_not_bubbling() {
     app.click(5.0, 5.0);
     assert_eq!(app.query_all(None, ":popover-open").unwrap(), [p]);
 }
+
+#[test]
+fn a_checkbox_changes_before_its_click_and_its_form_hears_input_and_change() {
+    let mut app = app(
+        "<body style='margin: 0'><form id=f><label id=l style='display: block; \
+         height: 20px; padding-left: 40px'>etiket</label>\
+         <input type=checkbox id=c style='display: block; margin: 0; width: 20px; \
+         height: 20px'></form>",
+    );
+    let (f, l, c) = (node(&app, "#f"), node(&app, "#l"), node(&app, "#c"));
+    app.set_attr(l, "for", "c").unwrap();
+    app.tick(0);
+    let log: Log = Rc::default();
+    for kind in [EventKind::Click, EventKind::Input, EventKind::Change] {
+        let log = log.clone();
+        app.on(f, kind, move |cx, event| {
+            if event.target == c {
+                log.borrow_mut()
+                    .push(format!("{kind:?} {:?}", cx.checked(c).unwrap()));
+            }
+        })
+        .unwrap();
+    }
+    // The box itself, then its label: each a click that has checked or
+    // unchecked it already, and bubbles to the form with its input and
+    // change.
+    app.click(10.0, 30.0);
+    app.click(60.0, 10.0);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "Click Some(true)",
+            "Input Some(true)",
+            "Change Some(true)",
+            "Click Some(false)",
+            "Input Some(false)",
+            "Change Some(false)"
+        ]
+    );
+    // Prevented: back as it was, and nothing more.
+    log.borrow_mut().clear();
+    app.on(c, EventKind::Click, |cx, _| cx.prevent_default())
+        .unwrap();
+    app.click(10.0, 30.0);
+    assert_eq!(*log.borrow(), ["Click Some(true)"]);
+    assert_eq!(app.checked(c), Ok(Some(false)));
+}
