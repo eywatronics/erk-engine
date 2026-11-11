@@ -118,6 +118,12 @@ const PAGES: &[&str] = &[
      <button commandfor=a command=close>c</button>\
      <button commandfor=p command=show-popover>s</button></dialog>\
      <div id=p popover><button commandfor=m command=--x>x</button></div>",
+    // Blocks inside inline elements, which split them around the blocks
+    // (CSS 2 §9.2.1.1): a card in a link, a bordered span holding only
+    // blocks, a control made a block in its label.
+    "<a href=# style='background: #eee'>önce <div class=a>kart</div> sonra</a>\
+     <span style='border: 1px solid; padding: 0 4px'><p>p</p><div>d</div></span>\
+     <label><input type=checkbox style='display: block'> etiket</label>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of

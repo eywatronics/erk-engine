@@ -16,7 +16,11 @@
 //! its baseline on the line's (the approach of blitz-dom 0.3.0-beta.2,
 //! src/layout/inline.rs, MIT OR Apache-2.0). In a block that mixes block
 //! children with text, each run of inline content becomes an anonymous
-//! paragraph box (CSS 2 §9.2.1.1). Anonymous boxes live only in this side
+//! paragraph box (CSS 2 §9.2.1.1). A block-level element inside an inline
+//! element is one of those block children: the inline element is split
+//! around it, its content before and after going into the anonymous boxes
+//! on each side, every part with the element's style and the start and end
+//! edges on the first and last part. Anonymous boxes live only in this side
 //! table, at indices past the arena's slots: the DOM, and the NodeIds a host
 //! sees, never contain them.
 //!
@@ -1030,7 +1034,6 @@ impl<'a> Builder<'a> {
         // positioned elements are set aside for their containing block.
         let mut entries = Vec::new();
         let mut out_of_flow: OutOfFlow = Vec::new();
-        let mut has_blocks = false;
         // A summary's disclosure marker opens its first line: Erk writes
         // room for it, over which it is drawn (M5.9).
         if let Some(style) = parent_style
@@ -1091,26 +1094,28 @@ impl<'a> Builder<'a> {
                             vec![(child, computed)],
                         ));
                     } else if is_inline_level(&computed) {
-                        let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
+                        let mut run = InlineRun::new(&mut entries);
                         inline_tokens(
                             doc,
                             styles,
                             child,
                             &computed,
                             container,
-                            &mut tokens,
-                            &mut atoms,
+                            &mut run,
                             &mut out_of_flow,
                         );
-                        entries.push(Entry::Inline(tokens, atoms));
+                        run.finish();
                     } else {
-                        has_blocks = true;
                         entries.push(Entry::Block(child, computed));
                     }
                 }
                 _ => {}
             }
         }
+        // A block-level element inside an inline one is a block child too.
+        let has_blocks = entries
+            .iter()
+            .any(|entry| matches!(entry, Entry::Block(..)));
         // A paragraph: only inline content, laid out as one run. A positioned
         // or transformed block keeps a block box with an anonymous paragraph
         // inside, so the absolutely positioned elements it contains are laid
@@ -1868,7 +1873,7 @@ impl Run {
         self.tokens.iter().any(|token| match token {
             InlineToken::Text(text, ..) => text.chars().any(|c| !c.is_ascii_whitespace()),
             InlineToken::Atom(..) | InlineToken::Anchor(_) | InlineToken::Break => true,
-            InlineToken::Open(..) | InlineToken::Close => false,
+            InlineToken::Open(..) | InlineToken::Close(_) => false,
         })
     }
 }
@@ -1894,18 +1899,64 @@ fn text_language(doc: &Document, id: NodeId) -> LanguageIdentifier {
     crate::case::language(&crate::fonts::language_of(doc, id))
 }
 
+/// The inline content of a block's children being read: the tokens and
+/// atoms of the run so far, and the inline elements open around it.
+struct InlineRun<'e> {
+    tokens: Vec<Token>,
+    atoms: Atoms,
+    open: Vec<(StyleArc, NodeId)>,
+    entries: &'e mut Vec<Entry>,
+}
+
+impl<'e> InlineRun<'e> {
+    fn new(entries: &'e mut Vec<Entry>) -> Self {
+        Self {
+            tokens: Vec::new(),
+            atoms: Vec::new(),
+            open: Vec::new(),
+            entries,
+        }
+    }
+
+    /// A block-level element inside the open inline elements: they are
+    /// split around it (CSS 2 §9.2.1.1). The run so far ends, its elements
+    /// closed without their end edges, the block follows as a child of the
+    /// block they are in, and the elements open again, without their start
+    /// edges, for the content after it. Their backgrounds and borders are
+    /// painted on each part that holds content; the start edge goes with
+    /// the first, the end edge with the last (`box-decoration-break:
+    /// slice`).
+    fn split(&mut self, block: NodeId, style: StyleArc) {
+        self.tokens
+            .extend(self.open.iter().map(|_| InlineToken::Close(false)));
+        let tokens = std::mem::take(&mut self.tokens);
+        let atoms = std::mem::take(&mut self.atoms);
+        self.entries.push(Entry::Inline(tokens, atoms));
+        self.entries.push(Entry::Block(block, style));
+        self.tokens.extend(
+            self.open
+                .iter()
+                .map(|(style, id)| InlineToken::Open(style.clone(), *id, false)),
+        );
+    }
+
+    /// The run after the last block, if any, ends with the content.
+    fn finish(self) {
+        self.entries.push(Entry::Inline(self.tokens, self.atoms));
+    }
+}
+
 /// The content of inline element `id`, in tree order: its start, the text
 /// of each text node with the style of its element, nested inline elements,
-/// atomic inlines, and its end.
-#[allow(clippy::too_many_arguments)]
+/// atomic inlines, and its end. A block-level element inside splits it
+/// (see [`InlineRun::split`]).
 fn inline_tokens(
     doc: &Document,
     styles: &Styles,
     id: NodeId,
     style: &StyleArc,
     container: NodeId,
-    tokens: &mut Vec<Token>,
-    atoms: &mut Atoms,
+    run: &mut InlineRun<'_>,
     out_of_flow: &mut OutOfFlow,
 ) {
     // `<br>` is a forced line break, not an element with content.
@@ -1914,14 +1965,15 @@ fn inline_tokens(
         .and_then(|node| node.as_element())
         .is_some_and(|element| element.name.local == erk_dom::local_name!("br"))
     {
-        tokens.push(InlineToken::Break);
+        run.tokens.push(InlineToken::Break);
         return;
     }
-    tokens.push(InlineToken::Open(style.clone(), id));
+    run.tokens.push(InlineToken::Open(style.clone(), id, true));
+    run.open.push((style.clone(), id));
     for child in doc.children(id) {
         match doc.node(child).map(|node| &node.data) {
             Some(NodeData::Text(content)) => {
-                tokens.push(InlineToken::Text(
+                run.tokens.push(InlineToken::Text(
                     content.clone(),
                     style.clone(),
                     text_language(doc, id),
@@ -1929,40 +1981,44 @@ fn inline_tokens(
                 ));
             }
             Some(NodeData::Element(_)) => {
-                if let Some(child_style) = styles.computed(child) {
-                    if is_out_of_flow(&child_style) {
-                        if has_no_box(&child_style) {
-                            continue;
-                        }
-                        tokens.push(InlineToken::Anchor(child.index() as usize));
-                        out_of_flow.push((child, child_style, container));
-                    } else if is_atomic_inline(&child_style)
-                        || is_replaced(doc, child)
-                        || text_field(doc, child).is_some()
-                    {
-                        tokens.push(InlineToken::Atom(
-                            child.index() as usize,
-                            child_style.clone(),
-                        ));
-                        atoms.push((child, child_style));
-                    } else {
-                        inline_tokens(
-                            doc,
-                            styles,
-                            child,
-                            &child_style,
-                            container,
-                            tokens,
-                            atoms,
-                            out_of_flow,
-                        );
-                    }
+                let Some(child_style) = styles.computed(child) else {
+                    continue;
+                };
+                // No box, and nothing it holds has one.
+                if has_no_box(&child_style) {
+                    continue;
+                }
+                if is_out_of_flow(&child_style) {
+                    run.tokens.push(InlineToken::Anchor(child.index() as usize));
+                    out_of_flow.push((child, child_style, container));
+                } else if is_atomic_inline(&child_style)
+                    || ((is_replaced(doc, child) || text_field(doc, child).is_some())
+                        && is_inline_level(&child_style))
+                {
+                    run.tokens.push(InlineToken::Atom(
+                        child.index() as usize,
+                        child_style.clone(),
+                    ));
+                    run.atoms.push((child, child_style));
+                } else if child_style.get_box().clone_display().outside() == DisplayOutside::Block {
+                    run.split(child, child_style);
+                } else {
+                    inline_tokens(
+                        doc,
+                        styles,
+                        child,
+                        &child_style,
+                        container,
+                        run,
+                        out_of_flow,
+                    );
                 }
             }
             _ => {}
         }
     }
-    tokens.push(InlineToken::Close);
+    run.open.pop();
+    run.tokens.push(InlineToken::Close(true));
 }
 
 fn taffy_id(id: NodeId) -> taffy::NodeId {

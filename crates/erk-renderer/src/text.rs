@@ -316,10 +316,13 @@ pub(crate) enum InlineToken<S> {
     /// paints and is hit as its block.
     Text(String, S, LanguageIdentifier, Option<NodeId>),
     /// An inline element starts; its style gives its padding, border,
-    /// margin and background.
-    Open(S, NodeId),
-    /// The innermost open inline element ends.
-    Close,
+    /// margin and background. The flag says whether its start edge is
+    /// here: not where a block-level element inside it split it and its
+    /// content goes on (CSS 2 §9.2.1.1).
+    Open(S, NodeId, bool),
+    /// The innermost open inline element ends; the flag says whether its
+    /// end edge is here, as for [`InlineToken::Open`].
+    Close(bool),
     /// An atomic inline (`inline-block`, `inline-flex`): laid out as a box
     /// of its own and placed in the line like a glyph. The arena index and
     /// its style.
@@ -655,7 +658,7 @@ impl Paragraph {
                         }
                     }
                 }
-                InlineToken::Open(style, element) => {
+                InlineToken::Open(style, element, start_edge) => {
                     paragraph.flush(
                         &mut closes,
                         &mut pending_space,
@@ -672,7 +675,7 @@ impl Paragraph {
                         .raise(&parent, extents.0, extents.1)
                         .unwrap_or(parent.raise);
                     let sides = InlineSides::of(style);
-                    let open_box = (sides.start > 0.0).then(|| {
+                    let open_box = (*start_edge && sides.start > 0.0).then(|| {
                         paragraph.push_item(InlineItemKind::Spacer {
                             width: sides.start,
                             opening: true,
@@ -729,8 +732,11 @@ impl Paragraph {
                     has_content = true;
                     last_was_space = true;
                 }
-                InlineToken::Close => {
-                    if let Some(element) = open.pop() {
+                InlineToken::Close(end_edge) => {
+                    if let Some(mut element) = open.pop() {
+                        if !end_edge {
+                            element.end_spacer = 0.0;
+                        }
                         closes.push((element, pending_space));
                     }
                 }
