@@ -982,6 +982,13 @@ impl<'a> Builder<'a> {
                 };
             }
         }
+        // A replaced element shows its image, never what it holds: a host
+        // can append children to an `img`, but they get no box. Built, they
+        // would keep the layout they had before they moved in, since Taffy
+        // lays the `img` out as a leaf and never reaches them.
+        if is_replaced(doc, parent) {
+            return Vec::new();
+        }
         let parent_style = styles.computed(parent);
         // A text field shows its value as its one line or paragraph, in
         // place of what it holds in the document (M5.8).
