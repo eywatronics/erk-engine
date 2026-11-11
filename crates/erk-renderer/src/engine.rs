@@ -1068,7 +1068,10 @@ mod tests {
             assert!(engine.node_box(y).unwrap().is_some(), "{hidden}");
             let b = engine.query(Some(y), "b").unwrap().unwrap();
             let style = engine.computed_style(b).unwrap().unwrap_or_default();
-            assert!(style.contains("color: rgb(0, 0, 255);"), "{hidden}: {style}");
+            assert!(
+                style.contains("color: rgb(0, 0, 255);"),
+                "{hidden}: {style}"
+            );
         }
     }
 
