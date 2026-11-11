@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Onay kutuları</title>
+<meta name="erk-press" content="et-haber kutu-b radyo-iki et-kosul engelli">
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  .form { margin: 20px; padding: 16px; width: 440px; border: 2px solid #cbd5e1; }
+  .satir { margin-bottom: 10px; height: 26px; }
+  .kutu {
+    appearance: none; margin: 0 8px 0 0; width: 18px; height: 18px;
+    border: 2px solid #64748b; background: #ffffff; vertical-align: middle; outline: none;
+  }
+  .kutu:checked { background: #16a34a; border-color: #14532d; }
+  .kutu:checked + span { color: #b45309; }
+  .kutu:disabled { border-color: #a5b4fc; background: #e0e7ff; }
+  .yuvarlak { border-radius: 50%; }
+  fieldset { margin: 0 0 10px 0; padding: 8px 12px; border: 2px solid #f472b6; }
+  fieldset:disabled { background: #fdf2f8; }
+  .yerli { margin-top: 4px; }
+</style>
+</head>
+<body>
+  <div class="form">
+    <div class="satir"><label id="et-haber"><input class="kutu" type="checkbox"><span>Haber bülteni</span></label></div>
+    <div class="satir"><input class="kutu" type="checkbox" id="kutu-b" checked><label for="kutu-b">Önceden işaretli, basınca kalkar</label></div>
+    <div class="satir">
+      <label><input class="kutu yuvarlak" type="radio" name="boy" checked><span>Bir</span></label>
+      <label><input class="kutu yuvarlak" type="radio" name="boy" id="radyo-iki"><span>İki</span></label>
+    </div>
+    <div class="satir"><label id="et-kosul" for="kosul">Koşulları kabul et </label><input class="kutu" type="checkbox" id="kosul"><span>kabul</span></div>
+    <fieldset disabled>
+      <div class="satir"><input class="kutu" type="checkbox" id="engelli"><span>Engelli kutu, basılmaz</span></div>
+    </fieldset>
+    <div class="satir yerli">Yerli görünüm:
+      <input type="checkbox"><input type="checkbox" checked><input type="radio" name="y"><input type="radio" name="y" checked><input type="checkbox" checked disabled>
+    </div>
+  </div>
+</body>
+</html>

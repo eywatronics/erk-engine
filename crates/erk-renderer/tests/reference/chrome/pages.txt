@@ -2,6 +2,7 @@ block-in-inline 3ff8941302a419ef
 blocks 34d6fbfbe2573fa3
 borders 1dc4702396b718e8
 canvas-alpha 719508b93c27ff29
+checkboxes ceaa48bfbfe9a78b
 command 518c55fce72fc2e0
 details 7d7f3d5b04b38020
 dialog 1cb29d62c3c6512c
