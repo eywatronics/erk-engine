@@ -1234,6 +1234,78 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_element_split_around_a_block_is_built_again_where_it_splits() {
+        // CSS 2 §9.2.1.1: the link is split around the card, its text
+        // before and after in anonymous boxes; each change moves where it
+        // splits, or whether it does.
+        let mut engine = verifying(
+            "<div><a id=a style='border: 2px solid; background: #eee'>önce \
+             <div id=card style='height: 20px'>kart</div> sonra</a><p>alt</p></div>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (a, card) = (find(&engine, "#a"), find(&engine, "#card"));
+        engine.set_text(card, "daha uzun bir kart").unwrap();
+        boxes_laid_out(&mut engine);
+        for display in ["inline", "none", "inline-block"] {
+            engine.set_style_property(card, "display", display).unwrap();
+            boxes_laid_out(&mut engine);
+            engine.remove_style_property(card, "display").unwrap();
+            boxes_laid_out(&mut engine);
+        }
+        engine.set_style_property(a, "display", "block").unwrap();
+        boxes_laid_out(&mut engine);
+        engine.remove_style_property(a, "display").unwrap();
+        boxes_laid_out(&mut engine);
+        // A second block: the part between the two holds nothing.
+        let second = engine.create_element("div").unwrap();
+        engine.set_text(second, "ikinci").unwrap();
+        engine.insert(a, second, None).unwrap();
+        boxes_laid_out(&mut engine);
+        engine.remove(card).unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
+    fn the_parts_of_a_split_inline_element_are_not_laid_out_again_for_the_block() {
+        // Each part is the box it was in the last frame: a change to the
+        // block between them lays out the block and what holds it, not
+        // the parts.
+        let mut engine = verifying(
+            "<div><span>önce<div id=card style='width: 200px'>kart</div>sonra</span></div>",
+        );
+        let card = engine.query(None, "#card").unwrap().unwrap();
+        // The card, the div, body, html and the document's box.
+        engine.set_text(card, "başka bir kart").unwrap();
+        assert_eq!(boxes_laid_out(&mut engine), 5);
+    }
+
+    #[test]
+    fn parts_of_a_split_inline_element_without_text_are_told_apart() {
+        // Only the edges are in the parts before and after the blocks:
+        // no text node tells their anonymous boxes apart.
+        let mut engine = verifying(
+            "<div id=d style='width: 200px'><span id=s style='padding: 0 6px; \
+             border: 1px solid'><div id=x>x</div><div>y</div></span></div>",
+        );
+        let find = |engine: &Engine, selector| engine.query(None, selector).unwrap().unwrap();
+        let (d, s, x) = (
+            find(&engine, "#d"),
+            find(&engine, "#s"),
+            find(&engine, "#x"),
+        );
+        engine.set_text(x, "daha uzun").unwrap();
+        boxes_laid_out(&mut engine);
+        engine.set_style_property(s, "padding", "0 12px").unwrap();
+        boxes_laid_out(&mut engine);
+        engine.set_style_property(d, "width", "120px").unwrap();
+        boxes_laid_out(&mut engine);
+        engine
+            .set_style_property(s, "border-left-width", "0")
+            .unwrap();
+        boxes_laid_out(&mut engine);
+    }
+
+    #[test]
     fn a_containing_block_that_changes_takes_what_is_deep_inside() {
         // Only the ancestor's style changes; the positioned element deep
         // inside goes to it all the same.

@@ -495,3 +495,48 @@ fn a_relatively_positioned_inline_element_moves_what_it_holds() {
         "{a:?} -> {b:?}"
     );
 }
+
+/// The `glyphs` lines of a display list, top to bottom: each run's
+/// baseline and its quoted text.
+fn glyph_runs(list: &str) -> Vec<(f32, String)> {
+    let mut runs: Vec<(f32, String)> = list
+        .lines()
+        .filter(|line| line.starts_with("glyphs"))
+        .map(|line| {
+            let y = line.split(' ').nth(2).unwrap().parse().unwrap();
+            (y, line[line.find('"').unwrap()..].to_owned())
+        })
+        .collect();
+    runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    runs
+}
+
+#[test]
+fn a_block_inside_an_inline_element_is_painted_on_lines_of_its_own() {
+    // CSS 2 §9.2.1.1: the inline element is split around the block, which
+    // gets a box of its own. Read as inline content, the block was lost.
+    let list = render_html(
+        "<body style='margin: 0'><span><div style='width: 40px; height: 40px; \
+         background: #ff0000'></div></span>",
+        WIDTH,
+        HEIGHT,
+    )
+    .display_list()
+    .to_owned();
+    assert!(
+        list.lines().any(|line| line == "rect 0 0 40x40 #ff0000ff"),
+        "{list}"
+    );
+    // The text before, in and after the block: three lines, not one run.
+    let list = render_html(
+        "<body style='margin: 0'><span>a<div>blok</div>b</span>",
+        WIDTH,
+        HEIGHT,
+    )
+    .display_list()
+    .to_owned();
+    let runs = glyph_runs(&list);
+    let texts: Vec<&str> = runs.iter().map(|(_, text)| text.as_str()).collect();
+    assert_eq!(texts, ["\"a\"", "\"blok\"", "\"b\""], "{list}");
+    assert!(runs[0].0 < runs[1].0 && runs[1].0 < runs[2].0, "{list}");
+}

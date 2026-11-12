@@ -978,3 +978,161 @@ fn an_absolutely_positioned_flex_child_starts_where_a_sole_item_would() {
         "a sole item"
     );
 }
+
+#[test]
+fn a_block_inside_an_inline_element_splits_it_into_anonymous_boxes() {
+    // CSS 2 §9.2.1.1: the text before and after the block goes into
+    // anonymous block boxes of the div around the span, the block gets a
+    // box of its own between them.
+    let (doc, layouts) = lay_out("<div><span>önce<p style='margin: 0'>blok</p>sonra</span></div>");
+    let div = all(&doc, &local_name!("div"))[0];
+    let anonymous = layouts.anonymous(div);
+    let texts: Vec<&str> = anonymous.iter().map(|a| a.text.text.as_str()).collect();
+    assert_eq!(texts, ["önce", "sonra"]);
+    let p_id = all(&doc, &local_name!("p"))[0];
+    assert_eq!(
+        layouts.text(p_id).map(|text| text.text.as_str()),
+        Some("blok")
+    );
+    // Relative to the div, the nearest box above it: the span has none.
+    let p = *layouts.get(p_id).expect("the block has a box");
+    let (before, after) = (anonymous[0].layout, anonymous[1].layout);
+    assert_eq!(before.location.y, 0.0);
+    assert_eq!(p.location.y, before.size.height);
+    assert_eq!(after.location.y, p.location.y + p.size.height);
+}
+
+#[test]
+fn a_block_alone_inside_an_inline_element_gets_its_box() {
+    let (doc, layouts) =
+        lay_out("<span><div style='width: 40px; height: 40px; background: red'></div></span>");
+    let div = divs(&doc, &layouts)[0];
+    assert_eq!(
+        (
+            div.location.x,
+            div.location.y,
+            div.size.width,
+            div.size.height
+        ),
+        (0.0, 0.0, 40.0, 40.0)
+    );
+    // Nothing but the block: no empty line before or after it.
+    let body = all(&doc, &local_name!("body"))[0];
+    assert!(layouts.anonymous(body).is_empty());
+    assert_eq!(layouts.get(body).unwrap().size.height, 40.0);
+}
+
+#[test]
+fn a_block_deep_inside_inline_elements_splits_each_of_them() {
+    let (doc, layouts) = lay_out("<div><a href=#>bir <b>iki<div>üç</div>dört</b> beş</a></div>");
+    let outer = all(&doc, &local_name!("div"))[0];
+    let texts: Vec<&str> = layouts
+        .anonymous(outer)
+        .iter()
+        .map(|a| a.text.text.as_str())
+        .collect();
+    assert_eq!(texts, ["bir iki", "dört beş"]);
+    // The text after the block keeps the bold of the `b` it is in.
+    let after = &layouts.anonymous(outer)[1].text;
+    let bold: Vec<bool> = after
+        .layout
+        .layout
+        .lines()
+        .flat_map(|line| {
+            line.items()
+                .filter_map(|item| match item {
+                    parley::PositionedLayoutItem::GlyphRun(run) => {
+                        Some(crate::text::is_bold_face(run.run().font()))
+                    }
+                    parley::PositionedLayoutItem::InlineBox(_) => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(bold, [true, false], "{:?}", after.text);
+}
+
+#[test]
+fn whitespace_around_a_block_inside_an_inline_element_makes_no_box() {
+    // A card wrapped in a link, as pages write it.
+    let (doc, layouts) =
+        lay_out("<div><a href=#>\n  <div style='height: 30px'>kart</div>\n</a></div>");
+    let outer = all(&doc, &local_name!("div"))[0];
+    assert!(layouts.anonymous(outer).is_empty());
+    assert_eq!(layouts.get(outer).unwrap().size.height, 30.0);
+}
+
+#[test]
+fn a_split_inline_element_has_its_start_edge_first_and_its_end_edge_last() {
+    // box-decoration-break: slice: the left border on the first fragment,
+    // the right on the last, neither where the block splits it.
+    let (doc, layouts) = lay_out(
+        "<div><span style='border: 3px solid blue; background: red'>a<div>b</div>c</span></div>",
+    );
+    let outer = all(&doc, &local_name!("div"))[0];
+    let anonymous = layouts.anonymous(outer);
+    let borders: Vec<[f32; 4]> = anonymous
+        .iter()
+        .flat_map(|a| a.text.decorations.iter().map(|rect| rect.border))
+        .collect();
+    assert_eq!(borders, [[3.0, 0.0, 3.0, 3.0], [3.0, 3.0, 3.0, 0.0]]);
+    // Each edge takes room in its own fragment's line only.
+    let (plain_doc, plain) = lay_out("<div><span>a<div>b</div>c</span></div>");
+    let plain_outer = all(&plain_doc, &local_name!("div"))[0];
+    let widths = |layouts: &Layouts, id| -> Vec<f32> {
+        layouts
+            .anonymous(id)
+            .iter()
+            .map(|a| a.text.layout.width())
+            .collect()
+    };
+    let (bordered, plain) = (widths(&layouts, outer), widths(&plain, plain_outer));
+    let grown: Vec<f32> = bordered.iter().zip(&plain).map(|(b, p)| b - p).collect();
+    assert_eq!(grown, [3.0, 3.0]);
+}
+
+#[test]
+fn a_hidden_element_inside_an_inline_element_neither_shows_nor_splits_it() {
+    let (doc, layouts) =
+        lay_out("<div><span>a<b style='display: none'>gizli<div>blok</div></b>c</span></div>");
+    let outer = all(&doc, &local_name!("div"))[0];
+    assert_eq!(
+        layouts.text(outer).map(|text| text.text.as_str()),
+        Some("ac")
+    );
+}
+
+#[test]
+fn a_block_level_control_inside_a_label_gets_its_box() {
+    let (doc, layouts) = lay_out(
+        "<label><input type=checkbox style='display: block; width: 40px; height: 40px'> etiket</label>",
+    );
+    let input = all(&doc, &local_name!("input"))[0];
+    let layout = layouts.get(input).expect("the checkbox has a box");
+    assert_eq!((layout.size.width, layout.size.height), (40.0, 40.0));
+    let body = all(&doc, &local_name!("body"))[0];
+    let texts: Vec<&str> = layouts
+        .anonymous(body)
+        .iter()
+        .map(|a| a.text.text.as_str())
+        .collect();
+    assert_eq!(texts, ["etiket"]);
+}
+
+#[test]
+fn a_block_level_image_inside_an_inline_element_is_on_a_line_of_its_own() {
+    // As beside blocks: a block-level replaced element is a block, not an
+    // atom in the line.
+    let (doc, layouts) = lay_out(
+        "<div><span><img style='display: block; width: 30px; height: 20px'>sonra</span></div>",
+    );
+    let img = all(&doc, &local_name!("img"))[0];
+    let image = layouts.get(img).expect("the image has a box");
+    assert_eq!((image.location.y, image.size.height), (0.0, 20.0));
+    let outer = all(&doc, &local_name!("div"))[0];
+    let after = &layouts.anonymous(outer)[0];
+    assert_eq!(
+        (after.text.text.as_str(), after.layout.location.y),
+        ("sonra", 20.0)
+    );
+}

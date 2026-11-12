@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Satır içinde blok</title>
+<style>
+  body { margin: 24px; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 16px; }
+  section { width: 420px; margin-bottom: 16px; }
+  a { color: #1d4ed8; text-decoration: none; }
+  .kart { background: #e0f2fe; padding: 8px 12px; width: 300px; }
+  .vurgu { background: #fde68a; border: 2px solid #b45309; padding: 0 6px; }
+  .blok { background: #bbf7d0; width: 220px; }
+  .mor { color: #7c3aed; }
+  .kare { background: #f9a8d4; width: 40px; height: 40px; }
+</style>
+</head>
+<body>
+  <section>
+    <a href="#">
+      <div class="kart">Bağlantının içindeki kart: başlık ve açıklama</div>
+    </a>
+  </section>
+  <section>Önce <span class="vurgu">satır içinin başı <div class="blok">ortadaki blok</div> satır içinin sonu</span> sonra.</section>
+  <section><span>bir <b>iki <span class="mor">üç<div class="blok">iç içe satır içlerinde blok</div>dört</span> beş</b> altı</span></section>
+  <section><span><div class="kare"></div></span></section>
+</body>
+</html>

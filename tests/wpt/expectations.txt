@@ -20,18 +20,18 @@ css/CSS2/normal-flow/block-formatting-contexts-011.xht PASS
 css/CSS2/normal-flow/block-formatting-contexts-012.xht PASS
 css/CSS2/normal-flow/block-formatting-contexts-015.xht FAIL
 css/CSS2/normal-flow/block-formatting-contexts-016.xht FAIL
-css/CSS2/normal-flow/block-in-inline-after-block-in-inline-with-margin-collapse.html FAIL
+css/CSS2/normal-flow/block-in-inline-after-block-in-inline-with-margin-collapse.html PASS
 css/CSS2/normal-flow/block-in-inline-align-001.html PASS
-css/CSS2/normal-flow/block-in-inline-align-justify-001.html FAIL
+css/CSS2/normal-flow/block-in-inline-align-justify-001.html PASS
 css/CSS2/normal-flow/block-in-inline-align-last-001.html FAIL
 css/CSS2/normal-flow/block-in-inline-append-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-append-002.xht FAIL
-css/CSS2/normal-flow/block-in-inline-baseline-001.html FAIL
-css/CSS2/normal-flow/block-in-inline-empty-001.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-baseline-001.html PASS
+css/CSS2/normal-flow/block-in-inline-empty-001.xht PASS
 css/CSS2/normal-flow/block-in-inline-empty-002.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
-css/CSS2/normal-flow/block-in-inline-empty-003.xht FAIL
+css/CSS2/normal-flow/block-in-inline-empty-003.xht PASS
 css/CSS2/normal-flow/block-in-inline-empty-004.xht FAIL
-css/CSS2/normal-flow/block-in-inline-first-line-001.html FAIL
+css/CSS2/normal-flow/block-in-inline-first-line-001.html PASS
 css/CSS2/normal-flow/block-in-inline-first-line-002.html PASS
 css/CSS2/normal-flow/block-in-inline-float-between-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-float-in-layer-001.html PASS
@@ -72,17 +72,17 @@ css/CSS2/normal-flow/block-in-inline-insert-014.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-015.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-016a.xht FAIL
 css/CSS2/normal-flow/block-in-inline-insert-016b.xht FAIL
-css/CSS2/normal-flow/block-in-inline-insert-017.xht FAIL
-css/CSS2/normal-flow/block-in-inline-margins-001a.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
-css/CSS2/normal-flow/block-in-inline-margins-001b.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
-css/CSS2/normal-flow/block-in-inline-margins-002a.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
-css/CSS2/normal-flow/block-in-inline-margins-002b.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
-css/CSS2/normal-flow/block-in-inline-margins-003.html FAIL
-css/CSS2/normal-flow/block-in-inline-margins-004.html FAIL
+css/CSS2/normal-flow/block-in-inline-insert-017.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-001a.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-001b.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-002a.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-002b.xht PASS
+css/CSS2/normal-flow/block-in-inline-margins-003.html PASS
+css/CSS2/normal-flow/block-in-inline-margins-004.html PASS
 css/CSS2/normal-flow/block-in-inline-margins-005.html PASS
-css/CSS2/normal-flow/block-in-inline-nested-001.xht FAIL
-css/CSS2/normal-flow/block-in-inline-nested-002.xht FAIL
-css/CSS2/normal-flow/block-in-inline-percents-001.xht FAIL  # lowered: a block inside an inline is laid out as inline content; painting the inline border made that visible
+css/CSS2/normal-flow/block-in-inline-nested-001.xht PASS
+css/CSS2/normal-flow/block-in-inline-nested-002.xht PASS
+css/CSS2/normal-flow/block-in-inline-percents-001.xht PASS
 css/CSS2/normal-flow/block-in-inline-remove-000.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-001.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-002.xht FAIL
@@ -90,8 +90,8 @@ css/CSS2/normal-flow/block-in-inline-remove-003.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-004.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-005.xht FAIL
 css/CSS2/normal-flow/block-in-inline-remove-006.xht FAIL
-css/CSS2/normal-flow/block-in-inline-whitespace-001a.xht FAIL
-css/CSS2/normal-flow/block-in-inline-whitespace-001b.xht FAIL
+css/CSS2/normal-flow/block-in-inline-whitespace-001a.xht PASS
+css/CSS2/normal-flow/block-in-inline-whitespace-001b.xht PASS
 css/CSS2/normal-flow/block-non-replaced-height-001.xht PASS
 css/CSS2/normal-flow/block-non-replaced-height-005.xht FAIL
 css/CSS2/normal-flow/block-non-replaced-height-011.xht FAIL
@@ -210,7 +210,7 @@ css/CSS2/normal-flow/height-applies-to-013.xht FAIL  # lowered: needs table layo
 css/CSS2/normal-flow/height-applies-to-014.xht FAIL  # lowered: needs table layout, not planned; it passed only while its reference image was not loaded
 css/CSS2/normal-flow/height-applies-to-015.xht PASS
 css/CSS2/normal-flow/height-applies-to-016.xht PASS
-css/CSS2/normal-flow/height-inherit-001.xht FAIL
+css/CSS2/normal-flow/height-inherit-001.xht PASS
 css/CSS2/normal-flow/height-percentage-001.xht PASS
 css/CSS2/normal-flow/height-percentage-002.xht PASS
 css/CSS2/normal-flow/height-percentage-003.xht FAIL  # lowered: needs an image or replaced element Erk does not load or size yet; it passed only while borders were not painted
@@ -746,7 +746,7 @@ css/CSS2/normal-flow/width-applies-to-013.xht PASS
 css/CSS2/normal-flow/width-applies-to-014.xht FAIL
 css/CSS2/normal-flow/width-applies-to-015.xht PASS
 css/CSS2/normal-flow/width-applies-to-016.xht PASS
-css/CSS2/normal-flow/width-inherit-001.xht FAIL
+css/CSS2/normal-flow/width-inherit-001.xht PASS
 css/CSS2/normal-flow/width-non-replaced-inline-001.xht PASS
 css/CSS2/normal-flow/width-percentage-001.xht PASS
 css/CSS2/normal-flow/width-percentage-002.xht PASS
@@ -1665,7 +1665,7 @@ css/css-flexbox/overflow-auto-005.html PASS
 css/css-flexbox/overflow-auto-007.html PASS
 css/css-flexbox/overflow-top-left.html FAIL
 css/css-flexbox/padding-overflow.html PASS
-css/css-flexbox/percentage-descendant-of-anonymous-flex-item.html PASS
+css/css-flexbox/percentage-descendant-of-anonymous-flex-item.html FAIL  # lowered: passed by accident, test and reference both blank; the block in the button now has its box (200x100 green, as the test asks), but Erk's button is still an inline element (no UA display until the M5.10 button look), so the reference's button height is ignored and its box is 0 high
 css/css-flexbox/percentage-heights-002.html PASS
 css/css-flexbox/percentage-heights-004.html PASS
 css/css-flexbox/percentage-heights-005.html PASS
@@ -1681,7 +1681,7 @@ css/css-flexbox/percentage-heights-017.html FAIL
 css/css-flexbox/percentage-heights-018.html FAIL
 css/css-flexbox/percentage-heights-019.html PASS
 css/css-flexbox/percentage-heights-020.html FAIL
-css/css-flexbox/percentage-heights-021.html FAIL
+css/css-flexbox/percentage-heights-021.html PASS
 css/css-flexbox/percentage-heights-022.html FAIL
 css/css-flexbox/percentage-heights-023.html FAIL
 css/css-flexbox/percentage-heights-024.html FAIL
@@ -1844,7 +1844,7 @@ css/css-position/position-absolute-in-inline-009.html FAIL
 css/css-position/position-absolute-in-inline-010.html FAIL
 css/css-position/position-absolute-in-inline-011.html FAIL
 css/css-position/position-absolute-in-inline-012.html FAIL
-css/css-position/position-absolute-in-inline-margin-top.html FAIL
+css/css-position/position-absolute-in-inline-margin-top.html PASS
 css/css-position/position-absolute-large-negative-inset.html PASS
 css/css-position/position-absolute-multicol-001.html PASS
 css/css-position/position-absolute-replaced-intrinsic-size.tentative.html FAIL
@@ -1872,9 +1872,9 @@ css/css-position/position-relative-004.html PASS
 css/css-position/position-relative-005.html PASS
 css/css-position/position-relative-006.html PASS
 css/css-position/position-relative-007.html PASS
-css/css-position/position-relative-008.html FAIL
-css/css-position/position-relative-009.html FAIL
-css/css-position/position-relative-010.html FAIL
+css/css-position/position-relative-008.html PASS
+css/css-position/position-relative-009.html PASS
+css/css-position/position-relative-010.html PASS
 css/css-position/position-relative-011.html FAIL
 css/css-position/position-relative-012.html FAIL
 css/css-position/position-relative-013.html FAIL
@@ -2806,7 +2806,7 @@ css/css-text/text-justify/text-justify-inter-word-001.html FAIL
 css/css-text/text-justify/text-justify-none-001.html PASS
 css/css-text/text-justify/text-justify-word-separators.html FAIL
 css/css-text/text-spacing-trim/text-spacing-trim-001.html PASS
-css/css-text/text-spacing-trim/text-spacing-trim-colon-001.html FAIL
+css/css-text/text-spacing-trim/text-spacing-trim-colon-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-dot-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-dynamic-001.html FAIL
 css/css-text/text-spacing-trim/text-spacing-trim-end-001.html FAIL
@@ -2815,7 +2815,7 @@ css/css-text/text-spacing-trim/text-spacing-trim-fallback-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-fallback-002.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-feature-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-narrow-001.html PASS
-css/css-text/text-spacing-trim/text-spacing-trim-quote-001.html FAIL
+css/css-text/text-spacing-trim/text-spacing-trim-quote-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-space-all-001.html FAIL
 css/css-text/text-spacing-trim/text-spacing-trim-span-001.html PASS
 css/css-text/text-spacing-trim/text-spacing-trim-start-001.html PASS
