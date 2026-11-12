@@ -215,16 +215,15 @@ legend {
 }
 
 /* 15.5.17 Checkboxes and radio buttons (M5.10): small inline-block boxes,
- * at Chrome's size and margins. With appearance: auto Erk draws its own
- * look over the box (M5 plan, decision 4); appearance: none leaves the
- * box to the page. */
+ * at Chrome's margins. With appearance: auto Erk draws its own look over
+ * the box (M5 plan, decision 4) and its size, Chrome's 13px, is a natural
+ * size layout gives it, not a width here: a flex item stretches.
+ * appearance: none leaves the box to the page, with no natural size. */
 input[type=checkbox i],
 input[type=radio i] {
   appearance: auto;
   display: inline-block;
   box-sizing: border-box;
-  width: 13px;
-  height: 13px;
   margin: 3px 3px 3px 4px;
   cursor: default;
 }

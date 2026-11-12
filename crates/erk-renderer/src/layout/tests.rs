@@ -1136,3 +1136,59 @@ fn a_block_level_image_inside_an_inline_element_is_on_a_line_of_its_own() {
         ("sonra", 20.0)
     );
 }
+
+/// The border-box sizes of the `input`s of `html`, in document order.
+fn input_sizes(html: &str) -> Vec<(f32, f32)> {
+    let (doc, layouts) = lay_out(html);
+    all(&doc, &local_name!("input"))
+        .into_iter()
+        .map(|input| {
+            let layout = layouts.get(input).expect("the input has a box");
+            (layout.size.width, layout.size.height)
+        })
+        .collect()
+}
+
+#[test]
+fn a_drawn_checkbox_or_radio_button_stretches_as_a_flex_item() {
+    // Its 13 px is a natural size, not a width and height the user agent
+    // sets: an auto cross size stretches, a given size stays (WPT
+    // stretch-flex-item-checkbox-input and -radio-input).
+    for kind in ["checkbox", "radio"] {
+        let sizes = input_sizes(&format!(
+            "<div style='display: flex; width: 50px; height: 50px'>\
+             <input type={kind} style='width: 100%; margin: 0'></div>\
+             <div style='display: flex; flex-direction: column; width: 50px; height: 50px'>\
+             <input type={kind} style='height: 100%; margin: 0'></div>\
+             <div style='display: flex; align-items: start'><input type={kind}></div>"
+        ));
+        assert_eq!(sizes, [(50.0, 50.0), (50.0, 50.0), (13.0, 13.0)], "{kind}");
+    }
+}
+
+#[test]
+fn a_drawn_checkbox_keeps_its_natural_size_where_the_style_leaves_it() {
+    let sizes = input_sizes(
+        "<input type=checkbox><input type=checkbox style='width: 30px'>\
+         <input type=checkbox style='display: block'>\
+         <input type=checkbox style='display: block; padding: 0 5px'>",
+    );
+    // In a line, with one dimension given, and as a block, which Taffy
+    // would stretch to the container; a border-box width takes the
+    // padding in.
+    assert_eq!(
+        sizes,
+        [(13.0, 13.0), (30.0, 13.0), (13.0, 13.0), (23.0, 13.0)]
+    );
+}
+
+#[test]
+fn a_checkbox_left_to_the_page_has_no_natural_size() {
+    // `appearance: none`: Chrome's natural size is none, so what the page
+    // gives is all there is.
+    let sizes = input_sizes(
+        "<input type=checkbox style='appearance: none; border: 1px solid'>\
+         <input type=radio style='appearance: none; width: 9px; height: 9px'>",
+    );
+    assert_eq!(sizes, [(2.0, 2.0), (9.0, 9.0)]);
+}

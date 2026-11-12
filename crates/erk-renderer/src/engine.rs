@@ -3179,15 +3179,9 @@ mod tests {
         assert!((size(&engine, "b").0 - 2.0 * twenty).abs() < 1.0);
         assert_eq!(size(&engine, "c").0, twenty);
         assert!((size(&engine, "d").0 - twenty / 4.0).abs() < 1.0);
-        // Not on a checkbox.
-        let e = engine.query(None, "#e").unwrap().unwrap();
-        let style = engine.computed_style(e).unwrap().unwrap();
-        // Its own width line, not `min-width`'s: the user agent's, not
-        // forty characters (M5.10).
-        assert!(
-            style.lines().any(|line| line.trim() == "width: 13px;"),
-            "{style}"
-        );
+        // Not on a checkbox: its natural size, not forty characters
+        // (M5.10).
+        assert_eq!(size(&engine, "e"), (13.0, 13.0));
         // A textarea: `cols` characters wide, `rows` lines high.
         let (width, height) = size(&engine, "t");
         assert!((width - twenty / 2.0).abs() < 1.0, "{width}");
@@ -4850,6 +4844,36 @@ mod tests {
         engine.remove_attr(c, "style").unwrap();
         assert!(paints_accent(&checked_frame(&mut engine)));
         assert_eq!(engine.node_box(c).unwrap().unwrap().width, 13.0);
+    }
+
+    #[test]
+    fn a_drawn_checkboxs_natural_size_follows_what_its_box_becomes() {
+        // Stretched, then not, then a block, then left to the page: each
+        // frame is the oracle's (M5.10).
+        let mut engine = verifying(
+            "<div id=f style='display: flex; height: 50px'><input type=checkbox id=c              style='margin: 0'></div>",
+        );
+        let (f, c) = (query_id(&engine, "f"), query_id(&engine, "c"));
+        let size = |engine: &Engine| {
+            let found = engine.node_box(c).unwrap().unwrap();
+            (found.width, found.height)
+        };
+        assert_eq!(size(&engine), (13.0, 50.0));
+        engine
+            .set_style_property(f, "align-items", "start")
+            .unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(size(&engine), (13.0, 13.0));
+        engine.set_style_property(f, "display", "block").unwrap();
+        engine.set_style_property(c, "display", "block").unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(size(&engine), (13.0, 13.0));
+        // Left to the page, a block like any: as wide as its container,
+        // as high as nothing.
+        engine.set_style_property(c, "appearance", "none").unwrap();
+        checked_frame(&mut engine);
+        let (width, height) = size(&engine);
+        assert!(width > 13.0 && height == 0.0, "{width} {height}");
     }
 
     #[test]
