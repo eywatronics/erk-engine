@@ -31,5 +31,6 @@ white-space 92.35
 details 84.10
 popover 87.32
 dialog 93.79  # lowered: the page opens its dialog from a new button's command, whose label under the backdrop adds antialiasing; boxes and lines still match
+checkboxes 90.27
 command 83.78
 block-in-inline 91.26

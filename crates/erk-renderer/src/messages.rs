@@ -213,10 +213,13 @@ pub struct Event {
 /// The kinds of p1-contract §10, numbered the same.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
+    /// A press and release on one element, or Enter or Space on the
+    /// focused control. A checkbox or radio button has changed already
+    /// when it is dispatched, and goes back if it is prevented; a disabled
+    /// control gets none (M5.10).
     Click = 1,
     /// The user changed a control's value (a text field typed in, a box
-    /// checked); not when the host sets it. Comes with the controls
-    /// (M5.8, M5.10).
+    /// checked); not when the host sets it.
     Input = 2,
     /// The user committed a change to a control's value.
     Change = 3,

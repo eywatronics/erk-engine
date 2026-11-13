@@ -1116,7 +1116,7 @@ css/css-flexbox/flex-shrink-006.html PASS
 css/css-flexbox/flex-shrink-007.html PASS
 css/css-flexbox/flex-shrink-008.html PASS
 css/css-flexbox/flex-svg-no-intrinsic-column-001.html FAIL
-css/css-flexbox/flex-vertical-align-effect.html PASS
+css/css-flexbox/flex-vertical-align-effect.html FAIL  # lowered: passed by accident, the radio button drew nothing; now drawn, the reference needs floats, which Erk lays out as none (css-support.md)
 css/css-flexbox/flex-wrap-002.html PASS
 css/css-flexbox/flex-wrap-003.html PASS
 css/css-flexbox/flex-wrap-004.html PASS

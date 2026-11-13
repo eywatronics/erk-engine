@@ -540,3 +540,24 @@ fn a_block_inside_an_inline_element_is_painted_on_lines_of_its_own() {
     assert_eq!(texts, ["\"a\"", "\"blok\"", "\"b\""], "{list}");
     assert!(runs[0].0 < runs[1].0 && runs[1].0 < runs[2].0, "{list}");
 }
+
+/// A page that presses a checkbox's label (the reference tests' press
+/// meta) is drawn with the box checked: the press goes through a click,
+/// as DOM's click() does (M5.10).
+#[test]
+fn a_pressed_label_draws_its_checkbox_checked() {
+    let page = |press: &str| {
+        format!(
+            "<meta name=erk-press content='{press}'><body style='margin: 0'>\
+             <label id=l><input type=checkbox id=c style='margin: 0; width: 40px; \
+             height: 40px'> etiket</label>"
+        )
+    };
+    // The middle of the box's top edge: grey unchecked, blue checked,
+    // pressed through its label or itself; pressed twice, unchecked.
+    let edge = |press: &str| pixel(&render_html(&page(press), WIDTH, HEIGHT), 20, 0);
+    assert_eq!(edge(""), [118, 118, 118, 255]);
+    assert_eq!(edge("l"), [0, 117, 255, 255]);
+    assert_eq!(edge("c"), [0, 117, 255, 255]);
+    assert_eq!(edge("l c"), [118, 118, 118, 255]);
+}

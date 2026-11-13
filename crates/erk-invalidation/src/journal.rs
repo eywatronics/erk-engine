@@ -33,6 +33,9 @@ pub struct State {
     /// What an input method is composing in a text field, also drawn in
     /// it.
     composition: Option<Composition>,
+    /// Whether a checkbox or radio button is checked, or an option
+    /// selected: `:checked`, and drawn in the control (M5.10).
+    checked: Option<bool>,
     /// Where the element is in the top layer, counted from the bottom, and
     /// whether as a modal dialog: an open popover or dialog is drawn
     /// above the page and laid out against the viewport (M5.9).
@@ -63,6 +66,7 @@ impl State {
             children: doc.children(id).collect(),
             value: doc.value_set(id).map(str::to_owned),
             composition: doc.composition(id).cloned(),
+            checked: doc.checked(id).ok().flatten(),
             layer: doc
                 .top_layer()
                 .iter()
@@ -99,6 +103,9 @@ pub struct Changes {
     /// Form controls whose value was set to another, or text fields whose
     /// composition changed: what the field shows.
     pub values: Vec<NodeId>,
+    /// Checkboxes and radio buttons checked or unchecked, and options
+    /// selected or not, by the user or the host (M5.10).
+    pub checked: Vec<NodeId>,
     /// Elements that joined or left the top layer, or moved in it.
     pub layers: Vec<NodeId>,
 }
@@ -110,6 +117,7 @@ impl Changes {
             + self.attrs.len()
             + self.children.len()
             + self.values.len()
+            + self.checked.len()
             + self.layers.len()
     }
 
@@ -140,6 +148,9 @@ impl Changes {
         if before.value != after.value || before.composition != after.composition {
             self.values.push(id);
         }
+        if before.checked != after.checked {
+            self.checked.push(id);
+        }
         if before.layer != after.layer {
             self.layers.push(id);
         }
@@ -150,6 +161,7 @@ impl Changes {
         self.attrs.sort_by_key(|change| change.node.index());
         self.children.sort_by_key(|id| id.index());
         self.values.sort_by_key(|id| id.index());
+        self.checked.sort_by_key(|id| id.index());
         self.layers.sort_by_key(|id| id.index());
     }
 }
@@ -456,6 +468,27 @@ mod tests {
         doc.set_value(t, "c").unwrap();
         journal.touch(&doc, t);
         doc.set_value(t, "b").unwrap();
+        assert_eq!(journal.take(&doc).0, Changes::default());
+    }
+
+    #[test]
+    fn a_control_checked_is_a_change_and_so_is_the_radio_it_unchecks() {
+        let mut doc = doc("<input type=radio name=r id=a checked><input type=radio name=r id=b>");
+        let (a, b) = (find(&doc, "a"), find(&doc, "b"));
+        let before = snapshot(&doc);
+        let mut journal = Journal::default();
+        journal.touch(&doc, a);
+        journal.touch(&doc, b);
+        doc.set_checked(b, true).unwrap();
+        let (changes, _) = journal.take(&doc);
+        assert_eq!(changes.checked, [a, b]);
+        assert_eq!(changes.count(), 2);
+        assert_eq!(changes, difference(&before, &doc));
+        // Checked and back in one frame: nothing.
+        journal.touch(&doc, a);
+        journal.touch(&doc, b);
+        doc.set_checked(a, true).unwrap();
+        doc.set_checked(b, true).unwrap();
         assert_eq!(journal.take(&doc).0, Changes::default());
     }
 

@@ -545,6 +545,16 @@ gerekçeli bir daraltma:
   açılan diyalog, ataları olmayan açık `auto` popover'ları kapatır:
   komutla açılınca her biri `beforetoggle` ve `toggle` ile, host
   açınca olaysız.
+- **v0.18, sürüm değişmeden (M5.10):** `ERK_EVENT_INPUT`,
+  `ERK_EVENT_CHANGE` ve `ERK_EVENT_SUBMIT` HTML'deki gibi kabarcıklanır:
+  bir form bütün kontrollerini tek abonelikle duyar. M5.7'den beri
+  kabarcıklanmıyorlardı; bu bir hataydı, yapı değişmediği için sürüm
+  aynı. Onay kutusu ve radyo düğmesi tıklama dağıtılmadan önce değişir
+  (callback yeni değeri okur); `erk_event_prevent_default` geri alır,
+  değilse ardından `ERK_EVENT_INPUT` ve `ERK_EVENT_CHANGE` gelir (zaten
+  seçili radyoda hiçbiri). Etikete basış kontrolünü odaklar ve ona bir
+  tıklama gönderir. Devre dışı kontrole (özniteliğiyle ya da `disabled`
+  bir `fieldset`'le) tıklama gitmez, odak da gitmez.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

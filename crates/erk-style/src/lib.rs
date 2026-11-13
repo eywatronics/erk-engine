@@ -82,6 +82,13 @@ impl StyleEngine {
         height: f32,
         font_metrics: StdArc<dyn FontMetricsProvider + Send>,
     ) -> Self {
+        // Servo mode parses `appearance` only behind this pref (M5.10): a
+        // page that draws its own checkbox says `appearance: none`. It
+        // lets Stylo parse the other properties Servo does not lay out
+        // too; Erk ignores them as before, and the WPT and Chrome
+        // reference results did not move with it. Process-wide, and the
+        // same for every engine.
+        style_config::set_pref!("layout.unimplemented", true);
         let guard = SharedRwLock::new();
         let url = UrlExtraData::from(url::Url::parse("about:blank").expect("valid URL"));
         let user_agent = stylesheet(UA_CSS, Origin::UserAgent, &guard, &url);
@@ -430,9 +437,9 @@ fn primary(slot: &Slot) -> Option<Arc<ComputedValues>> {
 /// Each arena slot's element state: a link's, an open `details` or
 /// `dialog`'s (`:open`, from its `open` attribute), an open popover's
 /// (`:popover-open`: one in the top layer), a modal dialog's (`:modal`),
-/// and what `interaction`
-/// puts on the element under the pointer, the pressed one and the focused
-/// one and on their ancestors.
+/// a form control's (`:checked`, `:disabled`, `:enabled`; M5.10), and
+/// what `interaction` puts on the element under the pointer, the pressed
+/// one and the focused one and on their ancestors.
 fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
     let mut states = vec![ElementState::empty(); doc.capacity_hint()];
     let mut stack = vec![doc.root()];
@@ -441,17 +448,25 @@ fn states(doc: &Document, interaction: &Interaction) -> Vec<ElementState> {
         let Some(element) = doc.node(id).and_then(|node| node.as_element()) else {
             continue;
         };
+        let html = element.name.ns == ns!(html);
+        let attr = |name| element.attr(&name).is_some();
         let state = &mut states[id.index() as usize];
         match element.name.local {
-            local_name!("a") if element.attr(&local_name!("href")).is_some() => {
-                *state = ElementState::UNVISITED;
+            local_name!("a") if attr(local_name!("href")) => {
+                *state |= ElementState::UNVISITED;
             }
-            local_name!("details") | local_name!("dialog")
-                if element.name.ns == ns!(html) && element.attr(&local_name!("open")).is_some() =>
-            {
-                *state = ElementState::OPEN;
+            local_name!("details") | local_name!("dialog") if html && attr(local_name!("open")) => {
+                *state |= ElementState::OPEN;
             }
             _ => {}
+        }
+        if html && doc.checked(id) == Ok(Some(true)) {
+            *state |= ElementState::CHECKED;
+        }
+        match doc.disabled(id) {
+            Some(true) => *state |= ElementState::DISABLED,
+            Some(false) => *state |= ElementState::ENABLED,
+            None => {}
         }
     }
     for id in doc.top_layer() {

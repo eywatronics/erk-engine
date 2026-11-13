@@ -11,6 +11,7 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+mod activation;
 mod command;
 mod dialog;
 mod popover;
@@ -70,8 +71,9 @@ pub(crate) struct Page {
     /// The focused text field's value when it took the focus, and whether
     /// the user has edited it since: leaving it changed is a `change`.
     focus_value: Option<(String, bool)>,
-    /// Whether input moved a caret or edited a field since the last look:
-    /// the next frame shows it, though nothing the pointer is on changed.
+    /// Whether input moved a caret, edited a field or checked a control
+    /// since the last look: the next frame shows it, though nothing the
+    /// pointer is on changed.
     edited: bool,
     /// The host's clock at its last tick, in nanoseconds (p1-contract §7:
     /// the core reads no clock), and when the caret last moved: it shows
@@ -118,6 +120,9 @@ pub(crate) struct Page {
     popovers: popover::Popovers,
     /// Each dialog's return value, once it has one.
     dialogs: Vec<(NodeId, String)>,
+    /// A checkbox or radio button a click changed, until the host has
+    /// dispatched the click (M5.10).
+    activation: Option<activation::Activation>,
 }
 
 /// What earlier frames left for a frame to build on: the last frame's
@@ -328,6 +333,7 @@ impl Page {
             touched: layout::Touched::default(),
             popovers: popover::Popovers::default(),
             dialogs: Vec::new(),
+            activation: None,
         }
     }
 
@@ -1026,12 +1032,7 @@ impl Page {
                 let Some(clicked) = self.common_ancestor(down, up) else {
                     return events;
                 };
-                events.push(self.event(
-                    EventKind::Click,
-                    clicked,
-                    (input.x, input.y),
-                    input.modifiers,
-                ));
+                events.extend(self.click(clicked, (input.x, input.y), input.modifiers));
                 events
             }
             _ => Vec::new(),
@@ -1125,13 +1126,20 @@ impl Page {
                     return Vec::new();
                 };
                 let name = &element.name.local;
+                let checkable = *name == local_name!("input")
+                    && element.attr(&local_name!("type")).is_some_and(|kind| {
+                        kind.eq_ignore_ascii_case("checkbox") || kind.eq_ignore_ascii_case("radio")
+                    });
                 let activates = *name == local_name!("button")
+                    || (input.key == Key::Space && checkable)
                     || self.details_of_summary(node).is_some()
                     || (input.key == Key::Enter
                         && *name == local_name!("a")
                         && element.attr(&local_name!("href")).is_some());
                 if activates {
-                    vec![self.event(EventKind::Click, node, (0.0, 0.0), input.modifiers)]
+                    self.click(node, (0.0, 0.0), input.modifiers)
+                        .into_iter()
+                        .collect()
                 } else {
                     Vec::new()
                 }
@@ -1790,7 +1798,8 @@ impl Page {
         ]
         .contains(name);
         let focusable = if control {
-            element.attr(&local_name!("disabled")).is_none()
+            // Disabled by its attribute or a fieldset (M5.10).
+            self.doc.disabled(node) != Some(true)
                 && !(*name == local_name!("input")
                     && element
                         .attr(&local_name!("type"))
@@ -1833,6 +1842,17 @@ impl Page {
                     .invoke_command(current)
                     .or_else(|| self.invoke_popover(current))
                     .unwrap_or_default();
+            }
+            // A label focuses its control, as browsers do, then clicks it
+            // (M5.10).
+            if let Some(control) = self.labeled_control(current) {
+                let mut events = if self.focusable(control) {
+                    self.move_focus(Some(control), Modifiers::default(), false)
+                } else {
+                    Vec::new()
+                };
+                events.extend(self.click(control, (0.0, 0.0), Modifiers::default()));
+                return events;
             }
             node = self.doc.node(current).and_then(|found| found.parent());
         };
@@ -1909,8 +1929,12 @@ impl Page {
             let Some(target) = self.element_with_id(&token) else {
                 continue;
             };
-            let mut queue: Vec<Event> = self.click_default(target);
-            queue.reverse();
+            // The click itself first: a checkbox changes with it, and a
+            // disabled control takes none (M5.10).
+            let mut queue: Vec<Event> = self
+                .click(target, (0.0, 0.0), Modifiers::default())
+                .into_iter()
+                .collect();
             while let Some(event) = queue.pop() {
                 let mut follow = self.follow(&event, false);
                 follow.reverse();
@@ -1926,7 +1950,7 @@ impl Page {
             return Vec::new();
         };
         match event.kind {
-            EventKind::Click if !prevented => self.click_default(target),
+            EventKind::Click => self.after_click(target, prevented),
             EventKind::BeforeToggle => self.after_before_toggle(target, prevented),
             EventKind::Cancel => self.after_cancel(target, prevented),
             EventKind::Command => self.after_command(target, prevented),
@@ -2311,10 +2335,13 @@ impl Page {
     }
 
     /// Check or uncheck element `node`, a checkbox or radio button, or
-    /// select an option; a radio button checked unchecks its group. Not
-    /// painted yet: `:checked` comes with the controls (M5.10).
+    /// select an option; a radio button checked unchecks its group, which
+    /// the journal notes with it (`:checked`, M5.10).
     pub(crate) fn set_checked(&mut self, node: u64, checked: bool) -> Result<(), Status> {
         let node = self.node(node)?;
+        for with in self.doc.checked_with(node) {
+            self.journal.touch(&self.doc, with);
+        }
         self.doc.set_checked(node, checked).map_err(status)
     }
 

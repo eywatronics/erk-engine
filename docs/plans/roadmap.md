@@ -390,9 +390,9 @@ formlardan sonraya alınması) planın kararlarında, gerekçesiyle:
 | M5.5 | Kalıcı metin şekillendirmesi | Bitti, M5.4'ün ikinci PR'ıyla: bir harf yalnızca kendi paragrafını şekillendiriyor |
 | M5.6 | Display list parçaları, hasar bölgesi, kısmi sunum | Bitti: görüntü alanının dışı listede yok (B15, 10 bin kartlık sayfada kaydırma, 709 → 88 ms); görünmeyen paragraf gezilmiyor (B15 75 → 31 ms); değişiklik yokken stil çalışmıyor (B15 42 → 21 ms); bandın içinde kaydırma yalnızca listeyi taşıyor (B15 54 → 12 ms); bant değişince yalnızca bandın kutuları geziliyor (B15 p95 13,4 → 7,3 ms, 120 Hz'in altında); belge değişen karede raster yalnızca değişen döşemeleri çiziyor (raster ~4 → ~1,7 ms). Kısmi kare tam kareyle piksel piksel aynı (muhafız) |
 | M5.7 | Odak, Tab sırası, varsayılan eylemin iptali, girdi/değişiklik/gönderim olayları | Bitti: varsayılan eylemin iptali (C-ABI 0.8), `:focus-visible` (klavye gösterir, tıklama göstermez), girdi/değişiklik/gönderim olaylarına abonelik ve değer API'si (`value`, `checked`, seçili seçenek; C-ABI 0.9) |
-| M5.8 | Metin alanları: imleç, seçim, pano, IME | Yeni |
+| M5.8 | Metin alanları: imleç, seçim, pano, IME | Bitti: alanlar çiziliyor ve düzenleniyor (imleç, seçim, pano), IME kompozisyonu ve imlecin dikdörtgeni (aday penceresi), `size`, `cols`, `rows` |
 | M5.9 | Üst katman; `<details>`, `<dialog>`, `popover`, `commandfor` | Bitti: açılır menü, akordeon ve modal diyalog host'a gitmeden çalışıyor; üst katman, `::backdrop`, etkisiz sayfa; düğmelerin komutları ve host'a özel komutlar (C-ABI 0.18); her biri Chrome referans sayfasıyla |
-| M5.10 | Onay kutusu, radyo, düğme, `select` (listesi üst katmanda), form gönderimi | Yeni |
+| M5.10 | Onay kutusu, radyo, düğme, `select` (listesi üst katmanda), form gönderimi | Sürüyor: onay kutusu ve radyo (tıklamadan önce değişiyor, iptalde geri dönüyor), `label`, `:checked`, `:disabled`, `fieldset` |
 | M5.11 | Erişilebilirlik (AccessKit) | Yeni |
 | M5.12 | Temel geçişler | Yeni |
 | M5.13 | Bellek: önce ölçüm (aşama aşama döküm, B16), sonra diyet; bütçe CI'da | Yeni (2026-10-12 kararı) |

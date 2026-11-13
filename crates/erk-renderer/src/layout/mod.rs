@@ -53,10 +53,10 @@ use icu_locale_core::LanguageIdentifier;
 use taffy::{
     AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Dimension, Display, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
-    LayoutPartialTree, LengthPercentageAuto, Line, Overflow, Point, RequestedAxis, ResolveOrZero,
-    RoundTree, RunMode, Size, SizingMode, Style, TraversePartialTree, TraverseTree,
-    compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
-    compute_leaf_layout, compute_root_layout, round_layout,
+    LayoutPartialTree, LengthPercentage, LengthPercentageAuto, Line, Overflow, Point,
+    RequestedAxis, ResolveOrZero, RoundTree, RunMode, Size, SizingMode, Style, TraversePartialTree,
+    TraverseTree, compute_block_layout, compute_cached_layout, compute_flexbox_layout,
+    compute_grid_layout, compute_leaf_layout, compute_root_layout, round_layout,
 };
 
 use std::collections::HashMap;
@@ -612,6 +612,9 @@ struct LayoutNode {
     /// A textarea's content height when its own is auto: `rows` lines of
     /// its line height (HTML §15.5.16), whatever it holds.
     field_height: Option<f32>,
+    /// Whether the box is a checkbox's or radio button's Erk draws: its
+    /// baseline is its border box's bottom, as Chrome sets it (M5.10).
+    check_control: bool,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -1327,6 +1330,23 @@ impl<'a> Builder<'a> {
                 if is_replaced(doc, id) {
                     self.replace(id, resources);
                 }
+                self.nodes[index].check_control = self.nodes[index]
+                    .style_source
+                    .as_ref()
+                    .is_some_and(|style| is_check_control(doc, id, style));
+                if self.nodes[index].check_control && in_block_flow(doc, styles, id) {
+                    // Taffy's block layout would stretch an auto width to
+                    // the container; a drawn control keeps its natural one
+                    // (CSS 2 §10.3.4, as an image).
+                    let style = &mut self.nodes[index].style;
+                    if style.size.width.is_auto() {
+                        let inset = horizontal_length_inset(style);
+                        style.size.width = Dimension::length(match style.box_sizing {
+                            taffy::BoxSizing::BorderBox => CHECK_CONTROL_SIZE + inset,
+                            taffy::BoxSizing::ContentBox => CHECK_CONTROL_SIZE,
+                        });
+                    }
+                }
             }
             // Anchors in lines: their paragraph is the static position.
             let anchors: Vec<usize> = self.nodes[index]
@@ -1352,22 +1372,7 @@ impl<'a> Builder<'a> {
             .and_then(|element| element.attr(&erk_dom::local_name!("src")))
             .and_then(|src| resources.image(src.trim()))
             .cloned();
-        // Laid out by Taffy's block layout: a block-level image whose
-        // parent is a block container (a flex or grid item sizes itself
-        // from its content, and an inline one is measured in its line).
-        let in_block_flow = styles
-            .computed(id)
-            .is_some_and(|style| !is_inline_level(&style))
-            && doc
-                .node(id)
-                .and_then(|node| node.parent())
-                .and_then(|parent| styles.computed(parent))
-                .is_some_and(|parent| {
-                    matches!(
-                        parent.get_box().clone_display().inside(),
-                        DisplayInside::Flow | DisplayInside::FlowRoot
-                    )
-                });
+        let in_block_flow = in_block_flow(doc, styles, id);
         if let Some(image) = &image {
             let style = &mut self.nodes[index].style;
             if style.aspect_ratio.is_none() {
@@ -1445,6 +1450,7 @@ impl<'a> Builder<'a> {
                     && node.style == then.style
                     && node.paragraph == then.paragraph
                     && node.field_height == then.field_height
+                    && node.check_control == then.check_control
                     && match (&node.replaced, &then.replaced) {
                         (Some(now), Some(then)) => match (&now.image, &then.image) {
                             (Some(now), Some(then)) => Arc::ptr_eq(now, then),
@@ -1775,6 +1781,67 @@ pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
     }
 }
 
+/// Whether element `id`, styled `style`, is a checkbox or radio button
+/// whose look Erk draws (`appearance` not `none`, M5.10).
+pub(crate) fn is_check_control(doc: &Document, id: NodeId, style: &ComputedValues) -> bool {
+    use erk_style::style::values::computed::Appearance;
+    style.get_box().clone_appearance() != Appearance::None
+        && doc
+            .node(id)
+            .and_then(|node| node.as_element())
+            .filter(|element| {
+                element.name.ns == erk_dom::ns!(html)
+                    && element.name.local == erk_dom::local_name!("input")
+            })
+            .and_then(|element| element.attr(&erk_dom::local_name!("type")))
+            .is_some_and(|kind| {
+                kind.eq_ignore_ascii_case("checkbox") || kind.eq_ignore_ascii_case("radio")
+            })
+}
+
+/// The content size of a checkbox or radio button Erk draws when the
+/// style leaves it auto: Chrome's 13 px (M5.10). A natural size rather
+/// than the user agent's `width` and `height`, so that a flex item
+/// stretches (WPT stretch-flex-item-checkbox-input).
+const CHECK_CONTROL_SIZE: f32 = 13.0;
+
+/// The left and right padding and border of `style` that are lengths;
+/// percentages resolve against a container not known yet, and are left
+/// out.
+fn horizontal_length_inset(style: &Style<Atom>) -> f32 {
+    let length = |value: LengthPercentage| {
+        let raw = value.into_raw();
+        if raw.tag() == taffy::CompactLength::length(0.0).tag() {
+            raw.value()
+        } else {
+            0.0
+        }
+    };
+    length(style.padding.left)
+        + length(style.padding.right)
+        + length(style.border.left)
+        + length(style.border.right)
+}
+
+/// Whether element `id` is laid out by Taffy's block layout: block-level,
+/// in a block container (a flex or grid item sizes itself from its
+/// content, and an inline-level one is measured in its line).
+fn in_block_flow(doc: &Document, styles: &Styles, id: NodeId) -> bool {
+    styles
+        .computed(id)
+        .is_some_and(|style| !is_inline_level(&style))
+        && doc
+            .node(id)
+            .and_then(|node| node.parent())
+            .and_then(|parent| styles.computed(parent))
+            .is_some_and(|parent| {
+                matches!(
+                    parent.get_box().clone_display().inside(),
+                    DisplayInside::Flow | DisplayInside::FlowRoot
+                )
+            })
+}
+
 /// Whether element `id` is a replaced element Erk lays out: `<img>`.
 fn is_replaced(doc: &Document, id: NodeId) -> bool {
     doc.node(id)
@@ -2098,6 +2165,22 @@ impl<'t> LayoutTree<'t> {
                 },
             );
         }
+        if self.node(id).check_control {
+            // A drawn checkbox or radio button: a leaf whose natural size
+            // is Chrome's. Taffy's leaf layout puts a size the style or
+            // the parent gives (a stretched flex item) first, each axis
+            // on its own.
+            let calcs = self.calcs;
+            return compute_leaf_layout(
+                inputs,
+                &self.node(id).style,
+                |ptr, basis| calcs.resolve(ptr, basis),
+                |_, _| Size {
+                    width: CHECK_CONTROL_SIZE,
+                    height: CHECK_CONTROL_SIZE,
+                },
+            );
+        }
         if self.node(id).paragraph.is_some() {
             return self.compute_paragraph_layout(id, inputs);
         }
@@ -2213,7 +2296,11 @@ impl<'t> LayoutTree<'t> {
             let baseline = visible
                 .then(|| output.baselines.last.or(output.baselines.first))
                 .flatten();
-            let above = baseline.map_or(outer_height, |baseline| margin.top + baseline);
+            let above = if self.nodes[atom].check_control {
+                margin.top + output.size.height
+            } else {
+                baseline.map_or(outer_height, |baseline| margin.top + baseline)
+            };
             sizes.push(AtomBox {
                 width: (margin.left + output.size.width + margin.right).max(0.0),
                 above,

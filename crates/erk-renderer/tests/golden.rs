@@ -77,6 +77,16 @@ fn text_fields() {
     );
 }
 
+/// Checkboxes' and radio buttons' look, checked, disabled, large and left
+/// to the page (M5.10): Erk's own, not Chrome's, so held by this image.
+#[test]
+fn checkboxes() {
+    check_golden(
+        "checkboxes",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/checkboxes.html"),
+    );
+}
+
 #[test]
 fn rendering_is_deterministic() {
     let html = std::fs::read_to_string(repo_root().join("examples/merhaba.html")).unwrap();
