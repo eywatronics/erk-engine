@@ -77,6 +77,17 @@ fn text_fields() {
     );
 }
 
+/// Buttons' look (M5.10): Erk's own over a button in its user agent's
+/// face and border, disabled, sized by the page, and as the page restyles
+/// it, which drops it. Held by this image, not Chrome's.
+#[test]
+fn buttons() {
+    check_golden(
+        "buttons",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/buttons.html"),
+    );
+}
+
 /// Checkboxes' and radio buttons' look, checked, disabled, large and left
 /// to the page (M5.10): Erk's own, not Chrome's, so held by this image.
 #[test]

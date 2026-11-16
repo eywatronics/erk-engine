@@ -1192,3 +1192,26 @@ fn a_checkbox_left_to_the_page_has_no_natural_size() {
     );
     assert_eq!(sizes, [(2.0, 2.0), (9.0, 9.0)]);
 }
+
+#[test]
+fn a_buttons_content_is_centred_in_it_unless_the_page_aligns_it() {
+    // Chrome centres what a button holds when the button is higher; the
+    // label of an input button too (M5.10).
+    let (doc, layouts) = lay_out(
+        "<button style='height: 40px; padding: 0; border: 0'>x</button>\
+         <input type=submit style='height: 40px; padding: 0; border: 0'>\
+         <button style='display: block; height: 40px; padding: 0; border: 0'>y</button>\
+         <button style='height: 40px; padding: 0; border: 0; align-content: start'>z</button>",
+    );
+    let tops: Vec<f32> = all(&doc, &local_name!("button"))
+        .into_iter()
+        .chain(all(&doc, &local_name!("input")))
+        .map(|button| layouts.anonymous(button)[0].layout.location.y)
+        .collect();
+    let line = layouts.anonymous(all(&doc, &local_name!("button"))[0])[0]
+        .layout
+        .size
+        .height;
+    let middle = (40.0 - line) / 2.0;
+    assert_eq!(tops, [middle, middle, 0.0, middle], "{line}");
+}

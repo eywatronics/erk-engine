@@ -555,6 +555,16 @@ gerekçeli bir daraltma:
   seçili radyoda hiçbiri). Etikete basış kontrolünü odaklar ve ona bir
   tıklama gönderir. Devre dışı kontrole (özniteliğiyle ya da `disabled`
   bir `fieldset`'le) tıklama gitmez, odak da gitmez.
+- **v0.18, sürüm değişmeden (M5.10, ikinci PR):** `ERK_EVENT_SUBMIT`
+  artık gerçekten gelir: formdaki bir gönder düğmesine tıklama host
+  önlemezse forma, ya da satırlık bir metin alanında Enter (formun ilk
+  gönder düğmesine bir tıklama; düğmesi yoksa ve başka engelleyen alan
+  yoksa doğrudan form). `ErkEvent`'in `source`'u gönderimde gönderen
+  düğmedir (DOM'un `SubmitEvent.submitter`'ı), Enter'la düğmesiz
+  gönderimde 0. `erk_event_prevent_default` `method=dialog` formunun
+  diyalogunu açık tutar; önlenmezse diyalog düğmenin değeriyle kapanır
+  ve `ERK_EVENT_CLOSE` gelir. Erk hiçbir yere bir şey göndermez:
+  gönderimin içeriği host'undur. Yapı değişmediği için sürüm aynı.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

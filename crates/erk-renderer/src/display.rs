@@ -1001,14 +1001,20 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
         // The canvas already shows the root's (or body's) background.
         let paint_background = Some(id) != walk.canvas_source;
         let mut decoration = Vec::new();
+        // A button in its user agent's face and border: Erk's own look in
+        // their place (M5.10).
+        let native = native_button(walk.doc, id, style, widths);
         box_decoration(
             style,
             frame,
-            widths,
-            paint_background,
+            if native { [0.0; 4] } else { widths },
+            paint_background && !native,
             walk.resources,
             &mut decoration,
         );
+        if native {
+            decoration.extend(button_look(walk.doc, id, frame));
+        }
         if takes_pointer(style) {
             decoration.push(DisplayItem::Hit {
                 node: id.to_bits(),
@@ -1241,6 +1247,82 @@ const CONTROL_EDGE: Rgba = [118, 118, 118, 255];
 /// A disabled control's edge and fill.
 const DISABLED_EDGE: Rgba = [118, 118, 118, 128];
 const DISABLED_FILL: Rgba = [118, 118, 118, 77];
+
+/// The face the user agent style sheet gives a button (Chrome's
+/// `buttonface`), which says the page left it alone.
+const BUTTON_FACE: Rgba = [239, 239, 239, 255];
+/// The face of a button in Erk's own look: Chrome's native one, a shade
+/// lighter than `buttonface`.
+const NATIVE_FACE: Rgba = [240, 240, 240, 255];
+
+/// Whether element `id`, styled `style` with border `widths`, is a button
+/// Erk draws its own look on (M5.10): a `button` or an input button whose
+/// `appearance` is not `none`, still in the user agent's face (no
+/// background image) and 2px outset grey border. A page that restyles
+/// either gets what it wrote, as Chrome then drops its native look.
+fn native_button(doc: &Document, id: NodeId, style: &ComputedValues, widths: [f32; 4]) -> bool {
+    use erk_style::style::values::computed::Appearance;
+    use erk_style::style::values::computed::BorderStyle;
+    use erk_style::style::values::generics::image::GenericImage;
+    if !crate::layout::is_button(doc, id) || style.get_box().clone_appearance() == Appearance::None
+    {
+        return false;
+    }
+    let border = style.get_border();
+    let styles = [
+        border.border_top_style,
+        border.border_right_style,
+        border.border_bottom_style,
+        border.border_left_style,
+    ];
+    let colors = [
+        &border.border_top_color,
+        &border.border_right_color,
+        &border.border_bottom_color,
+        &border.border_left_color,
+    ]
+    .map(|color| srgb_bytes(style.resolve_color(color)));
+    background(style) == BUTTON_FACE
+        && style
+            .get_background()
+            .background_image
+            .0
+            .iter()
+            .all(|layer| matches!(layer, GenericImage::None))
+        && styles.iter().all(|side| *side == BorderStyle::Outset)
+        && widths.iter().all(|width| *width == 2.0)
+        && colors.iter().all(|color| *color == CONTROL_EDGE)
+}
+
+/// A button's own look (M5.10; Erk's own, M5 plan decision 4), over its
+/// border box `frame`: Chrome's face with a 1px grey frame and round
+/// corners, both faded when the button is disabled.
+fn button_look(doc: &Document, id: NodeId, frame: Frame) -> Vec<DisplayItem> {
+    if frame.width <= 0.0 || frame.height <= 0.0 {
+        return Vec::new();
+    }
+    let fade = |[r, g, b, _]: Rgba| [r, g, b, 77];
+    let (face, edge) = if doc.disabled(id) == Some(true) {
+        (fade(NATIVE_FACE), fade(CONTROL_EDGE))
+    } else {
+        (NATIVE_FACE, CONTROL_EDGE)
+    };
+    let radius = 2.0_f32.min(frame.width.min(frame.height) / 4.0);
+    let radii = [(radius, radius); 4];
+    vec![
+        DisplayItem::RoundedRect {
+            frame,
+            radii,
+            color: face,
+        },
+        DisplayItem::Border {
+            frame,
+            widths: [1.0; 4],
+            colors: [edge; 4],
+            radii,
+        },
+    ]
+}
 
 /// A checkbox's or radio button's own look (M5.10; Erk's own, M5 plan
 /// decision 4), over its border box `frame`, unless its style says

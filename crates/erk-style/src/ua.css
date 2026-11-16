@@ -232,6 +232,43 @@ input[type=radio i] {
   margin: 3px 3px 0 5px;
 }
 
+/* 15.5.18-20 Buttons (M5.10): inline-block boxes in the control font,
+ * with Chrome's border, padding and face, so that a page changing one
+ * gets Chrome's box. While the face and the border are these, Erk draws
+ * its own look over the box instead (M5 plan, decision 4): a 1px grey
+ * frame with round corners, as Chrome draws its native one; a page that
+ * restyles either gets them as written. An input button shows its value
+ * as its label, which layout gives it. */
+button,
+input[type=submit i],
+input[type=reset i],
+input[type=button i] {
+  appearance: auto;
+  display: inline-block;
+  box-sizing: border-box;
+  font-family: sans-serif;
+  font-size: 13.333px;
+  color: black;
+  background-color: rgb(239, 239, 239);
+  border: 2px outset rgb(118, 118, 118);
+  padding: 1px 6px;
+  text-align: center;
+  cursor: default;
+}
+
+button:disabled,
+input[type=submit i]:disabled,
+input[type=reset i]:disabled,
+input[type=button i]:disabled {
+  color: rgba(16, 16, 16, 0.3);
+}
+
+input[type=submit i],
+input[type=reset i],
+input[type=button i] {
+  white-space: pre;
+}
+
 /* 15.5.4 The details and summary elements (M5.9): a closed details shows
  * only its first summary, which layout sees to (bare text too). The
  * disclosure marker is drawn by Erk, inside the summary's first line. */

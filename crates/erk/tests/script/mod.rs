@@ -16,7 +16,7 @@ use erk::{
 
 const TAGS: &[&str] = &[
     "div", "p", "span", "ul", "li", "button", "a", "template", "table", "tr", "td", "img", "br",
-    "section", "input", "A b", "", "svg", "-x", "dialog", "label", "fieldset", "legend",
+    "section", "input", "A b", "", "svg", "-x", "dialog", "label", "fieldset", "legend", "form",
 ];
 
 const NAMES: &[&str] = &[
@@ -41,6 +41,9 @@ const NAMES: &[&str] = &[
     "for",
     "checked",
     "name",
+    "method",
+    "formmethod",
+    "value",
 ];
 
 const VALUES: &[&str] = &[
@@ -64,6 +67,10 @@ const VALUES: &[&str] = &[
     "--x",
     "checkbox",
     "radio",
+    "submit",
+    "reset",
+    "dialog",
+    "align-content: start; height: 30px",
 ];
 
 /// What an input method composes or commits: kana, Turkish, a line break,
@@ -147,6 +154,13 @@ const PAGES: &[&str] = &[
      <input type=checkbox checked style='appearance: none; width: 9px'>\
      <fieldset disabled><legend><input type=radio name=r></legend>\
      <label><input type=checkbox checked> d</label></fieldset>",
+    // Buttons and forms: a dialog's form closed by its submit, a field
+    // Enter submits, input buttons and a high button whose content is
+    // centred (M5.10).
+    "<dialog open><form method=dialog><input id=t><button value=v>ok</button>\
+     <input type=submit value=s></form></dialog><form><input>\
+     <button style='height: 40px'>b<div>c</div></button><input type=reset>\
+     <input type=button value=x><button disabled>d</button></form>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of
