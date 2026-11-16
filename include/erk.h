@@ -123,6 +123,11 @@
 
 #define ERK_EVENT_CHANGE 3
 
+/*
+ A form is about to be submitted: a submit button's click, or Enter in
+ a one-line field; `source` is the button. `erk_event_prevent_default`
+ keeps a `method=dialog` form's dialog open; Erk sends nothing anywhere.
+ */
 #define ERK_EVENT_SUBMIT 4
 
 #define ERK_EVENT_KEY_DOWN 5
@@ -444,7 +449,9 @@ typedef struct {
    */
   ErkStr command;
   /*
-   `ERK_EVENT_COMMAND`: the button that sent it; 0 for other events.
+   `ERK_EVENT_COMMAND`: the button that sent it. `ERK_EVENT_SUBMIT`:
+   the button that submitted the form, 0 when Enter in its only field
+   did. 0 for other events.
    */
   ErkNodeId source;
 } ErkEvent;

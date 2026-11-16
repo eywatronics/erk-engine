@@ -34,3 +34,4 @@ dialog 93.79  # lowered: the page opens its dialog from a new button's command, 
 checkboxes 90.27
 command 83.78
 block-in-inline 91.26
+buttons 89.23

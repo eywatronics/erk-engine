@@ -1053,10 +1053,26 @@ impl<'a> Builder<'a> {
                 Vec::new(),
             ));
         }
+        // An input button shows its label, never what it holds (M5.10).
+        let label = button_label(doc, parent);
+        if let (Some(label), Some(style)) = (&label, &parent_style) {
+            entries.push(Entry::Inline(
+                vec![InlineToken::Text(
+                    label.clone(),
+                    style.clone(),
+                    text_language(doc, parent),
+                    None,
+                )],
+                Vec::new(),
+            ));
+        }
         // A closed `details` shows only its first `summary` (HTML §15.5.4):
         // the rest, bare text too, has no box.
         let shown_alone = closed_details(doc, parent);
         for child in doc.children(parent) {
+            if label.is_some() {
+                break;
+            }
             if let Some(summary) = shown_alone
                 && summary != Some(child)
             {
@@ -1122,8 +1138,10 @@ impl<'a> Builder<'a> {
         // A paragraph: only inline content, laid out as one run. A positioned
         // or transformed block keeps a block box with an anonymous paragraph
         // inside, so the absolutely positioned elements it contains are laid
-        // out by Taffy.
-        if !has_blocks && !contains && block_container && parent != doc.root() {
+        // out by Taffy; so does a button, whose content Taffy centres in it
+        // (M5.10).
+        let button = is_button(doc, parent);
+        if !has_blocks && !contains && !button && block_container && parent != doc.root() {
             let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
                 match entry {
@@ -1334,6 +1352,16 @@ impl<'a> Builder<'a> {
                     .style_source
                     .as_ref()
                     .is_some_and(|style| is_check_control(doc, id, style));
+                // A button's content is centred in it, block by block, as
+                // Chrome lays it out, unless the page aligns it (M5.10).
+                if is_button(doc, id) {
+                    let style = &mut self.nodes[index].style;
+                    if matches!(style.display, Display::Block | Display::FlowRoot)
+                        && style.align_content.is_none()
+                    {
+                        style.align_content = Some(taffy::AlignContent::CENTER);
+                    }
+                }
                 if self.nodes[index].check_control && in_block_flow(doc, styles, id) {
                     // Taffy's block layout would stretch an auto width to
                     // the container; a drawn control keeps its natural one
@@ -1779,6 +1807,47 @@ pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
         },
         _ => None,
     }
+}
+
+/// Whether element `id` is a button: a `button`, or an `input` of type
+/// `submit`, `reset` or `button`.
+pub(crate) fn is_button(doc: &Document, id: NodeId) -> bool {
+    is_html(doc, id, &erk_dom::local_name!("button")) || button_label(doc, id).is_some()
+}
+
+/// The label input button `id` shows (HTML §4.10.5.1.18-20): its `value`,
+/// or with none a submit or reset button's default label. HTML leaves that
+/// label to the browser, localized; Chrome writes it in its own language.
+/// Erk has none but the element's (`lang`): Turkish "Gönder" and
+/// "Sıfırla", else Chrome's English "Submit" and "Reset". `None` for any
+/// other element.
+pub(crate) fn button_label(doc: &Document, id: NodeId) -> Option<String> {
+    let element = doc.node(id)?.as_element()?;
+    if element.name.ns != erk_dom::ns!(html) || element.name.local != erk_dom::local_name!("input")
+    {
+        return None;
+    }
+    let kind = element
+        .attr(&erk_dom::local_name!("type"))?
+        .to_ascii_lowercase();
+    let turkish = crate::fonts::language_of(doc, id)
+        .split(['-', '_'])
+        .next()
+        .is_some_and(|primary| primary.eq_ignore_ascii_case("tr"));
+    let default = match (kind.as_str(), turkish) {
+        ("submit", true) => "Gönder",
+        ("submit", false) => "Submit",
+        ("reset", true) => "Sıfırla",
+        ("reset", false) => "Reset",
+        ("button", _) => "",
+        _ => return None,
+    };
+    Some(
+        element
+            .attr(&erk_dom::local_name!("value"))
+            .unwrap_or(default)
+            .to_owned(),
+    )
 }
 
 /// Whether element `id`, styled `style`, is a checkbox or radio button

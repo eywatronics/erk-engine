@@ -205,18 +205,7 @@ impl Page {
 
     /// Whether `node` is inside a `form`, which its submit button submits.
     pub(crate) fn in_form(&self, node: NodeId) -> bool {
-        let mut at = self.doc.node(node).and_then(|found| found.parent());
-        while let Some(id) = at {
-            let found = self.doc.node(id);
-            if found
-                .and_then(|found| found.as_element())
-                .is_some_and(|element| element.name.local == local_name!("form"))
-            {
-                return true;
-            }
-            at = found.and_then(|found| found.parent());
-        }
-        false
+        self.form_owner(node).is_some()
     }
 
     /// The first element in the document, in tree order, whose `id` is

@@ -206,7 +206,9 @@ pub struct Event {
     /// A `command` event's command: a built-in one as HTML names it
     /// (`show-modal`), a custom one (`--name`) as the button wrote it.
     pub command: Option<String>,
-    /// A `command` event's source: the button that sent it.
+    /// A `command` event's source: the button that sent it. A `submit`
+    /// event's submitter: the button that submitted the form, `None` when
+    /// Enter in its only field did (DOM's `SubmitEvent.submitter`).
     pub source: Option<u64>,
 }
 
@@ -223,8 +225,10 @@ pub enum EventKind {
     Input = 2,
     /// The user committed a change to a control's value.
     Change = 3,
-    /// A form is about to be submitted; preventing its default keeps it
-    /// (M5.10).
+    /// A form is about to be submitted: a submit button was clicked, or
+    /// Enter pressed in a one-line field; `source` is the button. Erk
+    /// sends nothing anywhere, which is the host's; preventing it keeps a
+    /// `method=dialog` form's dialog open (M5.10).
     Submit = 4,
     /// A key went down, at the focused element or the body.
     KeyDown = 5,

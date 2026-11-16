@@ -14,6 +14,7 @@
 mod activation;
 mod command;
 mod dialog;
+mod form;
 mod popover;
 
 use std::cell::RefCell;
@@ -1122,6 +1123,12 @@ impl Page {
                 let Some(node) = focused else {
                     return Vec::new();
                 };
+                // Enter in a one-line field submits its form (M5.10).
+                if input.key == Key::Enter
+                    && let Some(events) = self.implicit_submit(node)
+                {
+                    return events;
+                }
                 let Some(element) = self.doc.node(node).and_then(|found| found.as_element()) else {
                     return Vec::new();
                 };
@@ -1836,11 +1843,13 @@ impl Page {
                 break details;
             }
             // A link or a control does what it does itself: a button runs
-            // its command, or opens or closes its popover.
+            // its command, opens or closes its popover, or submits its
+            // form (M5.10).
             if self.interactive(current) {
                 return self
                     .invoke_command(current)
                     .or_else(|| self.invoke_popover(current))
+                    .or_else(|| self.invoke_submit(current))
                     .unwrap_or_default();
             }
             // A label focuses its control, as browsers do, then clicks it
@@ -1954,6 +1963,10 @@ impl Page {
             EventKind::BeforeToggle => self.after_before_toggle(target, prevented),
             EventKind::Cancel => self.after_cancel(target, prevented),
             EventKind::Command => self.after_command(target, prevented),
+            EventKind::Submit => {
+                let submitter = event.source.and_then(NodeId::from_bits);
+                self.after_submit(target, submitter, prevented)
+            }
             _ => Vec::new(),
         }
     }

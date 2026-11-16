@@ -730,3 +730,50 @@ fn a_checkbox_changes_before_its_click_and_its_form_hears_input_and_change() {
     assert_eq!(*log.borrow(), ["Click Some(true)"]);
     assert_eq!(app.checked(c), Ok(Some(false)));
 }
+
+#[test]
+fn a_form_hears_its_submit_with_the_button_and_a_dialogs_form_closes_it() {
+    let mut app = app(
+        "<body style='margin: 0'><dialog id=d open style='margin: 0; padding: 0; \
+         border: 0'><form id=f method=dialog><input id=t style='display: block; \
+         margin: 0; width: 60px; height: 20px'><button id=ok value=tamam \
+         style='display: block; margin: 0; width: 60px; height: 20px'>ok</button>\
+         </form></dialog>",
+    );
+    let (d, f, ok) = (node(&app, "#d"), node(&app, "#f"), node(&app, "#ok"));
+    let log: Log = Rc::default();
+    let prevent = Rc::new(Cell::new(true));
+    {
+        let (log, prevent) = (log.clone(), prevent.clone());
+        app.on(f, EventKind::Submit, move |cx, event| {
+            log.borrow_mut().push(format!(
+                "{:?} {:?}",
+                event.target == f,
+                event.source == Some(ok)
+            ));
+            if prevent.get() {
+                cx.prevent_default();
+            }
+        })
+        .unwrap();
+    }
+    {
+        let log = log.clone();
+        app.on(d, EventKind::Close, move |cx, _| {
+            log.borrow_mut()
+                .push(format!("close {}", cx.dialog_return_value(d).unwrap()));
+        })
+        .unwrap();
+    }
+    // Enter in the field clicks the button, whose submit the host
+    // prevents: the dialog stays open.
+    app.click(10.0, 10.0);
+    key(&mut app, erk::Key::Enter, KeyState::Down);
+    assert_eq!(*log.borrow(), ["true true"]);
+    assert!(app.query(None, "#d[open]").unwrap().is_some());
+    // Let through, the button's submit closes the dialog with its value.
+    prevent.set(false);
+    app.click(10.0, 30.0);
+    assert_eq!(*log.borrow(), ["true true", "true true", "close tamam"]);
+    assert!(app.query(None, "#d[open]").unwrap().is_none());
+}

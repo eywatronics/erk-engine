@@ -4846,6 +4846,229 @@ mod tests {
         assert_eq!(engine.node_box(c).unwrap().unwrap().width, 13.0);
     }
 
+    /// The nodes with the ids `names`, in order.
+    fn ids<const N: usize>(engine: &Engine, names: [&str; N]) -> [u64; N] {
+        names.map(|name| query_id(engine, name))
+    }
+
+    /// The `submit` events among `events`: the form and the button that
+    /// sent it (0 for none).
+    fn submits(events: &[Event]) -> Vec<(u64, u64)> {
+        events
+            .iter()
+            .filter(|event| event.kind == EventKind::Submit)
+            .map(|event| (event.target, event.source.unwrap_or(0)))
+            .collect()
+    }
+
+    /// `key` pressed and let go at the focus, by a host that prevents
+    /// nothing: the events, and what each does by default.
+    fn press_delivered(engine: &mut Engine, key: crate::messages::Key) -> Vec<Event> {
+        let mut events = Vec::new();
+        for state in [
+            crate::messages::KeyState::Down,
+            crate::messages::KeyState::Up,
+        ] {
+            let input = KeyInput {
+                key: key.clone(),
+                state,
+                modifiers: Modifiers::default(),
+            };
+            events.extend(engine.key(&input));
+            for event in engine.key_default(&input) {
+                events.extend(deliver(engine, event));
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn a_submit_button_submits_its_form_after_its_click_and_is_its_source() {
+        let mut engine = verifying(
+            "<form id=f><button id=auto>a</button><button id=sub type=submit>s</button>\
+             <input id=input type=submit><button id=plain type=button>p</button>\
+             <button id=reset type=reset>r</button>\
+             <button id=off disabled>o</button><span><button id=deep><b id=b style='display: inline-block'>d</b></button>\
+             </span></form><button id=outside>x</button>",
+        );
+        let [f, auto, sub, input, plain, reset, off, deep, b, outside] = ids(
+            &engine,
+            [
+                "f", "auto", "sub", "input", "plain", "reset", "off", "deep", "b", "outside",
+            ],
+        );
+        // A button without a type or one of type submit, and a submit
+        // input: the click, then the form's submit, the button its source.
+        for button in [auto, sub, input] {
+            let events = press_on(&mut engine, button);
+            let at = |kind| events.iter().position(|event| event.kind == kind);
+            assert!(at(EventKind::Click) < at(EventKind::Submit), "{events:?}");
+            assert_eq!(submits(&events), [(f, button)], "{button}");
+            checked_frame(&mut engine);
+        }
+        // A press on what a submit button holds submits as it.
+        assert_eq!(submits(&press_on(&mut engine, b)), [(f, deep)]);
+        // Plain, reset and disabled buttons, and one outside a form,
+        // submit nothing.
+        for button in [plain, reset, off, outside] {
+            assert_eq!(submits(&press_on(&mut engine, button)), [], "{button}");
+        }
+        // A prevented click submits nothing.
+        let (x, y) = middle_of(&engine, auto);
+        let mut prevented = Vec::new();
+        for kind in [PointerKind::Down, PointerKind::Up] {
+            for event in engine.pointer(&PointerInput {
+                kind,
+                x,
+                y,
+                button: PointerButton::Primary,
+                modifiers: Modifiers::default(),
+            }) {
+                let follow = engine.follow(&event, event.kind == EventKind::Click);
+                prevented.extend(follow);
+            }
+        }
+        assert_eq!(submits(&prevented), []);
+    }
+
+    #[test]
+    fn enter_in_a_one_line_field_clicks_its_forms_default_button() {
+        let mut engine = verifying(
+            "<form id=f><input id=t><textarea id=area></textarea>\
+             <button id=first>1</button><button id=second>2</button></form>\
+             <form id=g><input id=u><button id=off disabled>o</button>\
+             <button id=after>a</button></form>",
+        );
+        let [f, t, area, first, u] = ids(&engine, ["f", "t", "area", "first", "u"]);
+        press_on(&mut engine, t);
+        let events = press_delivered(&mut engine, crate::messages::Key::Enter);
+        // The first submit button in tree order is clicked, and submits.
+        let clicks: Vec<u64> = events
+            .iter()
+            .filter(|event| event.kind == EventKind::Click)
+            .map(|event| event.target)
+            .collect();
+        assert_eq!(clicks, [first]);
+        assert_eq!(submits(&events), [(f, first)]);
+        // Enter in a textarea is a line break, not a submission.
+        press_on(&mut engine, area);
+        assert_eq!(
+            submits(&press_delivered(&mut engine, crate::messages::Key::Enter)),
+            []
+        );
+        assert_eq!(engine.value(area), Ok(Some("\n".to_owned())));
+        // A disabled default button submits nothing, though one after it
+        // would.
+        press_on(&mut engine, u);
+        assert_eq!(
+            submits(&press_delivered(&mut engine, crate::messages::Key::Enter)),
+            []
+        );
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn enter_submits_a_form_without_a_button_when_no_other_field_blocks_it() {
+        let mut engine = verifying(
+            "<form id=one><input id=a><input type=checkbox><input type=hidden></form>\
+             <form id=two><input id=b><input type=email></form>\
+             <div><input id=c></div>",
+        );
+        let [one, a, b, c] = ids(&engine, ["one", "a", "b", "c"]);
+        // One field that takes text: the form submits, from no button.
+        press_on(&mut engine, a);
+        assert_eq!(
+            submits(&press_delivered(&mut engine, crate::messages::Key::Enter)),
+            [(one, 0)]
+        );
+        // Two: nothing. Outside a form: nothing.
+        for field in [b, c] {
+            press_on(&mut engine, field);
+            assert_eq!(
+                submits(&press_delivered(&mut engine, crate::messages::Key::Enter)),
+                [],
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_submit_in_a_dialogs_form_closes_it_with_its_buttons_value_unless_prevented() {
+        let mut engine = verifying(
+            "<dialog id=d open><form id=f method=dialog><input id=t>\
+             <button id=ok value=tamam>ok</button></form></dialog>\
+             <dialog id=e open><form id=g><button id=via formmethod=dialog value=v>v\
+             </button><button id=no>n</button></form></dialog>",
+        );
+        let [d, e, f, ok, via, no] = ids(&engine, ["d", "e", "f", "ok", "via", "no"]);
+        // Prevented, the dialog stays open.
+        let submit = Event {
+            kind: EventKind::Submit,
+            target: f,
+            path: vec![f],
+            x: 0.0,
+            y: 0.0,
+            modifiers: Modifiers::default(),
+            key: None,
+            command: None,
+            source: Some(ok),
+        };
+        assert_eq!(engine.follow(&submit, true), []);
+        assert!(engine.query(None, "#d[open]").unwrap().is_some());
+        // Let through, it closes with the button's value, and says so.
+        let events = press_on(&mut engine, ok);
+        assert_eq!(commands(&events), [(EventKind::Close, d)]);
+        assert_eq!(engine.dialog_return_value(d), Ok("tamam".to_owned()));
+        assert!(engine.query(None, "#d[open]").unwrap().is_none());
+        checked_frame(&mut engine);
+        // A form without the method submits and closes nothing; a
+        // button's formmethod makes it a dialog's.
+        assert_eq!(commands(&press_on(&mut engine, no)), []);
+        assert!(engine.query(None, "#e[open]").unwrap().is_some());
+        assert_eq!(
+            commands(&press_on(&mut engine, via)),
+            [(EventKind::Close, e)]
+        );
+        assert_eq!(engine.dialog_return_value(e), Ok("v".to_owned()));
+        checked_frame(&mut engine);
+    }
+
+    #[test]
+    fn an_input_button_shows_its_value_or_its_default_label() {
+        // Chrome's labels for a submit and a reset button without a value;
+        // what it holds in the document, it does not show (M5.10).
+        let mut engine = Engine::new();
+        engine.load_html(
+            "<input type=submit id=s><input type=reset id=r><input type=button>\
+             <input type=button id=b value=Tamam>",
+        );
+        engine.resize(300, 200);
+        engine.set_verifying(true);
+        let (prepared, _) = engine.prepare();
+        assert_eq!(painted_text(&prepared.unwrap()), "SubmitResetTamam");
+        let [s, b] = ids(&engine, ["s", "b"]);
+        let box_of = |engine: &Engine, id| engine.node_box(id).unwrap().unwrap();
+        let narrow = box_of(&engine, b).width;
+        // A value set, a type changed: shown again, as the oracle has it.
+        engine.set_attr(b, "value", "Kaydet ve kapat").unwrap();
+        engine.set_attr(s, "type", "reset").unwrap();
+        assert_eq!(
+            painted_text(&checked_frame(&mut engine)),
+            "ResetResetKaydet ve kapat"
+        );
+        assert!(box_of(&engine, b).width > narrow);
+        engine.remove_attr(b, "value").unwrap();
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "ResetReset");
+        // Text the host puts in one is not shown.
+        let text = engine.create_text("içinde");
+        engine.insert(s, text, None).unwrap();
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "ResetReset");
+        // In Turkish, the labels are Turkish; the language is the
+        // element's, as `lang` says.
+        engine.set_attr(s, "lang", "tr-TR").unwrap();
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "SıfırlaReset");
+    }
+
     #[test]
     fn a_drawn_checkboxs_natural_size_follows_what_its_box_becomes() {
         // Stretched, then not, then a block, then left to the page: each

@@ -266,6 +266,9 @@ pub struct ErkInput {
 pub const ERK_EVENT_CLICK: u32 = 1;
 pub const ERK_EVENT_INPUT: u32 = 2;
 pub const ERK_EVENT_CHANGE: u32 = 3;
+/// A form is about to be submitted: a submit button's click, or Enter in
+/// a one-line field; `source` is the button. `erk_event_prevent_default`
+/// keeps a `method=dialog` form's dialog open; Erk sends nothing anywhere.
 pub const ERK_EVENT_SUBMIT: u32 = 4;
 pub const ERK_EVENT_KEY_DOWN: u32 = 5;
 pub const ERK_EVENT_KEY_UP: u32 = 6;
@@ -318,7 +321,9 @@ pub struct ErkEvent {
     /// (`show-modal`), a custom one (`--name`) as the button wrote it;
     /// empty for other events.
     pub command: ErkStr,
-    /// `ERK_EVENT_COMMAND`: the button that sent it; 0 for other events.
+    /// `ERK_EVENT_COMMAND`: the button that sent it. `ERK_EVENT_SUBMIT`:
+    /// the button that submitted the form, 0 when Enter in its only field
+    /// did. 0 for other events.
     pub source: ErkNodeId,
 }
 

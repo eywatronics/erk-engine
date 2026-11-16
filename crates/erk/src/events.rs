@@ -40,7 +40,9 @@ pub struct Event {
     /// A `command` event's command: a built-in one as HTML names it
     /// (`show-modal`), a custom one (`--name`) as the button wrote it.
     pub command: Option<String>,
-    /// A `command` event's source: the button that sent it.
+    /// A `command` event's source: the button that sent it. A `submit`
+    /// event's submitter: the button that submitted the form, `None` when
+    /// Enter in its only field did (DOM's `SubmitEvent.submitter`).
     pub source: Option<Node>,
 }
 
