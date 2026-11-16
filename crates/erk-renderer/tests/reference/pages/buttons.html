@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Düğmeler</title>
+<meta name="erk-press" content="kapat">
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  button, input { font-family: "Noto Sans"; }
+  .form { margin: 20px; padding: 16px; width: 460px; border: 2px solid #cbd5e1; }
+  .satir { margin-bottom: 12px; }
+  .boy { width: 140px; height: 44px; }
+  .blok { display: block; width: 200px; height: 44px; margin-top: 8px; }
+  .mavi { background: #2563eb; color: #ffffff; border: 0; border-radius: 6px; padding: 8px 16px; font-size: 15px; }
+  .cercevesiz { border: 0; background: #e0f2fe; }
+  .sari { background: #fef3c7; }
+  dialog { margin: 0; padding: 12px; border: 2px solid #f472b6; }
+</style>
+</head>
+<body>
+  <div class="form">
+    <div class="satir">
+      <button>Kaydet</button> <input type="submit"> <input type="reset">
+      <input type="button" value="Tamam"> <button disabled>Engelli</button>
+    </div>
+    <div class="satir">
+      <button class="boy">Ortada</button> <input class="boy" type="submit" value="Gönder">
+      <button class="blok">Blok düğme</button>
+    </div>
+    <div class="satir">
+      <button class="mavi">Mavi</button> <button class="cercevesiz">Çerçevesiz</button>
+      <button class="sari">Sarı</button>
+    </div>
+    <p>Diyalogun formu gönderildi, diyalog kapandı:</p>
+    <dialog open><form method="dialog"><input value="ad"> <button id="kapat" value="tamam">Kapat</button></form></dialog>
+    <div class="satir">Sonra gelen satır</div>
+  </div>
+</body>
