@@ -293,7 +293,7 @@ impl Document {
 
     /// The `select` whose list option `id` is in: its parent, or its
     /// `optgroup` parent's.
-    fn select_of(&self, id: NodeId) -> Option<NodeId> {
+    pub fn select_of(&self, id: NodeId) -> Option<NodeId> {
         let is = |id: NodeId, name: LocalName| {
             self.node(id)
                 .and_then(|node| node.as_element())
@@ -321,6 +321,22 @@ impl Document {
         if let Some(value) = self.attribute(id, &local_name!("value")) {
             return value;
         }
+        self.option_text(id)
+    }
+
+    /// An `option`'s label, what a list shows for it (HTML §4.10.10): its
+    /// `label` attribute if not empty, or else its text with whitespace
+    /// stripped and collapsed.
+    pub fn option_label(&self, id: NodeId) -> String {
+        match self.attribute(id, &local_name!("label")) {
+            Some(label) if !label.is_empty() => label,
+            _ => self.option_text(id),
+        }
+    }
+
+    /// The text of `id` and what it holds, whitespace stripped and
+    /// collapsed (HTML's `option` text).
+    fn option_text(&self, id: NodeId) -> String {
         let mut text = String::new();
         let mut stack = vec![id];
         while let Some(node) = stack.pop() {
@@ -339,7 +355,7 @@ impl Document {
 
     /// A `select`'s options: its `option` children and those of its
     /// `optgroup` children, in tree order.
-    fn options(&self, select: NodeId) -> Vec<NodeId> {
+    pub fn options(&self, select: NodeId) -> Vec<NodeId> {
         let named = |id: NodeId, name: LocalName| {
             self.node(id)
                 .and_then(|node| node.as_element())
@@ -363,7 +379,7 @@ impl Document {
     /// nothing set and none marked `selected`, a single-choice list shows
     /// its first option that is not disabled; with more than one marked,
     /// the last (HTML's selectedness setting algorithm).
-    fn selected_options(&self, select: NodeId) -> Vec<NodeId> {
+    pub fn selected_options(&self, select: NodeId) -> Vec<NodeId> {
         let options = self.options(select);
         let set = options
             .iter()

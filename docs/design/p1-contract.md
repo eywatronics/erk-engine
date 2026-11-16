@@ -565,6 +565,11 @@ gerekçeli bir daraltma:
   diyalogunu açık tutar; önlenmezse diyalog düğmenin değeriyle kapanır
   ve `ERK_EVENT_CLOSE` gelir. Erk hiçbir yere bir şey göndermez:
   gönderimin içeriği host'undur. Yapı değişmediği için sürüm aynı.
+- **v0.18, sürüm değişmeden (M5.10, üçüncü PR):** Odaktaki açılır bir
+  `select`'te oklar, Home ve End seçimi değiştirir; ardından
+  `ERK_EVENT_INPUT` ve `ERK_EVENT_CHANGE` `select`'e gelir. Seçimi
+  değiştirmeyen tuş olay doğurmaz. Host'un `erk_node_set_value`'yla
+  seçtiği seçenek olay doğurmaz, ama artık bir sonraki karede çizilir.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

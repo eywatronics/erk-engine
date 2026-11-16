@@ -269,6 +269,29 @@ input[type=button i] {
   white-space: pre;
 }
 
+/* 15.5.16 The select element (M5.10): a drop-down select is an
+ * inline-block box in the control font that shows its selected option's
+ * label, as wide as its widest option. Layout gives it the label, and
+ * room around it that is not padding, as Chrome's is not: 4px before the
+ * label, 16px after it for the arrow Erk draws, 1px above and below. */
+select {
+  appearance: auto;
+  display: inline-block;
+  box-sizing: border-box;
+  font-family: sans-serif;
+  font-size: 13.333px;
+  color: black;
+  background-color: white;
+  border: 1px solid rgb(118, 118, 118);
+  white-space: pre;
+  cursor: default;
+}
+
+select:disabled {
+  color: rgba(16, 16, 16, 0.3);
+  border-color: rgba(118, 118, 118, 0.3);
+}
+
 /* 15.5.4 The details and summary elements (M5.9): a closed details shows
  * only its first summary, which layout sees to (bare text too). The
  * disclosure marker is drawn by Erk, inside the summary's first line. */

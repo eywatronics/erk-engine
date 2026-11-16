@@ -1215,3 +1215,34 @@ fn a_buttons_content_is_centred_in_it_unless_the_page_aligns_it() {
     let middle = (40.0 - line) / 2.0;
     assert_eq!(tops, [middle, middle, 0.0, middle], "{line}");
 }
+
+#[test]
+fn a_drop_down_select_leaves_chromes_room_and_counts_grouped_options_indented() {
+    // The widths, less the 1px border on each side: the widest label, with
+    // Chrome's 4px before it and 16px for the arrow after it, which a
+    // page's padding adds to; an option in a group counts 14px wider; with
+    // `appearance: none` there is no room (M5.10, measured in Chrome).
+    let (doc, layouts) = lay_out(
+        "<select><option>Elma</option></select>\
+         <select><optgroup label=g><option>Elma</option></optgroup></select>\
+         <select style='padding: 0 10px'><option>Elma</option></select>\
+         <select style='appearance: none'><option>Elma</option></select>\
+         <select style='height: 40px'><option>Elma</option></select>",
+    );
+    let selects = all(&doc, &local_name!("select"));
+    let label = |select| layouts.anonymous(select)[0].layout;
+    let text = label(selects[3]).size.width;
+    let widths: Vec<f32> = selects
+        .iter()
+        .map(|select| layouts.get(*select).unwrap().size.width - 2.0 - text)
+        .collect();
+    // Rounded to whole pixels where they are: within one.
+    for (width, expected) in widths.iter().zip([20.0, 34.0, 40.0, 0.0, 20.0]) {
+        assert!((width - expected).abs() <= 1.0, "{widths:?} {text}");
+    }
+    // The label sits 4px in and 1px down, centred in a higher select.
+    let first = label(selects[0]);
+    assert_eq!((first.location.x, first.location.y), (5.0, 2.0));
+    let high = label(selects[4]);
+    assert_eq!(high.location.y, 1.0 + (38.0 - high.size.height) / 2.0);
+}
