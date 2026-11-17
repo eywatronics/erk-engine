@@ -35,3 +35,4 @@ checkboxes 90.27
 command 83.78
 block-in-inline 91.26
 buttons 89.23
+select 78.18

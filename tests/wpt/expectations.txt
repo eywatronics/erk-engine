@@ -1708,7 +1708,7 @@ css/css-flexbox/scrollbars-auto.html PASS
 css/css-flexbox/scrollbars-no-margin.html PASS
 css/css-flexbox/scrollbars.html PASS
 css/css-flexbox/select-element-multiple.html PASS
-css/css-flexbox/select-element-zero-height-001.html PASS
+css/css-flexbox/select-element-zero-height-001.html FAIL  # lowered: passed by accident, the select's options were inline text in test and reference alike; now drawn, the reference's inline select sits on the line's baseline, which Chrome puts half a pixel low and Erk rounds to a whole one below the test's flex item
 css/css-flexbox/select-element-zero-height-002.html FAIL
 css/css-flexbox/stretch-flex-item-checkbox-input.html PASS
 css/css-flexbox/stretch-flex-item-radio-input.html PASS

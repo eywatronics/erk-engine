@@ -1051,6 +1051,13 @@ fn add_box(walk: &Walk<'_>, id: NodeId, context: &mut Context, context_root: boo
             }
         }
         decoration.extend(control_look(walk.doc, id, style, frame));
+        decoration.extend(select_arrow(
+            walk.doc,
+            id,
+            style,
+            frame,
+            layout.border.right,
+        ));
         decoration.retain(|item| ink(item).is_none_or(|ink| walk.shows(ink)));
         context.backgrounds.extend(tag(decoration, scope));
     }
@@ -1428,6 +1435,62 @@ fn control_look(
     });
     items.push(DisplayItem::PopTransform);
     items
+}
+
+/// A drop-down select's arrow (M5.10; Erk's own look, M5 plan decision 4):
+/// a chevron pointing down, in the text's colour, inside border box
+/// `frame`'s right border `inset`, in the room layout leaves for it, as
+/// Chrome draws it whatever the padding. Nothing for any other element, or
+/// with `appearance: none`.
+fn select_arrow(
+    doc: &Document,
+    id: NodeId,
+    style: &ComputedValues,
+    frame: Frame,
+    inset: f32,
+) -> Vec<DisplayItem> {
+    use erk_style::style::values::computed::Appearance;
+    if !crate::layout::is_dropdown(doc, id)
+        || style.get_box().clone_appearance() == Appearance::None
+        || frame.height <= 0.0
+    {
+        return Vec::new();
+    }
+    let room = crate::layout::SELECT_ROOM[1];
+    let color = srgb_bytes(style.get_inherited_text().color);
+    let right = frame.x + frame.width - inset;
+    let (cx, cy) = (right - room / 2.0, frame.y + frame.height / 2.0);
+    // The right and bottom edges of a small square, turned an eighth of a
+    // turn about its middle: a V.
+    let side = 6.5_f32;
+    let stroke = 2.0;
+    let (mx, my) = (cx, cy - side * 0.3);
+    let (cos, sin) = (
+        std::f32::consts::FRAC_1_SQRT_2,
+        std::f32::consts::FRAC_1_SQRT_2,
+    );
+    vec![
+        DisplayItem::PushTransform([
+            cos,
+            sin,
+            -sin,
+            cos,
+            mx - cos * mx + sin * my,
+            my - sin * mx - cos * my,
+        ]),
+        DisplayItem::Border {
+            frame: Frame {
+                x: mx - side / 2.0,
+                y: my - side / 2.0,
+                width: side,
+                height: side,
+            },
+            widths: [0.0, stroke, stroke, 0.0],
+            colors: [color; 4],
+            radii: [(0.0, 0.0); 4],
+        },
+        DisplayItem::PopTransform,
+    ]
 }
 
 /// A summary's disclosure marker (M5.9), drawn over the room Erk wrote for

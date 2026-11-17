@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Seçim kutuları</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1f2933; font-family: "Noto Sans"; font-size: 15px; }
+  select { font-family: "Noto Sans"; vertical-align: top; }
+  .form { margin: 20px; padding: 16px; width: 460px; border: 2px solid #cbd5e1; }
+  .satir { margin-bottom: 12px; }
+  .genis { width: 220px; }
+  .yuksek { height: 40px; }
+  .sayfanin { background: #ecfeff; border: 2px solid #0891b2; border-radius: 6px; padding: 4px 28px 4px 10px; font-size: 15px; }
+</style>
+</head>
+<body>
+  <div class="form">
+    <div class="satir">Şehir:
+      <select><option>Ankara</option><option>İstanbul</option><option>Kahramanmaraş</option></select>
+      <select><option>Kısa</option><option selected>En uzun seçenek burada</option><option>Orta boy</option></select>
+    </div>
+    <div class="satir">
+      <select><optgroup label="Meyve"><option>Elma</option><option selected>Armut</option></optgroup><optgroup label="Sebze"><option>Pırasa</option></optgroup></select>
+      <select disabled><option>Engelli</option></select>
+      <select><option label="Etiketli">metin</option></select>
+      <select></select>
+    </div>
+    <div class="satir">
+      <select class="genis"><option>Genişliği verilmiş</option></select>
+      <select class="yuksek"><option>Ortada</option><option>İkinci</option></select>
+    </div>
+    <div class="satir">
+      <select class="sayfanin"><option>Sayfanın stili</option></select>
+    </div>
+  </div>
+</body>

@@ -77,6 +77,18 @@ fn text_fields() {
     );
 }
 
+/// Drop-down selects' look (M5.10): the selected label, the arrow Erk
+/// draws in the text's colour inside the right border, disabled, sized by
+/// the page, padded, and with `appearance: none`, which leaves no arrow.
+/// Erk's own, not Chrome's, so held by this image.
+#[test]
+fn select() {
+    check_golden(
+        "select",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/select.html"),
+    );
+}
+
 /// Buttons' look (M5.10): Erk's own over a button in its user agent's
 /// face and border, disabled, sized by the page, and as the page restyles
 /// it, which drops it. Held by this image, not Chrome's.

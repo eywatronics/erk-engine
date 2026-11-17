@@ -16,6 +16,7 @@ mod command;
 mod dialog;
 mod form;
 mod popover;
+mod select;
 
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
@@ -389,6 +390,11 @@ impl Page {
         let reusable = last.as_ref().is_some_and(|kept| {
             kept.revision == revision
                 && only_repaints(&self.styles, &styles, &changes)
+                // An option selected changes its select's label (M5.10).
+                && !changes
+                    .checked
+                    .iter()
+                    .any(|node| self.select_around(*node).is_some())
                 && (quiet || kept.layouts.colours_split_alike(&self.doc, &styles))
         });
         // A layout that does not hold is dropped after the frame: freeing
@@ -535,6 +541,31 @@ impl Page {
                 .iter()
                 .filter_map(|text| self.doc.node(*text)?.parent()),
         );
+        // A drop-down select shows its selected option's label and is as
+        // wide as its widest: whatever changed in it, or which option is
+        // selected, builds it again (M5.10).
+        let selects: Vec<NodeId> = self
+            .touched
+            .deep
+            .iter()
+            .chain(self.touched.shallow.iter())
+            .chain(&changes.checked)
+            .chain(&changes.text)
+            .filter_map(|node| self.select_around(*node))
+            .collect();
+        self.touched.shallow.extend(selects);
+    }
+
+    /// The drop-down select `node` is in, or is.
+    fn select_around(&self, node: NodeId) -> Option<NodeId> {
+        let mut at = Some(node);
+        while let Some(id) = at {
+            if crate::layout::is_dropdown(&self.doc, id) {
+                return Some(id);
+            }
+            at = self.doc.node(id).and_then(|found| found.parent());
+        }
+        None
     }
 
     /// The last layout's tree, from this thread's entry for the page.
@@ -1087,6 +1118,13 @@ impl Page {
         if input.state == KeyState::Down
             && let Some(field) = focused
             && let Some(events) = self.edit(field, input)
+        {
+            return events;
+        }
+        // A drop-down select's arrows, Home and End change its selection
+        // (M5.10).
+        if let Some(select) = focused
+            && let Some(events) = self.select_key(select, input)
         {
             return events;
         }
@@ -2256,8 +2294,10 @@ impl Page {
         // The parent it leaves and the one it joins.
         if let Some(old) = self.doc.node(child).and_then(|n| n.parent()) {
             self.journal.touch(&self.doc, old);
+            self.touch_list(old);
         }
         self.journal.touch(&self.doc, parent);
+        self.touch_list(parent);
         let joins = !erk_invalidation::journal::connected(&self.doc, child);
         // Into an element outside the document: it may come back this
         // frame, to be compared with what it was.
@@ -2280,6 +2320,7 @@ impl Page {
         let node = self.node(node)?;
         if let Some(parent) = self.doc.node(node).and_then(|n| n.parent()) {
             self.journal.touch(&self.doc, parent);
+            self.touch_list(parent);
         }
         self.touch_top_layer(None);
         if !self.doc.remove(node) {
@@ -2293,6 +2334,7 @@ impl Page {
     pub(crate) fn set_attr(&mut self, node: u64, name: &str, value: &str) -> Result<(), Status> {
         let node = self.node(node)?;
         self.journal.touch(&self.doc, node);
+        self.touch_list(node);
         let before = self.popover_kind(node);
         self.doc.set_attr(node, name, value).map_err(status)?;
         self.popover_attribute_changed(node, name, before);
@@ -2304,11 +2346,38 @@ impl Page {
     pub(crate) fn remove_attr(&mut self, node: u64, name: &str) -> Result<bool, Status> {
         let node = self.node(node)?;
         self.journal.touch(&self.doc, node);
+        self.touch_list(node);
         let before = self.popover_kind(node);
         let had = self.doc.remove_attr(node, name).map_err(status)?;
         self.popover_attribute_changed(node, name, before);
         self.dialog_attribute_changed(node, name);
         Ok(had)
+    }
+
+    /// Note in the journal every option of the select `node` is or is in,
+    /// before a change there: which option a list shows selected follows
+    /// from all of them (HTML's selectedness setting algorithm), so adding,
+    /// removing, disabling or marking one can select or unselect another
+    /// (found by fuzzing, M5.10).
+    fn touch_list(&mut self, node: NodeId) {
+        let mut at = Some(node);
+        while let Some(id) = at {
+            let is_select = self
+                .doc
+                .node(id)
+                .and_then(|found| found.as_element())
+                .is_some_and(|element| {
+                    element.name.ns == erk_dom::ns!(html)
+                        && element.name.local == local_name!("select")
+                });
+            if is_select {
+                for option in self.doc.options(id) {
+                    self.journal.touch(&self.doc, option);
+                }
+                return;
+            }
+            at = self.doc.node(id).and_then(|found| found.parent());
+        }
     }
 
     /// Attribute `name` of element `node`; `None` without one, or for a node
@@ -2337,6 +2406,12 @@ impl Page {
     pub(crate) fn set_value(&mut self, node: u64, value: &str) -> Result<(), Status> {
         let node = self.node(node)?;
         self.journal.touch(&self.doc, node);
+        // A select's value is which option is selected: the journal notes
+        // its options, whose selectedness it changes (found by the oracle,
+        // M5.10).
+        for option in self.doc.options(node) {
+            self.journal.touch(&self.doc, option);
+        }
         self.doc.set_value(node, value).map_err(status)
     }
 

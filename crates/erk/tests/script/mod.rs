@@ -17,6 +17,7 @@ use erk::{
 const TAGS: &[&str] = &[
     "div", "p", "span", "ul", "li", "button", "a", "template", "table", "tr", "td", "img", "br",
     "section", "input", "A b", "", "svg", "-x", "dialog", "label", "fieldset", "legend", "form",
+    "select", "option", "optgroup",
 ];
 
 const NAMES: &[&str] = &[
@@ -44,6 +45,10 @@ const NAMES: &[&str] = &[
     "method",
     "formmethod",
     "value",
+    "selected",
+    "label",
+    "multiple",
+    "size",
 ];
 
 const VALUES: &[&str] = &[
@@ -161,6 +166,11 @@ const PAGES: &[&str] = &[
      <input type=submit value=s></form></dialog><form><input>\
      <button style='height: 40px'>b<div>c</div></button><input type=reset>\
      <input type=button value=x><button disabled>d</button></form>",
+    // Drop-down selects: options of several widths, one selected, a
+    // group, a disabled option and select, an empty one (M5.10).
+    "<select id=s><option>a</option><option selected>uzun seçenek</option>\
+     <optgroup label=g><option disabled>d</option><option label=e>f</option></optgroup>\
+     </select><select disabled><option>x</option></select><select></select>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of

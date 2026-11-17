@@ -615,6 +615,10 @@ struct LayoutNode {
     /// Whether the box is a checkbox's or radio button's Erk draws: its
     /// baseline is its border box's bottom, as Chrome sets it (M5.10).
     check_control: bool,
+    /// For the anonymous box that shows a drop-down `select`'s label: the
+    /// label of each of its options and the room before it, which the box
+    /// is as wide as the widest of, as Chrome sizes a select (M5.10).
+    option_labels: Vec<(Paragraph, f32)>,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -996,6 +1000,16 @@ impl<'a> Builder<'a> {
         if is_replaced(doc, parent) {
             return Vec::new();
         }
+        // Nor does any other input that is not a text field or a button
+        // show what it holds: a checkbox is a leaf Taffy never enters, so
+        // children built in it would keep the layout they had elsewhere
+        // (found by fuzzing, M5.10). Chrome draws none of them either.
+        if is_html(doc, parent, &erk_dom::local_name!("input"))
+            && text_field(doc, parent).is_none()
+            && button_label(doc, parent).is_none()
+        {
+            return Vec::new();
+        }
         let parent_style = styles.computed(parent);
         // A text field shows its value as its one line or paragraph, in
         // place of what it holds in the document (M5.8).
@@ -1053,8 +1067,9 @@ impl<'a> Builder<'a> {
                 Vec::new(),
             ));
         }
-        // An input button shows its label, never what it holds (M5.10).
-        let label = button_label(doc, parent);
+        // An input button and a drop-down select show their label, never
+        // what they hold (M5.10).
+        let label = button_label(doc, parent).or_else(|| select_label(doc, parent));
         if let (Some(label), Some(style)) = (&label, &parent_style) {
             entries.push(Entry::Inline(
                 vec![InlineToken::Text(
@@ -1140,7 +1155,7 @@ impl<'a> Builder<'a> {
         // inside, so the absolutely positioned elements it contains are laid
         // out by Taffy; so does a button, whose content Taffy centres in it
         // (M5.10).
-        let button = is_button(doc, parent);
+        let button = shows_label(doc, parent);
         if !has_blocks && !contains && !button && block_container && parent != doc.root() {
             let (mut tokens, mut atoms) = (Vec::new(), Vec::new());
             for entry in entries {
@@ -1229,6 +1244,45 @@ impl<'a> Builder<'a> {
             }
         }
         self.close(&mut run, &mut children, parent, &parent_style, container);
+        // A drop-down select's label box is as wide as its widest option.
+        if let (true, Some(style), Some(label_box)) =
+            (is_dropdown(doc, parent), &parent_style, children.last())
+        {
+            let labels = doc
+                .options(parent)
+                .into_iter()
+                .map(|option| {
+                    let tokens = [InlineToken::Text(
+                        doc.option_label(option),
+                        style.clone(),
+                        text_language(doc, parent),
+                        None,
+                    )];
+                    // An option in a group counts as indented, as Chrome's
+                    // list draws it, whatever the group's own label.
+                    let in_group = doc.node(option).and_then(|node| node.parent()) != Some(parent);
+                    let indent = if in_group { OPTGROUP_INDENT } else { 0.0 };
+                    (Paragraph::new(&tokens, style), indent)
+                })
+                .collect();
+            let label_box = &mut self.nodes[usize::from(*label_box)];
+            label_box.option_labels = labels;
+            // Chrome's room around the label, which is not the select's
+            // padding: a page's padding comes on top of it. A margin, as
+            // anonymous boxes have no padding where they are painted. With
+            // `appearance: none` Chrome leaves none, nor draws an arrow.
+            let drawn = style.get_box().clone_appearance()
+                != erk_style::style::values::computed::Appearance::None;
+            if drawn {
+                let px = LengthPercentageAuto::length;
+                label_box.style.margin = taffy::Rect {
+                    left: px(SELECT_ROOM[3]),
+                    right: px(SELECT_ROOM[1]),
+                    top: px(SELECT_ROOM[0]),
+                    bottom: px(SELECT_ROOM[2]),
+                };
+            }
+        }
         // Taffy lays out flex and grid items in child order and has no
         // `order` property: sort the items by it, keeping tree order between
         // equal values (CSS Flexbox §5.4). Anonymous items have order 0.
@@ -1354,7 +1408,7 @@ impl<'a> Builder<'a> {
                     .is_some_and(|style| is_check_control(doc, id, style));
                 // A button's content is centred in it, block by block, as
                 // Chrome lays it out, unless the page aligns it (M5.10).
-                if is_button(doc, id) {
+                if shows_label(doc, id) {
                     let style = &mut self.nodes[index].style;
                     if matches!(style.display, Display::Block | Display::FlowRoot)
                         && style.align_content.is_none()
@@ -1479,6 +1533,7 @@ impl<'a> Builder<'a> {
                     && node.paragraph == then.paragraph
                     && node.field_height == then.field_height
                     && node.check_control == then.check_control
+                    && node.option_labels == then.option_labels
                     && match (&node.replaced, &then.replaced) {
                         (Some(now), Some(then)) => match (&now.image, &then.image) {
                             (Some(now), Some(then)) => Arc::ptr_eq(now, then),
@@ -1807,6 +1862,57 @@ pub(crate) fn text_field(doc: &Document, id: NodeId) -> Option<TextField> {
         },
         _ => None,
     }
+}
+
+/// Whether element `id` is a drop-down `select`: one that shows one option,
+/// without `multiple` and with a `size` of at most 1 (HTML §4.10.7). A list
+/// box, which shows several, is not one.
+pub(crate) fn is_dropdown(doc: &Document, id: NodeId) -> bool {
+    let Some(element) = doc.node(id).and_then(|node| node.as_element()) else {
+        return false;
+    };
+    element.name.ns == erk_dom::ns!(html)
+        && element.name.local == erk_dom::local_name!("select")
+        && element.attr(&erk_dom::local_name!("multiple")).is_none()
+        && element
+            .attr(&erk_dom::local_name!("size"))
+            .and_then(|size| size.trim().parse::<u32>().ok())
+            .is_none_or(|size| size <= 1)
+}
+
+/// The room Chrome leaves around a drop-down select's label inside its
+/// padding, top, right, bottom, left: the arrow's on the right (measured on
+/// the select reference page, with and without the page's padding).
+pub(crate) const SELECT_ROOM: [f32; 4] = [1.0, 16.0, 1.0, 4.0];
+
+/// How much wider an option in an `optgroup` counts towards its select's
+/// width than one outside: Chrome's list indents it (measured: 14px, the
+/// group's own label not counting).
+const OPTGROUP_INDENT: f32 = 14.0;
+
+/// The label a drop-down select shows: its selected option's. With no
+/// option, or one with no label, a zero-width space, so that the box keeps
+/// a line's height, as Chrome's does. `None` for any other element.
+pub(crate) fn select_label(doc: &Document, id: NodeId) -> Option<String> {
+    if !is_dropdown(doc, id) {
+        return None;
+    }
+    let label = doc
+        .selected_options(id)
+        .first()
+        .map(|option| doc.option_label(*option))
+        .unwrap_or_default();
+    Some(if label.is_empty() {
+        "\u{200b}".to_owned()
+    } else {
+        label
+    })
+}
+
+/// Whether element `id` shows a label of its own in place of what it
+/// holds, centred in it: a button or a drop-down select (M5.10).
+fn shows_label(doc: &Document, id: NodeId) -> bool {
+    is_button(doc, id) || is_dropdown(doc, id)
 }
 
 /// Whether element `id` is a button: a `button`, or an `input` of type
@@ -2276,6 +2382,7 @@ impl<'t> LayoutTree<'t> {
         let style = self.nodes[index].style.clone();
         let key = self.nodes[index].shape_key;
         let field_height = self.nodes[index].field_height;
+        let option_labels = std::mem::take(&mut self.nodes[index].option_labels);
         let calcs = self.calcs;
         let mut measured: Option<InlineLayout> = None;
         let mut output = compute_leaf_layout(
@@ -2295,8 +2402,13 @@ impl<'t> LayoutTree<'t> {
                     .map_or(available.width, AvailableSpace::Definite);
                 let atoms = self.measure_atoms(&paragraph, space);
                 let shaped = self.text.shape(&paragraph, key, max_advance, &atoms);
+                // A select's label box: as wide as its widest option.
+                let widest = option_labels
+                    .iter()
+                    .map(|(label, indent)| indent + self.text.shape(label, None, None, &[]).width())
+                    .fold(0.0_f32, f32::max);
                 let size = Size {
-                    width: known.width.unwrap_or_else(|| shaped.width()),
+                    width: known.width.unwrap_or_else(|| shaped.width().max(widest)),
                     height: known
                         .height
                         .unwrap_or(field_height.unwrap_or(shaped.height)),
@@ -2341,6 +2453,7 @@ impl<'t> LayoutTree<'t> {
             self.nodes[index].shaped = Some(shaped);
         }
         self.nodes[index].paragraph = Some(paragraph);
+        self.nodes[index].option_labels = option_labels;
         output
     }
 

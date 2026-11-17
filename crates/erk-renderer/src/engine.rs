@@ -5070,6 +5070,118 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_down_select_shows_its_selected_label_as_wide_as_its_widest_option() {
+        let mut engine = Engine::new();
+        engine.load_html(
+            "<select id=a><option>kısa</option><option id=long>en uzun seçenek</option>\
+             </select><select id=b><option>kısa</option><option selected>en uzun seçenek\
+             </option></select><select id=c><option label=etiket>metin</option></select>",
+        );
+        engine.resize(400, 200);
+        engine.set_verifying(true);
+        let (prepared, _) = engine.prepare();
+        let [a, b, long] = ids(&engine, ["a", "b", "long"]);
+        let width = |engine: &Engine, id| engine.node_box(id).unwrap().unwrap().width;
+        // Each shows its selected option, by its label if it has one, and
+        // none what else it holds; the two with the same options are as
+        // wide, whichever is selected.
+        assert_eq!(
+            painted_text(&prepared.unwrap()),
+            "kısaen uzun seçeneketiket"
+        );
+        // Rounded to whole pixels where they are: within one.
+        assert!((width(&engine, a) - width(&engine, b)).abs() <= 1.0);
+        // The host selects another: the label follows, the width does not.
+        let before = width(&engine, a);
+        engine.set_value(a, "en uzun seçenek").unwrap();
+        assert_eq!(
+            painted_text(&checked_frame(&mut engine)),
+            "en uzun seçeneken uzun seçeneketiket"
+        );
+        assert_eq!(width(&engine, a), before);
+        // An option not shown that grows widens its select.
+        let text = engine.create_text(" ve daha da uzun");
+        engine.insert(long, text, None).unwrap();
+        engine.set_value(a, "kısa").unwrap();
+        checked_frame(&mut engine);
+        assert!(width(&engine, a) > before);
+        // With no option left, an empty label keeps a line's height.
+        engine.remove(long).unwrap();
+        let first = engine.query(Some(a), "option").unwrap().unwrap();
+        engine.remove(first).unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(
+            engine.node_box(a).unwrap().unwrap().height,
+            engine.node_box(b).unwrap().unwrap().height
+        );
+    }
+
+    #[test]
+    fn arrows_home_and_end_change_a_focused_selects_option_and_tell_input_and_change() {
+        let mut engine = verifying(
+            "<select id=s><option>a</option><option disabled>b</option><option>c</option>\
+             <optgroup label=g><option>d</option></optgroup></select>\
+             <select id=off disabled><option>x</option><option>y</option></select>",
+        );
+        let [s, off] = ids(&engine, ["s", "off"]);
+        press_on(&mut engine, s);
+        let value = |engine: &Engine| engine.value(s).unwrap().unwrap();
+        // Down skips the disabled option and tells input and change.
+        assert_eq!(
+            press(&mut engine, crate::messages::Key::ArrowDown),
+            [
+                EventKind::KeyDown,
+                EventKind::Input,
+                EventKind::Change,
+                EventKind::KeyUp
+            ]
+        );
+        assert_eq!(value(&engine), "c");
+        checked_frame(&mut engine);
+        press(&mut engine, crate::messages::Key::ArrowRight);
+        assert_eq!(value(&engine), "d");
+        // At the end, Down changes nothing and tells nothing.
+        assert_eq!(
+            press(&mut engine, crate::messages::Key::ArrowDown),
+            [EventKind::KeyDown, EventKind::KeyUp]
+        );
+        press(&mut engine, crate::messages::Key::Home);
+        assert_eq!(value(&engine), "a");
+        press(&mut engine, crate::messages::Key::End);
+        assert_eq!(value(&engine), "d");
+        press(&mut engine, crate::messages::Key::ArrowUp);
+        press(&mut engine, crate::messages::Key::ArrowLeft);
+        assert_eq!(value(&engine), "a");
+        checked_frame(&mut engine);
+        // Alt with an arrow opens the list in browsers, not here yet: it
+        // changes nothing.
+        let alt_down = KeyInput {
+            key: crate::messages::Key::ArrowDown,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers {
+                alt: true,
+                ..Modifiers::default()
+            },
+        };
+        assert_eq!(engine.key_default(&alt_down), []);
+        assert_eq!(value(&engine), "a");
+        // A select disabled while focused changes nothing; nor does a press
+        // reach one disabled from the start.
+        engine.set_attr(s, "disabled", "").unwrap();
+        assert_eq!(
+            press(&mut engine, crate::messages::Key::ArrowDown),
+            [EventKind::KeyDown, EventKind::KeyUp]
+        );
+        assert_eq!(value(&engine), "a");
+        checked_frame(&mut engine);
+        assert!(
+            press_on(&mut engine, off)
+                .iter()
+                .all(|event| event.target != off)
+        );
+    }
+
+    #[test]
     fn a_drawn_checkboxs_natural_size_follows_what_its_box_becomes() {
         // Stretched, then not, then a block, then left to the page: each
         // frame is the oracle's (M5.10).
@@ -5097,6 +5209,16 @@ mod tests {
         checked_frame(&mut engine);
         let (width, height) = size(&engine);
         assert!(width > 13.0 && height == 0.0, "{width} {height}");
+        // A checkbox the host puts in it has no box there, whatever box it
+        // had before (found by fuzzing).
+        let inner = engine.create_element("input").unwrap();
+        engine.set_attr(inner, "type", "radio").unwrap();
+        engine.insert(f, inner, None).unwrap();
+        checked_frame(&mut engine);
+        assert!(engine.node_box(inner).unwrap().is_some());
+        engine.insert(c, inner, None).unwrap();
+        checked_frame(&mut engine);
+        assert_eq!(engine.node_box(inner), Ok(None));
     }
 
     #[test]
