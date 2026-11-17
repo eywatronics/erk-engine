@@ -570,6 +570,13 @@ gerekçeli bir daraltma:
   `ERK_EVENT_INPUT` ve `ERK_EVENT_CHANGE` `select`'e gelir. Seçimi
   değiştirmeyen tuş olay doğurmaz. Host'un `erk_node_set_value`'yla
   seçtiği seçenek olay doğurmaz, ama artık bir sonraki karede çizilir.
+- **v0.18, sürüm değişmeden (M5.10, dördüncü PR):** Açılır `select`'e
+  basış, Space ya da Alt'lı ok listesini açar; listedeki bir seçeneğe
+  basış onu seçer, seçim değiştiyse `ERK_EVENT_INPUT` ve
+  `ERK_EVENT_CHANGE` `select`'e gelir. Seçeneğe basışın
+  `ERK_EVENT_CLICK`'i seçeneğe gelir (hedef seçenek, yolu `select`'ten
+  geçer). Liste sayfanındır: host listeyi göremez, açıp kapatamaz;
+  açılıp kapanması olay doğurmaz.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

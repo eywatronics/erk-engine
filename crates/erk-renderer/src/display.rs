@@ -1712,7 +1712,7 @@ fn text_fragments(
 /// `origin`. Parley's positioned glyphs already include each line's offset
 /// and baseline; the line's shift moves them down past taller inline boxes
 /// above. With a `view`, a run that cannot meet it is left out.
-fn glyph_runs(
+pub(crate) fn glyph_runs(
     paragraph: &ShapedText,
     origin: (f32, f32),
     resources: &Resources,
