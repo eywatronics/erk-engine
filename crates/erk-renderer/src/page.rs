@@ -11,6 +11,7 @@
 //! element under the pointer, the one pressed, the one focused) is kept here
 //! and styled into the next frame.
 
+mod access;
 mod activation;
 mod command;
 mod dialog;

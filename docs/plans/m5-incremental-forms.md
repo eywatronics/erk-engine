@@ -303,6 +303,33 @@ Dört PR (2026-11-09):
   (Windows'ta Narrator ya da NVDA) form etiketlerinin okunduğu elle
   doğrulanıp notlara yazılmış.
 
+Üç PR (2026-11-19):
+
+1. **Çekirdeğin ağacı.** `erk-renderer` son karenin belgesinden,
+   stillerinden ve kutularından bir erişilebilirlik ağacı çıkarır:
+   düğüm başına rol, ad, değer, durumlar (işaretli, devre dışı, odakta,
+   açık), başlık düzeyi, görüntü alanındaki kutu ve çocuklar. Tipler
+   Erk'in kendi düz verisi (`messages.rs`: `AccessNode`, `AccessRole`),
+   AccessKit'in değil: çekirdeğin dış yüzeyi düz veri ve prelude
+   tipleriyle sınırlı (`check-renderer-surface.sh`), aynı veri ileride
+   C-ABI'den geçecek. Rol önce `role` özniteliği (bilinen bir rolse),
+   yoksa HTML-AAM'in örtük rolü; ad önce `aria-labelledby`, sonra
+   `aria-label`, kontrollerde `label`, `img`'de `alt`, düğme, bağlantı,
+   başlık ve seçenekte içindeki metin, en son `title` (accname'in bir
+   alt kümesi). Kutusu olmayan (`display: none`), `visibility: hidden`
+   ya da `aria-hidden="true"` olan eleman ve içindekiler ağaçta yok.
+   Yeni bağımlılık yok.
+2. **AccessKit ve tembel eşitleme.** `erk` ağacı AccessKit'e çevirir ve
+   winit'in bağdaştırıcısıyla (`accesskit_winit`) platforma verir (yeni
+   bağımlılık: lisansı `deny.toml`'da, boyutu bütçeye karşı ölçülmüş).
+   Ağaç bağdaştırıcı isteyene kadar kurulmaz; sonra yalnızca değişen
+   düğümler gönderilir (günlüğün değişiklikleri ve odak, B8 bunu
+   ölçer). Odak ve "tıkla" eylemleri ekran okuyucudan motora gelir.
+3. **C-ABI ve kabul.** Kendi penceresini süren host için ağacın C-ABI
+   yüzü; ekran okuyucuyla (Narrator ya da NVDA) form etiketlerinin
+   okunduğunun elle denenmesi. Bu denemeyi bir insan yapar: sonuç
+   notlara yazılır.
+
 ### M5.12: Temel geçişler
 
 - [ ] `transition` ile `color`, `background-color`, `opacity`, `transform`:
@@ -1186,3 +1213,19 @@ Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
 | Fuzz | Sabit tohumlu 200 betik temiz; yerelde üç tohumla 9000 betik temiz |
 | Sınırlar | Görüntü alanından uzun liste kaydırılmıyor, kesiliyor. Dönüşüm ya da kaydırma kabı içindeki `select`'in listesi bunlar yokmuş gibi çiziliyor. Grup etiketi Chrome'daki gibi kalın değil. Yazarak seçenek bulma yok |
 | Mutasyonlar | 15 mutasyonun 15'i yakalandı: basışın açmaması, seçeneğin seçilmemesi, dışarıya basışın kapatmaması, devre dışı seçeneğin seçilmesi, `change`'in gitmemesi, aynı seçeneğin olay doğurması, listenin tuş almaması, vurgunun devre dışı seçeneğe gitmesi, Tab'ın ve Escape'in kapatmaması, listenin hiç üste açılmaması, devre dışı `select`'in listesini tutması, Space'in açmaması, satırların isabet bölgesi olmaması, vurgunun çizilmemesi |
+
+### M5.11
+
+İlk PR: çekirdeğin ağacı.
+
+| Konu | Not |
+|---|---|
+| Yer | `Engine::access_tree` son karenin belgesinden, stillerinden ve kutularından ağacı kuruyor (`page/access.rs`). Tipler `messages.rs`'te: `AccessNode` (düğüm, rol, ad, değer, işaretli, seçili, açık, düzey, devre dışı, odakta, kutu, çocuklar) ve `AccessRole`. Düz veri ve prelude tipleri: çekirdeğin yüzey muhafızı (`check-renderer-surface.sh`) onları gözden geçirilmiş listeye aldı; muhafızın paylaşılan tip yasağı bir rol varyantının `Cell` adına takıldı, tablo rolleri `TableRow` ve `TableCell` oldu. Reddedilen: AccessKit tiplerini çekirdekte kullanmak; dış yüzeye bir bağımlılığın tipleri girerdi ve C-ABI onları taşıyamazdı |
+| Rol | Önce `role` özniteliğinin Erk'in bildiği ilk rolü (bilinmeyen rol atlanıyor, `none` ve `presentation` genel), yoksa HTML-AAM'in örtük rolü: başlıklar, bağlantı (`href`'li `a`), düğmeler (`summary` ve `input` düğmeleri dahil), metin alanları (parola ayrı), onay kutusu, radyo, açılır `select` (ComboBox; seçenekleri çocukları), seçenek, resim, liste, diyalog, grup (`fieldset`, `details`, `optgroup`), form, etiket, `nav`, `main`, `article`, tablo |
+| Ad | accname'in alt kümesi: `aria-labelledby` (adlandırdığı elemanların metni), `aria-label`, kontrollerde etiketlerin metni (`for`'la ya da sararak; kontrolün kendi metni hariç), `img`'de `alt`, düğme, bağlantı, başlık, etiket ve seçenekte içindeki metin, en son `title`. Bir adın içindeki gömülü kontrol değeriyle katılıyor (accname): ilk denemede `select`'i saran etiketin adı bütün seçenekleri içeriyordu ("Şehir Van Muş"), şimdi seçili olanı ("Şehir Muş"). Belge düğümünün adı `title` |
+| Gizli | Kutusu olmayan (`display: none`, stili olmayan), `visibility: hidden` ya da `aria-hidden="true"` olan eleman ve içindekiler ağaçta yok; `head`, `script`, `style` de. Seçenekler `select`'in içinden geliyor (kutuları yok) |
+| Yapraklar | Düğme, seçenek, metin alanları, onay kutusu, radyo ve resim yaprak: düğmenin ve seçeneğin metni adları, metin alanının değeri değeri |
+| Durumlar | İşaretli (onay kutusu, radyo), seçili (seçenek), açık (`details` ve özeti, `select`'in listesi), düzey (`h1`-`h6` ya da `aria-level`), devre dışı (HTML'in kuralı ya da `aria-disabled`), odakta, son karenin görüntü alanındaki kenarlık kutusu |
+| Tembellik | Bu PR'da ağaç her istendiğinde baştan kuruluyor; kirli düğümlerle eşitleme AccessKit'le birlikte ikinci PR'da (B8 orada ölçülüyor) |
+| Testler | `the_access_tree_names_controls_by_their_labels_and_roles` (bir ayarlar formunun bütün ağacı), `the_access_tree_follows_focus_values_checkedness_and_what_is_open`, `the_access_tree_takes_names_from_references_titles_and_known_roles` |
+| Mutasyonlar | 17 mutasyonun 17'si yakalandı: `display: none`'ın, `aria-hidden`'ın, `visibility`'nin, `role`'ün, `aria-labelledby`'nin, `aria-label`'ın, kontrolün kendi etiketinde dışlanmasının, gömülü kontrolün değerinin, yaprakların, işaretliliğin, `aria-level`'in, odağın, açık listenin, `title`'ın, belge adının, kutuların yok sayılması ve yalnızca ilk rolün okunması. İlk turda biri eşdeğerdi: `role='kaydırıcı navigation'` testi `nav` üstündeydi, örtük rol de Navigation olduğu için ilk rolü okumak da geçiyordu; eleman `div` yapıldı |
