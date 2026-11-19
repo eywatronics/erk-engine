@@ -41,6 +41,7 @@
 //! is what painting and the host walk.
 
 mod calc;
+pub(crate) mod picker;
 
 #[cfg(test)]
 mod tests;
@@ -1888,7 +1889,7 @@ pub(crate) const SELECT_ROOM: [f32; 4] = [1.0, 16.0, 1.0, 4.0];
 /// How much wider an option in an `optgroup` counts towards its select's
 /// width than one outside: Chrome's list indents it (measured: 14px, the
 /// group's own label not counting).
-const OPTGROUP_INDENT: f32 = 14.0;
+pub(crate) const OPTGROUP_INDENT: f32 = 14.0;
 
 /// The label a drop-down select shows: its selected option's. With no
 /// option, or one with no label, a zero-width space, so that the box keeps

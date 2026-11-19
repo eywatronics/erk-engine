@@ -89,6 +89,18 @@ fn select() {
     );
 }
 
+/// A drop-down select's open list (M5.10), opened by the press meta: a
+/// row per option and group label over the page, the selected option
+/// highlighted, a disabled one muted, a group's options indented. Erk's
+/// own: Chrome draws its list in a window of its own, out of its capture.
+#[test]
+fn select_list() {
+    check_golden(
+        "select-list",
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/select-list.html"),
+    );
+}
+
 /// Buttons' look (M5.10): Erk's own over a button in its user agent's
 /// face and border, disabled, sized by the page, and as the page restyles
 /// it, which drops it. Held by this image, not Chrome's.

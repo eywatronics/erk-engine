@@ -5124,7 +5124,9 @@ mod tests {
              <select id=off disabled><option>x</option><option>y</option></select>",
         );
         let [s, off] = ids(&engine, ["s", "off"]);
+        // The press that focuses it opens its list; Escape closes that.
         press_on(&mut engine, s);
+        press(&mut engine, crate::messages::Key::Escape);
         let value = |engine: &Engine| engine.value(s).unwrap().unwrap();
         // Down skips the disabled option and tells input and change.
         assert_eq!(
@@ -5153,8 +5155,8 @@ mod tests {
         press(&mut engine, crate::messages::Key::ArrowLeft);
         assert_eq!(value(&engine), "a");
         checked_frame(&mut engine);
-        // Alt with an arrow opens the list in browsers, not here yet: it
-        // changes nothing.
+        // Alt with an arrow opens the list instead (see the list's tests):
+        // it changes nothing.
         let alt_down = KeyInput {
             key: crate::messages::Key::ArrowDown,
             state: crate::messages::KeyState::Down,
@@ -5179,6 +5181,150 @@ mod tests {
                 .iter()
                 .all(|event| event.target != off)
         );
+    }
+
+    /// The frame of `node`'s hit region in `prepared`, if it has one: an
+    /// option's row in an open list.
+    fn hit_frame(prepared: &Prepared, node: u64) -> Option<crate::list::Frame> {
+        prepared.list.items.iter().find_map(|item| match item {
+            crate::list::DisplayItem::Hit {
+                node: hit, frame, ..
+            } if *hit == node => Some(*frame),
+            _ => None,
+        })
+    }
+
+    /// The kinds of `events`, in order.
+    fn kinds(events: &[Event]) -> Vec<EventKind> {
+        events.iter().map(|event| event.kind).collect()
+    }
+
+    /// The middle of `frame`.
+    fn middle(frame: crate::list::Frame) -> (f32, f32) {
+        (frame.x + frame.width / 2.0, frame.y + frame.height / 2.0)
+    }
+
+    #[test]
+    fn a_press_on_a_select_opens_its_list_and_a_press_on_an_option_chooses_it() {
+        let mut engine = verifying(
+            "<body style='margin: 0'><select id=s><option id=a>bir</option>\
+             <option id=b disabled>iki</option><optgroup label=grup>\
+             <option id=c>üç</option></optgroup></select><p id=p>dışarı</p>",
+        );
+        let [s, a, b, c, p] = ids(&engine, ["s", "a", "b", "c", "p"]);
+        // Open: every option and the group's label, over the page.
+        press_on(&mut engine, s);
+        let open = checked_frame(&mut engine);
+        assert_eq!(painted_text(&open), "birdışarıbirikigrupüç");
+        let row = |option| middle(hit_frame(&open, option).expect("a row"));
+        let (row_b, row_c) = (row(b), row(c));
+        assert!(hit_frame(&open, a).unwrap().y >= engine.node_box(s).unwrap().unwrap().height);
+        // A disabled option chooses nothing and keeps the list open: no
+        // frame changes, and its rows still take presses.
+        assert_eq!(kinds(&press_at(&mut engine, row_b)), [EventKind::Click]);
+        assert!(engine.prepare().0.is_none());
+        // An option: the click, then input and change at the select; the
+        // list closes, the label follows.
+        let events = press_at(&mut engine, row_c);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.kind, event.target))
+                .collect::<Vec<_>>(),
+            [
+                (EventKind::Click, c),
+                (EventKind::Input, s),
+                (EventKind::Change, s)
+            ]
+        );
+        assert_eq!(engine.value(s), Ok(Some("üç".to_owned())));
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "üçdışarı");
+        // The selected option again: nothing to tell.
+        press_on(&mut engine, s);
+        let open = checked_frame(&mut engine);
+        let events = press_at(&mut engine, middle(hit_frame(&open, c).unwrap()));
+        assert_eq!(kinds(&events), [EventKind::Click]);
+        // A press elsewhere closes it choosing nothing; on the select, too.
+        press_on(&mut engine, s);
+        checked_frame(&mut engine);
+        press_on(&mut engine, p);
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "üçdışarı");
+        press_on(&mut engine, s);
+        checked_frame(&mut engine);
+        press_on(&mut engine, s);
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "üçdışarı");
+        assert_eq!(engine.value(s), Ok(Some("üç".to_owned())));
+    }
+
+    #[test]
+    fn keys_open_a_selects_list_move_in_it_choose_and_close_it() {
+        let mut engine = verifying(
+            "<body style='margin: 0'><select id=s><option>a</option><option disabled>b\
+             </option><option>c</option><option>d</option></select><input id=t>",
+        );
+        let [s, t] = ids(&engine, ["s", "t"]);
+        // The press opens it; Escape closes it.
+        press_on(&mut engine, s);
+        checked_frame(&mut engine);
+        press(&mut engine, crate::messages::Key::Escape);
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "a");
+        // Alt with Down opens it; Down moves the highlight past the
+        // disabled option without choosing; Enter chooses.
+        let alt_down = KeyInput {
+            key: crate::messages::Key::ArrowDown,
+            state: crate::messages::KeyState::Down,
+            modifiers: Modifiers {
+                alt: true,
+                ..Modifiers::default()
+            },
+        };
+        assert_eq!(engine.key_default(&alt_down), []);
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "aabcd");
+        assert_eq!(
+            press(&mut engine, crate::messages::Key::ArrowDown),
+            [EventKind::KeyDown, EventKind::KeyUp]
+        );
+        assert_eq!(engine.value(s), Ok(Some("a".to_owned())));
+        checked_frame(&mut engine);
+        assert_eq!(
+            press(&mut engine, crate::messages::Key::Enter),
+            [
+                EventKind::KeyDown,
+                EventKind::Input,
+                EventKind::Change,
+                EventKind::KeyUp
+            ]
+        );
+        assert_eq!(engine.value(s), Ok(Some("c".to_owned())));
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "c");
+        // Space opens it, End goes to the last, Tab closes it choosing
+        // nothing and moves the focus on.
+        press(&mut engine, crate::messages::Key::Space);
+        checked_frame(&mut engine);
+        press(&mut engine, crate::messages::Key::End);
+        press(&mut engine, crate::messages::Key::Tab);
+        assert_eq!(painted_text(&checked_frame(&mut engine)), "c");
+        assert_eq!(engine.value(s), Ok(Some("c".to_owned())));
+        type_text(&mut engine, "x");
+        assert_eq!(engine.value(t), Ok(Some("x".to_owned())));
+    }
+
+    #[test]
+    fn a_selects_list_opens_above_it_without_room_below_and_goes_with_it() {
+        let mut engine = verifying(
+            "<body style='margin: 0'><select id=s style='margin-top: 170px'>\
+             <option id=a>bir</option><option>iki</option><option>üç</option></select>",
+        );
+        let [s, a] = ids(&engine, ["s", "a"]);
+        press_on(&mut engine, s);
+        let open = checked_frame(&mut engine);
+        let select = engine.node_box(s).unwrap().unwrap();
+        assert!(hit_frame(&open, a).unwrap().y < select.y);
+        // Disabled while open, the select shows no list.
+        engine.set_attr(s, "disabled", "").unwrap();
+        let closed = checked_frame(&mut engine);
+        assert_eq!(hit_frame(&closed, a), None);
+        assert_eq!(painted_text(&closed), "bir");
     }
 
     #[test]

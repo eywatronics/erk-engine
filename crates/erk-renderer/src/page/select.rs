@@ -4,8 +4,8 @@
 //! Chrome's does on Windows without opening its list: the arrows go to the
 //! next or previous option that is not disabled, Home and End to the first
 //! and last. A change tells `input` and `change` at once; a key that
-//! changes nothing tells nothing. Alt with an arrow opens the list in
-//! browsers; Erk's list comes in the next step, so it does nothing yet.
+//! changes nothing tells nothing. Alt with an arrow, or Space, opens its
+//! list (`picker.rs`).
 
 use erk_dom::NodeId;
 
@@ -19,11 +19,19 @@ impl Page {
     /// changed nothing.
     pub(crate) fn select_key(&mut self, select: NodeId, input: &KeyInput) -> Option<Vec<Event>> {
         if input.state != KeyState::Down
-            || input.modifiers.alt
             || !crate::layout::is_dropdown(&self.doc, select)
             || self.doc.disabled(select) == Some(true)
         {
             return None;
+        }
+        // Alt with an arrow, or Space, opens the list.
+        let opens = match input.key {
+            Key::ArrowDown | Key::ArrowUp => input.modifiers.alt,
+            Key::Space => true,
+            _ => false,
+        };
+        if opens {
+            return self.invoke_select(select);
         }
         let options = self.doc.options(select);
         let enabled = |option: &&NodeId| self.doc.disabled(**option) != Some(true);

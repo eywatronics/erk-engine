@@ -15,6 +15,7 @@ mod activation;
 mod command;
 mod dialog;
 mod form;
+mod picker;
 mod popover;
 mod select;
 
@@ -125,6 +126,8 @@ pub(crate) struct Page {
     /// A checkbox or radio button a click changed, until the host has
     /// dispatched the click (M5.10).
     activation: Option<activation::Activation>,
+    /// A drop-down select's open list (M5.10).
+    picker: Option<picker::Picker>,
 }
 
 /// What earlier frames left for a frame to build on: the last frame's
@@ -336,6 +339,7 @@ impl Page {
             popovers: popover::Popovers::default(),
             dialogs: Vec::new(),
             activation: None,
+            picker: None,
         }
     }
 
@@ -776,6 +780,20 @@ impl Page {
         let caret_rect = self
             .ime_line(&layouts, &scrolling)
             .map(|line| bounds(&around, &line));
+        // A select's open list over everything, its rows hit regions of
+        // their options (M5.10).
+        let select_frame = self.open_picker().and_then(|(select, _)| {
+            hits.iter()
+                .find(|hit| hit.node == select)
+                .and_then(HitRegion::frame)
+        });
+        let picker = self.picker_items(&styles, resources, select_frame, (w, h));
+        let hits = if picker.is_empty() {
+            hits
+        } else {
+            list.items.extend(picker);
+            self::hits(&list.items)
+        };
         if let Some(node) = self.highlight {
             list.items.extend(
                 hits.iter()
@@ -1028,6 +1046,7 @@ impl Page {
                 self.pointer_last = true;
                 self.pressed = target;
                 self.popover_press_down(target);
+                self.picker_press_down(target);
                 // The focus goes to the focusable element pressed, or away
                 // when there is none, as in browsers.
                 let focus = target.and_then(|target| {
@@ -1119,6 +1138,10 @@ impl Page {
             && let Some(field) = focused
             && let Some(events) = self.edit(field, input)
         {
+            return events;
+        }
+        // A select's open list takes the keys that move in it (M5.10).
+        if let Some(events) = self.picker_key(input) {
             return events;
         }
         // A drop-down select's arrows, Home and End change its selection
@@ -1872,6 +1895,10 @@ impl Page {
     /// one of a group that shares a `name` closes the others, each with its
     /// own `toggle`. Nothing for a click anywhere else.
     pub(crate) fn click_default(&mut self, target: NodeId) -> Vec<Event> {
+        // An option of a select's open list chooses itself (M5.10).
+        if let Some(events) = self.choose_in_picker(target) {
+            return events;
+        }
         let mut node = Some(target);
         let details = loop {
             let Some(current) = node else {
@@ -1888,6 +1915,7 @@ impl Page {
                     .invoke_command(current)
                     .or_else(|| self.invoke_popover(current))
                     .or_else(|| self.invoke_submit(current))
+                    .or_else(|| self.invoke_select(current))
                     .unwrap_or_default();
             }
             // A label focuses its control, as browsers do, then clicks it

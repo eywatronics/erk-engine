@@ -289,9 +289,11 @@ Dört PR (2026-11-09):
 
 ### M5.10: Diğer kontroller
 
-- [ ] `checkbox`, `radio` (gruplu), `button` (yerli görünüm),
+- [x] `checkbox`, `radio` (gruplu), `button` (yerli görünüm),
   `select` (açılır listesi M5.9'un üst katmanında, sayfa içinde); `:checked`, `:disabled`; `<form>` gönderimi (`SUBMIT`, iptal
-  edilebilir). Referans sayfası ve altın görüntü.
+  edilebilir). Referans sayfası ve altın görüntü. Liste DOM'un üst
+  katmanında değil, sayfanın kendi çizimiyle içeriğin üstünde
+  (yürütme notları, dördüncü PR).
 
 ### M5.11: Erişilebilirlik
 
@@ -1171,3 +1173,16 @@ ayrı dokunuyor.
 | Fuzz | Sözlüğe `select`, `option`, `optgroup`, `selected`, `label`, `multiple`, `size` ve farklı genişlikte seçenekli, gruplu, devre dışı ve boş `select`'li bir sayfa eklendi. Sabit tohumlu 200 betik temiz; yerelde iki ayrı tohumla 3000'er betik, hatalar düzeltildikten sonra temiz |
 | Sınırlar | Açılır liste (sonraki PR), liste kutusu (`multiple`, `size` > 1), yazarak seçenek bulma. `appearance: none`'da Chrome satırı da daraltıyor (13,33 px'te 15 px), Erk 18 px tutuyor |
 | Mutasyonlar | 16 mutasyonun 16'sı yakalandı: en geniş seçeneğin, grup girintisinin, iç boşluğun yok sayılması, `appearance: none`'da iç boşluk, okun çizilmemesi, `select`'in yeniden kurulmaması, seçililiğin yalnızca boyama sayılması, `set_value`'nun ve liste değişikliklerinin günlüğe yazılmaması, `input` çocuklarının kurulması, devre dışı seçeneğin seçilmesi, `change`'in gitmemesi, Alt'ın yok sayılmaması, devre dışı `select`'in değişmesi, `label` özniteliğinin yok sayılması, boş etiketin satır yüksekliğini kaybetmesi |
+
+Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
+
+| Konu | Not |
+|---|---|
+| Neden üst katmanda değil | DOM'un üst katmanı elemanlar için (`dialog`, popover); liste bir eleman değil, `select`'in seçeneklerinin sayfa içi görünüşü. Seçeneklere kutu verip onları bir üst katman kutusuna taşımak layout'a görüntü alanına konumlanan anonim bir kök, boyamaya seçenekleri `select`'in yığın bağlamından çıkarmak demekti. Bunun yerine liste, imleç ve seçim gibi, içerik listesinden sonra sayfanın çizdiği bir işaret: seçenekler kutu almıyor, host yalnızca `select`'in olaylarını görüyor. Durum sayfada (`Page::picker`); kâhin aynı durumdan aynı listeyi çiziyor |
+| Satırlar | Liste açıkken her karede, `select`'in stiliyle şekilleniyor (`layout/picker.rs`): her seçenek, her grubun etiketi ve grubun girintili (14 px) seçenekleri. Satır 4 px ve 1 px dolgulu. Layout'un yeniden kullanım kuralları değişmedi: satırlar layout'un ağacında değil |
+| Konum | `select`'in isabet bölgesinin altında; görüntü alanında altta yer yoksa ve üstte varsa üstünde. Genişlik en geniş satır ya da `select`, hangisi genişse. Her satır seçeneğini adlandıran bir isabet bölgesi: satıra basış seçeneğe basıştır (tıklamanın hedefi seçenek). İsabet bölgeleri liste eklendikten sonra yeniden hesaplanıyor |
+| Davranış | `select`'e basış (tıklamanın varsayılan işi), Space ya da Alt'lı ok açıyor; `select`'e yeniden basış kapatıyor. Devre dışı olmayan seçeneğe basış seçip kapatıyor, seçim değiştiyse `input` ve `change`; devre dışı seçenek bir şey yapmıyor, liste açık kalıyor. Başka yere basış (basış anında, tıklamadan önce) seçmeden kapatıyor. Açıkken oklar, Home ve End vurguyu devre dışı olmayan seçenekler üzerinde taşıyor, Enter seçiyor, Escape ve Tab kapatıyor (Tab odağı da taşıyor). `select` belgeden çıkar, devre dışı kalır ya da açılır olmaktan çıkarsa liste kendiliğinden yok sayılıyor (`open_picker`), karede de kâhinde de |
+| Görünüm | Erk'in kendi görünümü (karar 4): beyaz zemin, 1 px gri çerçeve, vurgulu satır Chrome'un vurgu mavisinde beyaz yazıyla, devre dışı seçenek ve grup etiketi soluk. Chrome listesini ayrı bir işletim sistemi penceresinde çiziyor, yakalamaya girmiyor: Chrome referans sayfası yok, görünüm golden görüntüyle sabit (`select-list`). İlk çizimde liste `select`'ten 2 px genişti (çerçeve `select`'in genişliğine de ekleniyordu) |
+| Fuzz | Sabit tohumlu 200 betik temiz; yerelde üç tohumla 9000 betik temiz |
+| Sınırlar | Görüntü alanından uzun liste kaydırılmıyor, kesiliyor. Dönüşüm ya da kaydırma kabı içindeki `select`'in listesi bunlar yokmuş gibi çiziliyor. Grup etiketi Chrome'daki gibi kalın değil. Yazarak seçenek bulma yok |
+| Mutasyonlar | 15 mutasyonun 15'i yakalandı: basışın açmaması, seçeneğin seçilmemesi, dışarıya basışın kapatmaması, devre dışı seçeneğin seçilmesi, `change`'in gitmemesi, aynı seçeneğin olay doğurması, listenin tuş almaması, vurgunun devre dışı seçeneğe gitmesi, Tab'ın ve Escape'in kapatmaması, listenin hiç üste açılmaması, devre dışı `select`'in listesini tutması, Space'in açmaması, satırların isabet bölgesi olmaması, vurgunun çizilmemesi |
