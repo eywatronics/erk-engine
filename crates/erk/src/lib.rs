@@ -59,6 +59,7 @@
 //! on_another_thread(erk::App::headless(erk::Config::default()).unwrap());
 //! ```
 
+mod access;
 mod context;
 mod events;
 mod fonts;
