@@ -453,3 +453,73 @@ pub enum Stage {
     /// The display list built.
     DisplayList,
 }
+
+/// A node of the accessibility tree (M5.11): what a screen reader is told
+/// about an element or a run of text, from its meaning in HTML, its `role`
+/// and `aria-*` attributes and the last frame (p1-contract §6.1). Plain
+/// data, Erk's own: the embedding layer turns it into a platform's tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AccessNode {
+    /// The node's id; the document node for the tree's root.
+    pub node: u64,
+    pub role: AccessRole,
+    /// What it is called: its label, its alternative text, the text it
+    /// holds, as the role takes it.
+    pub name: Option<String>,
+    /// A text field's value, a select's selected option.
+    pub value: Option<String>,
+    /// A checkbox's or radio button's checkedness.
+    pub checked: Option<bool>,
+    /// An option's selectedness.
+    pub selected: Option<bool>,
+    /// Whether a `details` (and its summary) or a select's list is open.
+    pub expanded: Option<bool>,
+    /// A heading's level, 1 to 6.
+    pub level: Option<u8>,
+    pub disabled: bool,
+    pub focused: bool,
+    /// Its border box in CSS pixels on the viewport, as the last frame
+    /// laid it out; `None` for text and for what has no box.
+    pub bounds: Option<(f32, f32, f32, f32)>,
+    /// Its children's ids, in order, each a node of the same tree.
+    pub children: Vec<u64>,
+}
+
+/// What a node of the accessibility tree is: a role from its `role`
+/// attribute, if Erk knows it, or else its element's implicit one
+/// (HTML-AAM).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccessRole {
+    Document,
+    /// An element with no meaning of its own: a `div`, a `span`.
+    Generic,
+    /// A run of text.
+    Text,
+    Paragraph,
+    Heading,
+    Link,
+    Button,
+    CheckBox,
+    RadioButton,
+    TextInput,
+    MultilineTextInput,
+    PasswordInput,
+    /// A drop-down select.
+    ComboBox,
+    /// A select's option.
+    Option,
+    Image,
+    List,
+    ListItem,
+    Dialog,
+    /// A `fieldset`, or a `details`.
+    Group,
+    Form,
+    Label,
+    Navigation,
+    Main,
+    Article,
+    Table,
+    TableRow,
+    TableCell,
+}

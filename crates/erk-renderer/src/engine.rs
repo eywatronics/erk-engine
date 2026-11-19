@@ -28,8 +28,8 @@ use erk_dom::NodeId;
 
 use crate::list::Prepared;
 use crate::messages::{
-    BoxModel, CaretRect, ClipboardRequest, Cursor, Event, FontCatalog, FrameStats, KeyInput,
-    NodeKind, PointerInput, ResourceRequest, ResourceResponse, Stage, Status,
+    AccessNode, BoxModel, CaretRect, ClipboardRequest, Cursor, Event, FontCatalog, FrameStats,
+    KeyInput, NodeKind, PointerInput, ResourceRequest, ResourceResponse, Stage, Status,
 };
 use crate::page::Page;
 use crate::resources::Resources;
@@ -560,6 +560,14 @@ impl Engine {
     /// `node`'s box in the last frame, if it has one.
     pub fn node_box(&self, node: u64) -> Result<Option<BoxModel>, Status> {
         self.page.node_box(node)
+    }
+
+    /// The accessibility tree of the last frame (M5.11): the document
+    /// node first, each node before what it holds, with its role, name,
+    /// value, states and box. Only the document node before the first
+    /// frame.
+    pub fn access_tree(&self) -> Vec<AccessNode> {
+        self.page.access_tree()
     }
 
     /// `node`'s computed style in the last frame, as `name: value;` lines;
@@ -5325,6 +5333,162 @@ mod tests {
         let closed = checked_frame(&mut engine);
         assert_eq!(hit_frame(&closed, a), None);
         assert_eq!(painted_text(&closed), "bir");
+    }
+
+    /// The accessibility tree as lines: each node's depth, role, and what
+    /// it says besides, in tree order.
+    fn access_lines(engine: &Engine) -> Vec<String> {
+        let tree = engine.access_tree();
+        let mut depth = std::collections::HashMap::new();
+        let mut lines = Vec::new();
+        for node in &tree {
+            let at = depth.get(&node.node).copied().unwrap_or(0);
+            for child in &node.children {
+                depth.insert(*child, at + 1);
+            }
+            let mut line = format!("{}{:?}", "  ".repeat(at), node.role);
+            if let Some(name) = &node.name {
+                line.push_str(&format!(" {name:?}"));
+            }
+            if let Some(value) = &node.value {
+                line.push_str(&format!(" value={value:?}"));
+            }
+            for (flag, set) in [
+                ("checked", node.checked),
+                ("selected", node.selected),
+                ("expanded", node.expanded),
+            ] {
+                if let Some(set) = set {
+                    line.push_str(&format!(" {flag}={set}"));
+                }
+            }
+            if let Some(level) = node.level {
+                line.push_str(&format!(" level={level}"));
+            }
+            if node.disabled {
+                line.push_str(" disabled");
+            }
+            if node.focused {
+                line.push_str(" focused");
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
+    #[test]
+    fn the_access_tree_names_controls_by_their_labels_and_roles() {
+        let engine = verifying(
+            "<title>Ayarlar</title><h2>Hesap</h2>\
+             <form><label for=ad>Ad</label><input id=ad value=Ece>\
+             <label><input type=checkbox checked> Haberler</label>\
+             <label>Şehir <select><option>Van</option><option selected>Muş</option>\
+             </select></label>\
+             <textarea aria-label=Not>yazı</textarea><input type=password disabled>\
+             <button>Kaydet</button><input type=submit></form>\
+             <img alt='Logo' src=x><a href=#>Yardım</a><div role=button aria-label=Kapat>×</div>\
+             <p style='display: none'>gizli</p><p aria-hidden=true>saklı</p>\
+             <p style='visibility: hidden'>görünmez</p>",
+        );
+        assert_eq!(
+            access_lines(&engine),
+            [
+                "Document \"Ayarlar\"",
+                "  Generic",
+                "    Generic",
+                "      Heading \"Hesap\" level=2",
+                "        Text \"Hesap\"",
+                "      Form",
+                "        Label \"Ad\"",
+                "          Text \"Ad\"",
+                "        TextInput \"Ad\" value=\"Ece\"",
+                "        Label \"Haberler\"",
+                "          CheckBox \"Haberler\" checked=true",
+                "          Text \"Haberler\"",
+                "        Label \"Şehir Muş\"",
+                "          Text \"Şehir\"",
+                "          ComboBox \"Şehir\" value=\"Muş\" expanded=false",
+                "            Option \"Van\" selected=false",
+                "            Option \"Muş\" selected=true",
+                "        MultilineTextInput \"Not\" value=\"yazı\"",
+                "        PasswordInput disabled",
+                "        Button \"Kaydet\"",
+                "        Button \"Submit\"",
+                "      Image \"Logo\"",
+                "      Link \"Yardım\"",
+                "        Text \"Yardım\"",
+                "      Button \"Kapat\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_access_tree_follows_focus_values_checkedness_and_what_is_open() {
+        let mut engine = verifying(
+            "<body style='margin: 0'><input id=t><input type=checkbox id=c>\
+             <details id=d><summary id=s>Daha</summary>içi</details>\
+             <select id=l><option>a</option><option>b</option></select>",
+        );
+        let [t, c, s, l] = ids(&engine, ["t", "c", "s", "l"]);
+        let line = |engine: &Engine, id| {
+            let tree = engine.access_tree();
+            let node = tree.iter().find(|node| node.node == id).cloned();
+            node.unwrap()
+        };
+        press_on(&mut engine, t);
+        type_text(&mut engine, "yeni");
+        checked_frame(&mut engine);
+        let field = line(&engine, t);
+        assert_eq!(
+            (field.value.as_deref(), field.focused),
+            (Some("yeni"), true)
+        );
+        assert!(
+            field
+                .bounds
+                .is_some_and(|(_, _, width, height)| width > 0.0 && height > 0.0)
+        );
+        press_on(&mut engine, c);
+        press_on(&mut engine, s);
+        press_on(&mut engine, l);
+        checked_frame(&mut engine);
+        assert_eq!(line(&engine, c).checked, Some(true));
+        assert_eq!(line(&engine, s).expanded, Some(true));
+        assert_eq!(line(&engine, l).expanded, Some(true));
+        assert!(!line(&engine, t).focused && line(&engine, l).focused);
+        // What the open details shows is in the tree.
+        assert!(
+            access_lines(&engine)
+                .iter()
+                .any(|line| line.ends_with("Text \"içi\""))
+        );
+    }
+
+    #[test]
+    fn the_access_tree_takes_names_from_references_titles_and_known_roles() {
+        let engine = verifying(
+            "<span id=a>İlk</span><span id=b>ikinci</span>\
+             <input aria-labelledby='a b' aria-label=yok>\
+             <input title=İpucu><div role='kaydırıcı navigation'>n</div>\
+             <h3 role=none>düz</h3><div role=checkbox aria-disabled=true>k</div>\
+             <h1 aria-level=4>dört</h1>",
+        );
+        let lines = access_lines(&engine);
+        for wanted in [
+            "TextInput \"İlk ikinci\" value=\"\"",
+            "TextInput \"İpucu\" value=\"\"",
+            "Navigation",
+            "Generic",
+            "CheckBox checked=false disabled",
+            "Heading \"dört\" level=4",
+        ] {
+            assert!(
+                lines.iter().any(|line| line.trim_start() == wanted),
+                "{wanted} in {lines:#?}"
+            );
+        }
+        // A heading made generic is no heading.
+        assert!(!lines.iter().any(|line| line.contains("\"düz\" level")));
     }
 
     #[test]
