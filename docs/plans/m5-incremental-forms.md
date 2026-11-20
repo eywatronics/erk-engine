@@ -1214,6 +1214,19 @@ Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
 | Sınırlar | Görüntü alanından uzun liste kaydırılmıyor, kesiliyor. Dönüşüm ya da kaydırma kabı içindeki `select`'in listesi bunlar yokmuş gibi çiziliyor. Grup etiketi Chrome'daki gibi kalın değil. Yazarak seçenek bulma yok |
 | Mutasyonlar | 15 mutasyonun 15'i yakalandı: basışın açmaması, seçeneğin seçilmemesi, dışarıya basışın kapatmaması, devre dışı seçeneğin seçilmesi, `change`'in gitmemesi, aynı seçeneğin olay doğurması, listenin tuş almaması, vurgunun devre dışı seçeneğe gitmesi, Tab'ın ve Escape'in kapatmaması, listenin hiç üste açılmaması, devre dışı `select`'in listesini tutması, Space'in açmaması, satırların isabet bölgesi olmaması, vurgunun çizilmemesi |
 
+### Kararsız test: odaktan çıkış (2026-11-20)
+
+`a_press_moves_the_focus_and_reports_blur_then_focus` (`erk-renderer/tests/input.rs`) CI'ın ubuntu koşucusunda bir kez düştü (PR #109, koşu 44548529284): ikinci basıştan sonra alınan karede eski odaklı eleman hâlâ `:focus` yeşiliydi ("blurred"). Aynı commit'in ilk koşusunda ve Windows'ta geçiyordu. Hata motorda değil, test düzeneğindeydi.
+
+| Konu | Not |
+|---|---|
+| Kök neden | Testlerin protokol iş parçacığı (`tests/support/protocol.rs`) kareyi raster iş parçacığına verip beklemeden sonraki mesajları okuyordu; kare çıkış kanalına raster bitirince düşüyordu. `events()` basışı (Down, Up) ve bir `InspectAt` gönderip yanıta kadar okuyor, `frame()` ise kanaldaki bir sonraki kareyi alıyordu. Renderer Down'ı tek başına uygular ve kare boyarsa (A), Up ile `InspectAt` sonraki turda gelir ve bir kare daha (B) boyanır. Yavaş bir raster'da A, yanıttan sonra gelir: ilk `frame()` A'yı alır, B kanalda kalır ve ikinci basışın `frame()`'i bu eski B'yi (yeşil) ikinci basışın karesi sanar |
+| Zorlama | Raster'ın teslimine 200 ms gecikme ve `events()`'te girdiler arasına 50 ms koyunca düzeltmeden önce test her koşuda CI'daki hatayla düştü (`blurred`, `[0, 255, 0]`), düzeltmeden sonra aynı gecikmelerle geçti |
+| Düzeltme | Protokol iş parçacığı boyadığı karenin gönderilmesini bekliyor (60 sn zaman aşımı; durmuş raster iş parçacığı bitirir): bir turun karesi sonraki mesajların yanıtlarından önce kanalda. Yeni `Sync` mesajının yanıtı (`Synced`) turun karesinden sonra gidiyor. `events()` artık `Sync` ile bitiyor ve okuduğu en yeni kareyi tutuyor; test kareyi `painted()`'den alıyor, yani basışın boyadığı son kareyi. Basış hiç kare boyamadıysa test "the inputs painted no frame" ile düşüyor, eski bir kareyi kabul etmiyor |
+| Reddedilen | Bekleme süresini uzatmak ya da "son kareye kadar sessizlik" beklemek (zamana bağlı, yine kararsız); raster'ı yalnızca `Sync` olan turda beklemek (raster sıradaki kareleri birleştirdiği için hangi teslimin hangi tura ait olduğu bilinemiyor) |
+| Mutasyonlar | 2 mutasyonun 2'si yakalandı (gecikmeler açıkken): protokolün beklememesi ("the inputs painted no frame"), stilin odağı kaybeden elemana anlık görüntü almaması (`restyle.rs`, "blurred" yine yeşil) |
+| Kapsam | `input.rs`'te çok mesajlı bir girdinin ardından kare okuyan tek test buydu; tek mesajdan sonra `frame()` okuyan testler tek turda kaldıkları için etkilenmiyor |
+
 ### M5.11
 
 İlk PR: çekirdeğin ağacı.

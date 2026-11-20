@@ -7,12 +7,17 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 pub use erk_renderer::{Cursor, Event};
 use erk_renderer::{
     Engine, FontCatalog, Frame, KeyInput, Painted, PointerInput, Raster, RasterThread,
     ResourceRequest, ResourceResponse, Status,
 };
+
+/// How long the renderer waits for its raster to paint a frame; a raster
+/// that takes longer has stopped.
+const PATIENCE: Duration = Duration::from_secs(60);
 
 /// Messages from the test, as host, to the renderer.
 #[derive(Debug)]
@@ -62,6 +67,10 @@ pub enum ToRenderer {
         node: u64,
         text: String,
     },
+    /// Answered with `FromRenderer::Synced` once every message before it
+    /// is applied and the frame they painted, if any, has been sent: the
+    /// newest frame before the answer shows all of them.
+    Sync { request: u64 },
     /// Stop the renderer thread.
     Shutdown,
 }
@@ -88,6 +97,8 @@ pub enum FromRenderer {
         request: u64,
         result: Result<(), Status>,
     },
+    /// The answer to `ToRenderer::Sync`, after the frame it waited for.
+    Synced { request: u64 },
     /// The pointer should now look like this (the `cursor` property of
     /// what it is over). Sent when it changes.
     Cursor(Cursor),
@@ -113,12 +124,17 @@ pub fn spawn() -> (Sender<ToRenderer>, Receiver<FromRenderer>, JoinHandle<()>) {
 
 fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
     let frames = outbox.clone();
+    let (delivered, frame_sent) = channel();
     let raster = RasterThread::cpu(move |painted| {
+        let frame = matches!(painted, Painted::Frame(_) | Painted::Presented { .. });
         let _ = frames.send(match painted {
             Painted::Frame(frame) => FromRenderer::Frame(frame),
             Painted::Presented { width, height } => FromRenderer::Presented { width, height },
             Painted::Raster(raster) => FromRenderer::Raster(raster),
         });
+        if frame {
+            let _ = delivered.send(());
+        }
     });
     let mut engine = Engine::new();
     // No frame until a document is loaded.
@@ -133,6 +149,7 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
         // Everything queued is applied before a frame, as the renderer
         // thread did.
         let mut message = Some(first);
+        let mut synced = Vec::new();
         while let Some(current) = message {
             let reply = match current {
                 ToRenderer::Load { html } => {
@@ -200,6 +217,10 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
                     request,
                     result: engine.set_text(node, &text),
                 }],
+                ToRenderer::Sync { request } => {
+                    synced.push(FromRenderer::Synced { request });
+                    Vec::new()
+                }
                 ToRenderer::Shutdown => return,
             };
             if !send(reply) {
@@ -216,7 +237,18 @@ fn run(inbox: &Receiver<ToRenderer>, outbox: &Sender<FromRenderer>) {
             }
             if let Some(prepared) = prepared {
                 raster.paint(prepared);
+                // The frame is sent before anything the next messages
+                // answer: a raster painting on its own would let a frame of
+                // these messages arrive after the answer to later ones, and
+                // a test would take it for theirs (input.rs failed so on a
+                // slow CI runner). A raster that stops sends nothing more.
+                if frame_sent.recv_timeout(PATIENCE).is_err() {
+                    return;
+                }
             }
+        }
+        if !send(synced) {
+            return;
         }
         let now = if loaded {
             engine.cursor()
