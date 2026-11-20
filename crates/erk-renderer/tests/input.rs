@@ -39,6 +39,8 @@ struct Session {
     from: Receiver<FromRenderer>,
     renderer: Option<JoinHandle<()>>,
     request: u64,
+    /// The newest frame the inputs of the last `events` painted.
+    painted: Option<Frame>,
 }
 
 impl Session {
@@ -57,6 +59,7 @@ impl Session {
             from,
             renderer: Some(renderer),
             request: 0,
+            painted: None,
         };
         session.send(ToRenderer::Load {
             html: html.to_owned(),
@@ -175,27 +178,34 @@ impl Session {
         }
     }
 
-    /// The events `inputs` make, in order (an inspection marks the end).
+    /// The events `inputs` make, in order, keeping the newest frame they
+    /// paint for `painted`. A sync marks the end: it is answered after the
+    /// frame of the inputs before it, which the renderer may paint in more
+    /// than one go.
     fn events(&mut self, inputs: Vec<ToRenderer>) -> Vec<Event> {
         for input in inputs {
             self.send(input);
         }
         self.request += 1;
         let request = self.request;
-        self.send(ToRenderer::InspectAt {
-            request,
-            x: 0.0,
-            y: 0.0,
-        });
+        self.send(ToRenderer::Sync { request });
         let mut events = Vec::new();
+        self.painted = None;
         loop {
             match self.from.recv_timeout(PATIENCE) {
                 Ok(FromRenderer::Event(event)) => events.push(event),
-                Ok(FromRenderer::Inspected { request: r, .. }) if r == request => break events,
+                Ok(FromRenderer::Frame(frame)) => self.painted = Some(frame),
+                Ok(FromRenderer::Synced { request: r }) if r == request => break events,
                 Ok(_) => {}
                 Err(error) => panic!("no answer: {error:?}"),
             }
         }
+    }
+
+    /// The frame that shows everything the last `events` did: the newest it
+    /// painted, never an older one still on its way.
+    fn painted(&mut self) -> Frame {
+        self.painted.take().expect("the inputs painted no frame")
     }
 
     fn click(&mut self, x: f32, y: f32) -> Event {
@@ -575,7 +585,7 @@ fn a_press_moves_the_focus_and_reports_blur_then_focus() {
 
     let events = page.events(press(70.0, 20.0));
     assert_eq!(named(&events, &ids), [(focus, s("f")), (click, s("f"))]);
-    assert_eq!(pixel(&page.frame(), 70, 20), [0, 255, 0], ":focus");
+    assert_eq!(pixel(&page.painted(), 70, 20), [0, 255, 0], ":focus");
 
     // On the link's text: the link takes the focus, its block matches
     // :focus-within.
@@ -584,7 +594,7 @@ fn a_press_moves_the_focus_and_reports_blur_then_focus() {
         named(&events, &ids),
         [(blur, s("f")), (focus, s("link")), (click, s("link"))]
     );
-    let frame = page.frame();
+    let frame = page.painted();
     assert_eq!(pixel(&frame, 70, 20), [200, 200, 200], "blurred");
     assert_eq!(pixel(&frame, 110, 50), [255, 255, 0], ":focus-within");
 
