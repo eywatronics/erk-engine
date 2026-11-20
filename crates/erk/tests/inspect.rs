@@ -239,3 +239,44 @@ fn each_painted_frame_has_its_stage_timings() {
     app.tick(2);
     assert_eq!(app.last_frame_timings().unwrap().frame, 2);
 }
+
+#[test]
+fn the_access_tree_names_nodes_by_the_hosts_ids() {
+    let mut app = app(
+        r#"<!DOCTYPE html><body><h2 id="h">Ayarlar</h2><label for="ad">Ad</label><input id="ad" value="Ece"><button id="b" disabled>Kaydet</button></body>"#,
+    );
+    let tree = app.access_tree();
+    // The document's node first, as the host knows it.
+    assert_eq!(tree[0].node, app.root());
+    assert_eq!(tree[0].role, erk::AccessRole::Document);
+    let by = |node: erk::Node| tree.iter().find(|n| n.node == node).expect("in the tree");
+    let heading = by(node(&app, "#h"));
+    assert_eq!(heading.role, erk::AccessRole::Heading);
+    assert_eq!(heading.level, Some(2));
+    assert_eq!(heading.name.as_deref(), Some("Ayarlar"));
+    let field = by(node(&app, "#ad"));
+    assert_eq!(field.role, erk::AccessRole::TextInput);
+    assert_eq!(field.name.as_deref(), Some("Ad"));
+    assert_eq!(field.value.as_deref(), Some("Ece"));
+    assert!(field.bounds.is_some());
+    let button = by(node(&app, "#b"));
+    assert!(button.disabled);
+    // Every child is a node of the same tree, and its parent holds it.
+    for parent in &tree {
+        for child in &parent.children {
+            assert!(tree.iter().any(|n| n.node == *child), "{child:?}");
+        }
+    }
+    // The body holds what it holds in the document, in order.
+    let body = by(node(&app, "body"));
+    let held: Vec<erk::Node> = ["#h", "label", "#ad", "#b"]
+        .iter()
+        .map(|selector| node(&app, selector))
+        .collect();
+    assert_eq!(body.children, held);
+    // A node the host removes leaves the next frame's tree.
+    let gone = button.node;
+    app.remove(gone).unwrap();
+    app.tick(1);
+    assert!(app.access_tree().iter().all(|n| n.node != gone));
+}

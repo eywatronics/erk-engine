@@ -52,7 +52,7 @@ static void on_destroy(void *user_data) {
 }
 
 int main(void) {
-  CHECK(erk_abi_version() == ((0u << 16) | 18u));
+  CHECK(erk_abi_version() == ((0u << 16) | 19u));
 
   ErkConfig config;
   memset(&config, 0, sizeof config);
@@ -209,6 +209,31 @@ int main(void) {
   frame.struct_size = sizeof frame;
   CHECK(erk_app_frame(app, &frame) == ERK_OK);
   CHECK(frame.width == 320 && frame.height == 200 && frame.len == 320u * 200u * 4u);
+
+  /* What a screen reader is told: the button, named by its text, found
+   * by walking the tree from the document down. */
+  size_t nodes = 0;
+  CHECK(erk_access_tree(app, &nodes) == ERK_OK);
+  int reached = 0;
+  size_t todo[64];
+  size_t pending = 0;
+  todo[pending++] = 0;
+  while (pending > 0) {
+    size_t index = todo[--pending];
+    ErkAccessNode node;
+    memset(&node, 0, sizeof node);
+    node.struct_size = sizeof node;
+    CHECK(erk_access_node(app, index, &node) == ERK_OK);
+    if (node.node == button) {
+      reached++;
+      CHECK(node.role == ERK_ROLE_BUTTON && (node.flags & ERK_ACCESS_HAS_NAME));
+      CHECK(node.name.len == strlen("Tıkla") && memcmp(node.name.ptr, "Tıkla", node.name.len) == 0);
+    }
+    for (size_t at = 0; at < node.child_count && pending < 64; at++) {
+      CHECK(erk_access_child(app, index, at, &todo[pending++]) == ERK_OK);
+    }
+  }
+  CHECK(reached == 1 && nodes > 1);
 
   /* A new document: the old ids are stale, and the subscription ended with
    * its node, its destroy called once. */
