@@ -23,6 +23,11 @@ fontique = { version = "=0.11.1", default-features = false, features = ["system"
 # I/O and stays out of the core). Text only: no image support, and on Linux
 # X11 only (Wayland sessions reach it through XWayland).
 arboard = { version = "=3.7.0", default-features = false }
+# The platform's accessibility tree for a window (M5.11): the renderer
+# gives Erk's own plain tree, AccessKit hands it to UI Automation, AT-SPI or
+# NSAccessibility, built only once a screen reader asks for it.
+accesskit = "=0.25.2"
+accesskit_winit = "=0.34.2"
 
 [dev-dependencies]
 png = "0.18"

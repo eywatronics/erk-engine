@@ -6,4 +6,4 @@
 # binary and set the budget 10% above it. Lowering it is always allowed;
 # raising it needs a reason on the budget's line:
 #   <bytes>  # raised: <reason>
-34213414  # raised: the GPU path (wgpu, naga, vello_hybrid) in the shell, M2.5: 31103104 bytes on ubuntu-latest (PR #35); the budget is 110% of it
+42234570  # raised: AccessKit's AT-SPI adapter (accesskit_unix and zbus) for screen readers on Linux, M5.11: 38395064 bytes on ubuntu-latest (PR #109); the budget is 110% of it

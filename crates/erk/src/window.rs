@@ -32,6 +32,15 @@ enum UserEvent {
     Painted(Painted),
     /// Another thread sent the app a message: tick it.
     Wake,
+    /// A screen reader asked for the tree, asked for an action, or went
+    /// away (M5.11).
+    Access(accesskit_winit::Event),
+}
+
+impl From<accesskit_winit::Event> for UserEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        UserEvent::Access(event)
+    }
 }
 
 /// Run `app`'s window until it closes.
@@ -61,6 +70,7 @@ pub(crate) fn run(app: &mut App) -> Result<(), RunError> {
         cursor: None,
         caret: None,
         ime: false,
+        access: None,
         panic: None,
     };
     let result = event_loop.run_app(&mut host);
@@ -131,6 +141,9 @@ fn retried<T>(mut attempt: impl FnMut() -> Result<T, arboard::Error>) -> Result<
 
 struct WindowState {
     window: Arc<Window>,
+    /// The platform's accessibility adapter, made before the window
+    /// showed, as AccessKit requires.
+    access: accesskit_winit::Adapter,
     /// softbuffer's surface, made when the first CPU frame arrives: on the
     /// GPU path the raster draws into the window itself.
     surface: Option<Surface<Arc<Window>, Arc<Window>>>,
@@ -155,6 +168,8 @@ struct Host<'a> {
     /// Whether the window lets the input method work: while the focus is
     /// in a text field that takes a composition.
     ime: bool,
+    /// What the screen reader was last told, while one listens (M5.11).
+    access: Option<crate::access::AccessSync>,
     /// A panic in the host's callbacks, carried out of the loop.
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
@@ -244,6 +259,58 @@ impl Host<'_> {
         let _ = buffer.present();
     }
 
+    /// What a screen reader asked (M5.11): the whole tree when it starts
+    /// listening, a click on a node, or nothing more once it has gone.
+    fn access_event(&mut self, event: accesskit_winit::WindowEvent) {
+        let scale = self.scale();
+        let Some(state) = &mut self.window else {
+            return;
+        };
+        match event {
+            accesskit_winit::WindowEvent::InitialTreeRequested => {
+                let mut sync = crate::access::AccessSync::default();
+                let update = sync.full(&self.app.cx.engine.access_tree(), scale);
+                state.access.update_if_active(|| update);
+                self.access = Some(sync);
+            }
+            accesskit_winit::WindowEvent::ActionRequested(request) => {
+                if request.action != accesskit::Action::Click {
+                    return;
+                }
+                // A click is a press and release in the middle of the
+                // node's box, as the pointer's would be.
+                let Some(at) = self
+                    .access
+                    .as_ref()
+                    .and_then(|sync| sync.middle(request.target_node.0))
+                else {
+                    return;
+                };
+                for kind in [PointerKind::Down, PointerKind::Up] {
+                    self.app.input(Input::Pointer(PointerInput {
+                        kind,
+                        x: at.0,
+                        y: at.1,
+                        button: PointerButton::Primary,
+                        modifiers: Modifiers::default(),
+                    }));
+                }
+            }
+            accesskit_winit::WindowEvent::AccessibilityDeactivated => self.access = None,
+        }
+    }
+
+    /// While a screen reader listens, tell it what changed this turn.
+    fn tell_screen_reader(&mut self) {
+        let scale = self.scale();
+        let (Some(sync), Some(state)) = (&mut self.access, &mut self.window) else {
+            return;
+        };
+        if let Some(update) = sync.changes(&self.app.cx.engine.access_tree(), scale) {
+            state.access.update_if_active(|| update);
+        }
+    }
+
     /// Show the cursor the page asks for, when it changes.
     fn show_cursor(&mut self) {
         let now = self.app.cx.engine.cursor();
@@ -318,9 +385,11 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
             return;
         }
         let config = &self.app.config;
+        // Hidden until its accessibility adapter is made (AccessKit).
         let attributes = Window::default_attributes()
             .with_title(&config.title)
-            .with_inner_size(LogicalSize::new(config.width, config.height));
+            .with_inner_size(LogicalSize::new(config.width, config.height))
+            .with_visible(false);
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {
@@ -343,13 +412,23 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
         };
         self.app.output = Output::Window(Some(raster));
         self.fit(&window);
+        let access = accesskit_winit::Adapter::with_event_loop_proxy(
+            event_loop,
+            &window,
+            self.proxy.clone(),
+        );
+        window.set_visible(true);
         self.window = Some(WindowState {
             window,
+            access,
             surface: None,
         });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if let Some(state) = &mut self.window {
+            state.access.process_event(&state.window, &event);
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
@@ -447,6 +526,7 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
             }
             // The tick after this event handles what arrived.
             UserEvent::Wake => {}
+            UserEvent::Access(event) => self.access_event(event.window_event),
         }
     }
 
@@ -456,6 +536,7 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
         self.guarded(event_loop, |app| app.tick(now));
         self.show_cursor();
         self.show_caret();
+        self.tell_screen_reader();
         // Wake for what moves by itself (the caret's blink), else for input.
         event_loop.set_control_flow(match self.app.next_tick() {
             Some(at) => ControlFlow::WaitUntil(self.started + Duration::from_nanos(at)),

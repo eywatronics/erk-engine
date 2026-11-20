@@ -232,6 +232,15 @@ sıradan öznitelikler olarak yazar. `erk-dom`'un düğüm yapısına şimdiden
 boş alanlar M5'e kadar ölü kod olurdu. AccessKit ağacı M5'te bu özniteliklerden
 kurulur.
 
+M5.11'de çekirdek bu ağacı Erk'in kendi düz verisiyle verir
+(`Engine::access_tree`: rol, ad, değer, durumlar, kutu, çocuklar). Pencere
+kipinde `erk` onu AccessKit'le platforma verir (`accesskit_winit`): ekran
+okuyucu isteyene kadar ağaç kurulmaz, sonra her turda yalnızca değişen
+düğümler gider. Ekran okuyucunun tıklaması düğümün kutusunun ortasına bir
+basış olarak gelir; host'un abonelikleri onu sıradan bir tıklama olarak
+görür. Kendi penceresini süren host için ağacın C-ABI yüzü M5.11'in
+üçüncü adımında.
+
 ### 6.2 Fontlar (M1.7)
 
 **Karar: sistem fontlarını host tarar, çekirdek yalnızca bir katalog ve
