@@ -269,7 +269,7 @@ impl Host<'_> {
         match event {
             accesskit_winit::WindowEvent::InitialTreeRequested => {
                 let mut sync = crate::access::AccessSync::default();
-                let update = sync.full(&self.app.cx.engine.access_tree(), scale);
+                let update = sync.full(self.app.cx.engine.access_tree(), scale, self.app.prepared);
                 state.access.update_if_active(|| update);
                 self.access = Some(sync);
             }
@@ -300,13 +300,18 @@ impl Host<'_> {
         }
     }
 
-    /// While a screen reader listens, tell it what changed this turn.
+    /// While a screen reader listens, tell it what changed this turn. The
+    /// tree comes from the last frame: a turn that prepared none, and
+    /// kept the scale, has nothing new to tell.
     fn tell_screen_reader(&mut self) {
-        let scale = self.scale();
+        let (scale, frame) = (self.scale(), self.app.prepared);
         let (Some(sync), Some(state)) = (&mut self.access, &mut self.window) else {
             return;
         };
-        if let Some(update) = sync.changes(&self.app.cx.engine.access_tree(), scale) {
+        if !sync.behind(frame, scale) {
+            return;
+        }
+        if let Some(update) = sync.changes(self.app.cx.engine.access_tree(), scale, frame) {
             state.access.update_if_active(|| update);
         }
     }

@@ -238,8 +238,18 @@ kipinde `erk` onu AccessKit'le platforma verir (`accesskit_winit`): ekran
 okuyucu isteyene kadar ağaç kurulmaz, sonra her turda yalnızca değişen
 düğümler gider. Ekran okuyucunun tıklaması düğümün kutusunun ortasına bir
 basış olarak gelir; host'un abonelikleri onu sıradan bir tıklama olarak
-görür. Kendi penceresini süren host için ağacın C-ABI yüzü M5.11'in
-üçüncü adımında.
+görür. Ağaç yalnızca bir kare hazırlanınca ya da ölçek değişince
+yeniden çıkarılır: hiçbir şeyin değişmediği bir tur ekran okuyucuya bir
+şey söylemez.
+
+Kendi penceresini süren host ağacı `erk`'in kimlikleriyle alır
+(`Context::access_tree`; C-ABI'de `erk_access_tree`, `erk_access_node`,
+`erk_access_child`) ve platforma kendisi verir. C-ABI ağacın bir
+anlık görüntüsünü uygulamada tutar: düğümler konumlarıyla okunur (belge
+0'da), adlar ve değerler ödünç verilir ve bir sonraki `erk_access_tree`'ye
+ya da uygulamanın sonuna kadar geçerlidir (`ErkFrame`'in pikselleri
+gibi). Neyin değiştiğini host karşılaştırır: Erk'in penceresi de öyle
+yapıyor.
 
 ### 6.2 Fontlar (M1.7)
 
@@ -586,6 +596,16 @@ gerekçeli bir daraltma:
   `ERK_EVENT_CLICK`'i seçeneğe gelir (hedef seçenek, yolu `select`'ten
   geçer). Liste sayfanındır: host listeyi göremez, açıp kapatamaz;
   açılıp kapanması olay doğurmaz.
+- **v0.19 (M5.11):** Erişilebilirlik ağacı, kendi penceresini süren
+  host için (§6.1): `erk_access_tree` son karenin ağacını alıp
+  uygulamada tutar ve düğüm sayısını verir; `erk_access_node` bir
+  konumdaki düğümü `ErkAccessNode`'a yazar (rol `ERK_ROLE_*`, düğüm,
+  `ERK_ACCESS_*` bayrakları: adı, değeri, işaretlenebilirliği ve
+  işaretliliği, seçilebilirliği ve seçiliği, açılabilirliği ve açıklığı,
+  devre dışılığı, odağı ve kutusunun olup olmadığı; başlık düzeyi, ad ve
+  değer, kutu, çocuk sayısı); `erk_access_child` bir çocuğun konumunu
+  verir. Ad ve değer ödünç: bir sonraki `erk_access_tree`'ye kadar.
+  Konumların dışı `ERK_ERR_NOT_FOUND`.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin

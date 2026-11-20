@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_18() {
-    assert_eq!(erk_abi_version(), 18);
+fn the_abi_version_is_0_19() {
+    assert_eq!(erk_abi_version(), 19);
 }
 
 #[test]
@@ -1524,5 +1524,128 @@ fn c_hears_a_buttons_command_with_its_name_and_source() {
     }
     assert_eq!(*last.command.lock().unwrap(), "--kaydet");
     assert_eq!(last.source.load(Ordering::SeqCst), b);
+    assert_eq!(erk_app_destroy(app), ERK_OK);
+}
+
+fn access_node(app: *mut ErkApp, index: usize) -> Result<ErkAccessNode, ErkStatus> {
+    let mut out = ErkAccessNode {
+        struct_size: size_of::<ErkAccessNode>() as u32,
+        role: 0,
+        node: 0,
+        flags: 0,
+        level: 0,
+        name: s(""),
+        value: s(""),
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+        child_count: 0,
+    };
+    match erk_access_node(app, index, &mut out) {
+        ERK_OK => Ok(out),
+        status => Err(status),
+    }
+}
+
+#[allow(unsafe_code)] // SAFETY: reads a string Erk lent, before the next erk_access_tree.
+fn lent_text(text: ErkStr) -> String {
+    if text.len == 0 {
+        return String::new();
+    }
+    // SAFETY: Erk lends `len` bytes at `ptr` until the next tree.
+    let bytes = unsafe { std::slice::from_raw_parts(text.ptr.cast::<u8>(), text.len) };
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+#[test]
+fn a_host_reads_the_access_tree_node_by_node() {
+    let app = app_with(
+        r#"<body><h2 id="h">Ayarlar</h2><label for="ad">Ad</label><input id="ad" value="Ece"><input type="checkbox" id="c" checked aria-label="Hatırla"><button id="b" disabled>Kaydet</button>"#,
+    );
+    let mut count = 0;
+    assert_eq!(erk_access_tree(app, &mut count), ERK_OK);
+    assert!(count > 5, "{count}");
+    // The document's node first, under the id the host knows it by.
+    let mut root = 0;
+    assert_eq!(erk_document_root(app, &mut root), ERK_OK);
+    let first = access_node(app, 0).unwrap();
+    assert_eq!((first.node, first.role), (root, ERK_ROLE_DOCUMENT));
+    // Walking the children from the root reaches every node once.
+    let mut seen = vec![0; count];
+    let mut todo = vec![0];
+    while let Some(index) = todo.pop() {
+        seen[index] += 1;
+        let node = access_node(app, index).unwrap();
+        for at in 0..node.child_count {
+            let mut child = usize::MAX;
+            assert_eq!(erk_access_child(app, index, at, &mut child), ERK_OK);
+            todo.push(child);
+        }
+        let mut past = 0;
+        assert_eq!(
+            erk_access_child(app, index, node.child_count, &mut past),
+            ERK_ERR_NOT_FOUND
+        );
+    }
+    assert!(seen.iter().all(|n| *n == 1), "{seen:?}");
+    let of = |selector: &str, count: usize| {
+        let id = query(app, selector);
+        (0..count)
+            .map(|index| access_node(app, index).unwrap())
+            .find(|node| node.node == id)
+            .unwrap_or_else(|| panic!("{selector} in the tree"))
+    };
+    let heading = of("#h", count);
+    assert_eq!((heading.role, heading.level), (ERK_ROLE_HEADING, 2));
+    assert_eq!(lent_text(heading.name), "Ayarlar");
+    let field = of("#ad", count);
+    assert_eq!(field.role, ERK_ROLE_TEXT_INPUT);
+    let both = ERK_ACCESS_HAS_NAME | ERK_ACCESS_HAS_VALUE | ERK_ACCESS_HAS_BOUNDS;
+    assert_eq!(field.flags & both, both);
+    assert_eq!(field.flags & ERK_ACCESS_DISABLED, 0);
+    assert_eq!(
+        (lent_text(field.name), lent_text(field.value)),
+        ("Ad".to_owned(), "Ece".to_owned())
+    );
+    assert!(field.width > 0.0 && field.height > 0.0);
+    let check = of("#c", count);
+    assert_eq!(check.role, ERK_ROLE_CHECK_BOX);
+    let checked = ERK_ACCESS_CHECKABLE | ERK_ACCESS_CHECKED;
+    assert_eq!(check.flags & checked, checked);
+    assert_eq!(lent_text(check.name), "Hatırla");
+    let button = of("#b", count);
+    assert_eq!(button.role, ERK_ROLE_BUTTON);
+    assert_ne!(button.flags & ERK_ACCESS_DISABLED, 0);
+    assert_eq!(button.flags & ERK_ACCESS_HAS_VALUE, 0);
+    // Past the last node, and with nowhere to write.
+    assert_eq!(access_node(app, count).err(), Some(ERK_ERR_NOT_FOUND));
+    let mut child = 0;
+    assert_eq!(
+        erk_access_child(app, count, 0, &mut child),
+        ERK_ERR_NOT_FOUND
+    );
+    assert_eq!(
+        erk_access_tree(app, std::ptr::null_mut()),
+        ERK_ERR_INVALID_ARGUMENT
+    );
+    // An older, smaller structure gets what it has room for.
+    let mut short = access_node(app, 0).unwrap();
+    short.struct_size = offset_of!(ErkAccessNode, flags) as u32;
+    short.flags = 77;
+    assert_eq!(erk_access_node(app, 0, &mut short), ERK_OK);
+    assert_eq!((short.node, short.flags), (root, 77));
+    // A node the host unchecks is unchecked in the next frame's tree.
+    let mut node = query(app, "#c");
+    assert_eq!(erk_node_set_checked(app, node, 0), ERK_OK);
+    assert_eq!(erk_app_tick(app, 1), ERK_OK);
+    assert_eq!(erk_access_tree(app, &mut count), ERK_OK);
+    let check = of("#c", count);
+    assert_eq!(check.flags & checked, ERK_ACCESS_CHECKABLE);
+    node = query(app, "#b");
+    assert_eq!(erk_node_remove(app, node), ERK_OK);
+    assert_eq!(erk_app_tick(app, 2), ERK_OK);
+    assert_eq!(erk_access_tree(app, &mut count), ERK_OK);
+    assert!((0..count).all(|index| access_node(app, index).unwrap().node != node));
     assert_eq!(erk_app_destroy(app), ERK_OK);
 }
