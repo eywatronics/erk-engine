@@ -108,9 +108,16 @@ fn focus(tree: &[AccessNode]) -> NodeId {
 
 /// `node` as AccessKit's, its box in device pixels at `scale`.
 fn accesskit_node(node: &AccessNode, scale: f64) -> Node {
-    let mut out = Node::new(role(node.role));
+    let role = role(node.role);
+    let mut out = Node::new(role);
     if let Some(name) = &node.name {
-        out.set_label(name.as_str());
+        // AccessKit reads a label's name from its value (static text,
+        // `label_comes_from_value`); a label's own label is never read.
+        if role == Role::Label {
+            out.set_value(name.as_str());
+        } else {
+            out.set_label(name.as_str());
+        }
     }
     if let Some(value) = &node.value {
         out.set_value(value.as_str());
@@ -253,6 +260,26 @@ mod tests {
         assert_eq!(button.label(), Some("Kaydet"));
         let root = &update.nodes.iter().find(|(id, _)| id.0 == 1).unwrap().1;
         assert_eq!(root.children(), [NodeId(2), NodeId(3)]);
+    }
+
+    #[test]
+    fn text_reaches_a_screen_reader_as_the_value_its_name_is_read_from() {
+        // AccessKit names a label from its value, not its label (Windows'
+        // and the other adapters' `label_comes_from_value`): text kept in
+        // the label is never read.
+        for role in [AccessRole::Text, AccessRole::Label] {
+            let mut text = node(1, role, &[]);
+            text.name = Some("Kayıt formu".to_owned());
+            let out = accesskit_node(&text, 1.0);
+            assert_eq!(out.role(), Role::Label, "{role:?}");
+            assert_eq!(out.value(), Some("Kayıt formu"), "{role:?}");
+        }
+        // A control keeps its name in the label and its value apart.
+        let mut field = node(2, AccessRole::TextInput, &[]);
+        field.name = Some("Adınız".to_owned());
+        field.value = Some("Ece".to_owned());
+        let out = accesskit_node(&field, 1.0);
+        assert_eq!((out.label(), out.value()), (Some("Adınız"), Some("Ece")));
     }
 
     #[test]
