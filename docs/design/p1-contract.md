@@ -303,15 +303,21 @@ olurdu ve fontconfig ayarları ile platformun yedek kuralları yok sayılırdı.
 - **Host'un döngüsü** (M3 sonrası, burada tanımlanır): host kendi döngüsünü
   çalıştırır. Kendi penceresini raw-window-handle ile verir, girdiyi
   `erk_app_input` ile iletir ve her turda `erk_app_tick(app, now_ns)` çağırır.
-- Çekirdek saati hiç okumaz. İmleç yanıp sönmesi (M5), geçişler ve
-  animasyonlar (M9) yalnızca `now_ns`'e bağlıdır; testler zamanı kendileri
-  sürer.
+- Çekirdek saati hiç okumaz. İmleç yanıp sönmesi ve geçişler (M5),
+  `@keyframes` animasyonları (M9) yalnızca `now_ns`'e bağlıdır; testler
+  zamanı kendileri sürer. Bir stil değişikliğinin başlattığı geçiş, onu
+  gösteren karenin hazırlandığı turun saatinde başlar.
 - **Bir sonraki tur** (M5.8): sayfa kendiliğinden değişecekse (imlecin
   yanıp sönmesi) motor bunun zamanını aynı saatte söyler: Rust'ta
   `App::next_tick`, C-ABI'de `erk_app_next_tick`. Erk'in döngüsü o zamana
   kadar bekler (`WaitUntil`); kendi döngüsünü süren host o zaman ya da bir
   sonraki girdide `erk_app_tick` çağırır. Kendiliğinden değişen bir şey
-  yoksa zaman yoktur, döngü yalnızca girdiyi bekler.
+  yoksa zaman yoktur, döngü yalnızca girdiyi bekler. Bir geçiş sürerken
+  (M5.12) bir sonraki tur son turdan 16,67 ms sonradır (saniyede 60 kare);
+  host kendi ekranının hızında daha sık ya da seyrek çağırabilir: değer
+  saatten hesaplanır, kare kaçsa da kaymaz. Sözleşmenin sürümü değişmez:
+  yeni bir çağrı yok, `erk_app_next_tick` aynı anlamda daha sık bir zaman
+  verir.
 
 ## 8. Hata modeli
 

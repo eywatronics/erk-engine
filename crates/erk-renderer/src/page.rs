@@ -493,24 +493,41 @@ impl Page {
                 Some(entry) if entry.frame + 1 == self.frames && entry.viewport == viewport => {
                     (entry, true)
                 }
-                _ => (
-                    Kept {
-                        page: Arc::downgrade(&self.style_key),
-                        frame: 0,
-                        interaction,
-                        viewport,
-                        restyler: Restyler::new(style_engine(viewport)),
-                        tree: None,
-                    },
-                    false,
-                ),
+                last => {
+                    let engine = style_engine(viewport);
+                    // Another viewport does not cut the transitions short;
+                    // a restyler that missed a frame may hold those of
+                    // nodes gone since (M5.12).
+                    let restyler = match last {
+                        Some(last) if last.frame + 1 == self.frames => {
+                            Restyler::taking_over(engine, last.restyler)
+                        }
+                        _ => Restyler::new(engine),
+                    };
+                    (
+                        Kept {
+                            page: Arc::downgrade(&self.style_key),
+                            frame: 0,
+                            interaction,
+                            viewport,
+                            restyler,
+                            tree: None,
+                        },
+                        false,
+                    )
+                }
             };
             entry.frame = self.frames;
+            entry.restyler.set_time(self.now);
             // Nothing styles depend on changed: neither the document nor
             // what the user is doing (a scroll, a frame the host asked
-            // for). The last frame's styles hold, and the restyler, which
-            // saw this frame, stays in step.
-            let styles = if continues && changes.count() == 0 && entry.interaction == interaction {
+            // for), nor the clock for a transition. The last frame's styles
+            // hold, and the restyler, which saw this frame, stays in step.
+            let styles = if continues
+                && changes.count() == 0
+                && entry.interaction == interaction
+                && !self.styles.animating()
+            {
                 std::mem::take(&mut self.styles).unchanged()
             } else {
                 entry.restyler.restyle(&self.doc, &interaction, changes)
@@ -626,7 +643,14 @@ impl Page {
         resources: &mut Resources,
     ) -> DisplayList {
         let viewport = viewport(width, height, scale);
-        let styles = style_engine(viewport).style_with(&self.doc, &self.interaction());
+        // The transitions as the last frame ran them, at its time (M5.12).
+        let transitions = RESTYLERS.with_borrow(|kept| {
+            kept.iter()
+                .find(|entry| std::ptr::eq(entry.page.as_ptr(), Arc::as_ptr(&self.style_key)))
+                .map(|entry| entry.restyler.transitions())
+                .unwrap_or_default()
+        });
+        let styles = style_engine(viewport).style_at(&self.doc, &self.interaction(), &transitions);
         self.build(
             (viewport.0, viewport.1),
             styles,
@@ -1705,19 +1729,27 @@ impl Page {
     }
 
     /// The host's clock is at `now`. Whether the caret shows or hides
-    /// otherwise than before: a frame is due.
+    /// otherwise than before, or a transition moved on: a frame is due.
     pub(crate) fn set_time(&mut self, now: u64) -> bool {
-        let before = self.caret_shown();
+        let before = (self.caret_shown(), self.now);
         self.now = now.max(self.now);
-        self.caret.is_some() && before != self.caret_shown()
+        let blinked = self.caret.is_some() && before.0 != self.caret_shown();
+        blinked || (self.styles.animating() && self.now > before.1)
     }
 
     /// When the page next looks different with nothing done to it: the
-    /// caret's next blink, if there is a caret.
+    /// caret's next blink, if there is a caret, or the next frame while a
+    /// transition runs (M5.12).
     pub(crate) fn next_tick(&self) -> Option<u64> {
-        self.caret?;
-        let blinks = (self.now - self.caret_since) / CARET_BLINK;
-        Some(self.caret_since + (blinks + 1) * CARET_BLINK)
+        let blink = self.caret.map(|_| {
+            let blinks = (self.now - self.caret_since) / CARET_BLINK;
+            self.caret_since + (blinks + 1) * CARET_BLINK
+        });
+        let frame = self
+            .styles
+            .animating()
+            .then(|| self.now.saturating_add(FRAME_INTERVAL));
+        blink.into_iter().chain(frame).min()
     }
 
     /// Whether the caret shows now: in the first half of each blink since
@@ -2863,6 +2895,11 @@ const SELECTION: crate::color::Rgba = [0, 120, 215, 90];
 /// How long a caret shows, then hides, in nanoseconds: half a second, as
 /// browsers blink it on most systems.
 const CARET_BLINK: u64 = 500_000_000;
+
+/// How long after a frame the next is due while a transition runs, in
+/// nanoseconds: 60 frames a second. A host may tick sooner or later, at its
+/// display's pace; the values come from the clock, so they do not drift.
+const FRAME_INTERVAL: u64 = 16_666_667;
 
 /// `at` or the nearest character boundary of `text` before it.
 fn floor_boundary(text: &str, mut at: usize) -> usize {

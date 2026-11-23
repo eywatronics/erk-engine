@@ -44,6 +44,7 @@ use style::values::GenericAtomIdent;
 
 use crate::node::ErkNode;
 use crate::side::Slot;
+use crate::transition::Transitions;
 use crate::{Interaction, StyleEngine, Styles, author_styles, primary, reacts, states};
 
 /// Styles one document frame after frame, keeping what Stylo computed and
@@ -57,6 +58,8 @@ pub struct Restyler {
     slots: Vec<Slot>,
     /// Each slot's style at the last frame.
     computed: Vec<Option<Arc<ComputedValues>>>,
+    /// The transitions running, and the host's clock (M5.12).
+    transitions: Transitions,
 }
 
 /// The selector flags that make a parent's children depend on where they
@@ -78,7 +81,31 @@ impl Restyler {
             author: Vec::new(),
             slots: Vec::new(),
             computed: Vec::new(),
+            transitions: Transitions::default(),
         }
+    }
+
+    /// A restyler styling with `engine` that takes over `from`'s running
+    /// transitions: a new viewport does not cut them short.
+    pub fn taking_over(engine: StyleEngine, from: Restyler) -> Self {
+        Self {
+            transitions: from.transitions,
+            ..Self::new(engine)
+        }
+    }
+
+    /// The host's clock is at `now_ns` (p1-contract §7): the next frame
+    /// takes the transitions' values at this time, and a style change in
+    /// it starts its transitions then.
+    pub fn set_time(&mut self, now_ns: u64) {
+        self.transitions.set_time(now_ns);
+    }
+
+    /// A copy of the transitions running, at the clock's time: what
+    /// [`StyleEngine::style_at`] needs to style the last frame from
+    /// nothing.
+    pub fn transitions(&self) -> Transitions {
+        self.transitions.clone()
     }
 
     /// Style `doc` as it is now, `changes` being what changed in it since
@@ -122,6 +149,11 @@ impl Restyler {
                 self.author = author;
                 self.slots.clear();
                 self.computed.clear();
+                if changes.everything {
+                    // Another document: its nodes are not the ones the
+                    // transitions belonged to.
+                    self.transitions.clear();
+                }
             }
         }
         let size = doc.capacity_hint();
@@ -131,7 +163,18 @@ impl Restyler {
         }
 
         let mut frame = Frame::default();
-        self.walk(doc, interaction, &mut frame);
+        let gone = self.walk(doc, interaction, &mut frame);
+        // A slot's next node must not take over its transitions: the key
+        // Stylo files them under is the arena slot.
+        self.transitions
+            .forget(|at| gone.get(at).copied().unwrap_or(true));
+        // Each element with a transition is styled again, at the clock's
+        // time.
+        for at in self.transitions.tick() {
+            if let Some(id) = self.slots.get(at).and_then(|slot| slot.owner) {
+                frame.hints.push((id, RestyleHint::RESTYLE_SELF));
+            }
+        }
         self.attributes(doc, changes, &mut frame);
         // A snapshot of the state alone has the attributes as they are:
         // they did not change. Stylo's stylesheet invalidation reads them
@@ -183,9 +226,18 @@ impl Restyler {
         }
 
         let stylist = self.stylist.as_mut().expect("made above");
-        let backdrops = self
-            .engine
-            .traverse(stylist, doc, &self.slots, &frame.snapshots);
+        let backdrops = self.engine.traverse(
+            stylist,
+            doc,
+            &self.slots,
+            &frame.snapshots,
+            &self.transitions,
+        );
+        // An element that is not styled any more (inside `display: none`,
+        // or removed) has its transitions cancelled, as a browser does.
+        let slots = &self.slots;
+        self.transitions
+            .forget(|at| slots.get(at).is_none_or(|slot| !slot.has_data()));
         // Rule nodes no style uses any more wait in the rule tree until it
         // collects them; a stylist that lives for the document's whole life
         // has to, every frame, or it grows with every change.
@@ -219,6 +271,7 @@ impl Restyler {
             styled,
             damage,
             moved: frame.moved,
+            animating: self.transitions.running(),
         }
     }
 
@@ -226,14 +279,16 @@ impl Restyler {
     /// state of each element whose state changed, and the elements that
     /// moved. Slots of nodes that left the document are emptied, and so
     /// are those of elements beside the root element, which styling never
-    /// reaches (a full style gives them none).
-    fn walk(&mut self, doc: &Document, interaction: &Interaction, frame: &mut Frame) {
+    /// reaches (a full style gives them none). Which arena slots the arena
+    /// gave to another node: what they held was the old node's.
+    fn walk(&mut self, doc: &Document, interaction: &Interaction, frame: &mut Frame) -> Vec<bool> {
         let states = states(doc, interaction);
         let root = doc.children(doc.root()).find(|child| {
             doc.node(*child)
                 .is_some_and(|node| node.as_element().is_some())
         });
         let mut present = vec![false; self.slots.len()];
+        let mut gone = vec![false; self.slots.len()];
         let mut stack = vec![(doc.root(), None, false)];
         while let Some((id, parent, inside)) = stack.pop() {
             stack.extend(
@@ -246,6 +301,9 @@ impl Restyler {
             slot.start_frame();
             let element = doc.node(id).and_then(|node| node.as_element());
             let fresh = slot.owner != Some(id);
+            if fresh && slot.owner.is_some() {
+                gone[at] = true;
+            }
             if fresh || !inside || slot.outside {
                 if fresh {
                     // What it holds is another node's.
@@ -284,6 +342,7 @@ impl Restyler {
                 *slot = Slot::default();
             }
         }
+        gone
     }
 
     /// Read the attributes that changed again, and give each styled

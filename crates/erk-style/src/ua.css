@@ -9,6 +9,15 @@
 
 @namespace url(http://www.w3.org/1999/xhtml);
 
+/* Not from the HTML Standard. `@keyframes` animations are for later
+ * (p1-contract §7): Stylo would start them, but nothing in Erk moves them
+ * on, so they would run halfway. A user agent's important declaration
+ * wins over the page's, and with no animation name none starts. Remove it
+ * with the milestone that runs them. */
+*|*, ::before, ::after {
+  animation-name: none !important;
+}
+
 /* 15.3.1 Hidden elements */
 area, base, basefont, datalist, head, link, meta, noembed,
 noframes, param, rp, script, style, template, title {

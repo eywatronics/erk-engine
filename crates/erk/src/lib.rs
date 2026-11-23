@@ -475,9 +475,10 @@ impl App {
     }
 
     /// When, on the clock [`App::tick`] is given, the page next looks
-    /// different with nothing done to it: the caret's next blink. A host
-    /// running its own loop ticks then, or at its next input; `None` while
-    /// nothing on the page moves by itself.
+    /// different with nothing done to it: the caret's next blink, or the
+    /// next frame while a transition runs. A host running its own loop
+    /// ticks then, or at its next input; `None` while nothing on the page
+    /// moves by itself.
     pub fn next_tick(&self) -> Option<u64> {
         self.cx.engine.next_tick()
     }
@@ -497,8 +498,8 @@ impl App {
     /// from other threads and answers to resource requests are handled
     /// first; then, if something that shows has changed, the frame is
     /// prepared and painted, and a windowless app waits for its pixels.
-    /// The caret's blink (M5.8) goes by this clock, transitions (M5.12)
-    /// will; [`App::next_tick`] says when the next turn is due for them.
+    /// The caret's blink (M5.8) and transitions (M5.12) go by this clock;
+    /// [`App::next_tick`] says when the next turn is due for them.
     pub fn tick(&mut self, now_ns: u64) {
         self.cx.engine.set_time(now_ns);
         // A window not yet open has no raster to paint with.

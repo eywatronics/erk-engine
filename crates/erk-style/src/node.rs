@@ -589,7 +589,11 @@ impl<'a> TElement for ErkNode<'a> {
     }
 
     fn may_have_animations(&self) -> bool {
-        false
+        // Matching asks for the transition rule only when this says yes.
+        // An element styled again while its transition runs must get the
+        // value at the frame's time, and so must one styled from nothing
+        // (the oracle): finding out costs a lookup in the set (M5.12).
+        true
     }
 
     fn has_animations(&self, context: &SharedStyleContext) -> bool {
