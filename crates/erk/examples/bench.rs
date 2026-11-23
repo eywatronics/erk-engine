@@ -1,4 +1,4 @@
-//! M5's measurements (p2-incremental §4, B1–B17) against the full
+//! M5's measurements (p2-incremental §4, B1–B18) against the full
 //! recompute every frame does today: the baseline M5's incremental steps
 //! are measured against, and the numbers its acceptance is set from.
 //!
@@ -320,6 +320,40 @@ fn b17() -> Result {
     )
 }
 
+fn b18() -> Result {
+    // Transitions (M5.12): 100 of B1's rows fade for a minute, nothing
+    // else changing; each frame styles them again at its time.
+    let html = rows(2000).replacen(
+        "</style>",
+        " .row { transition: opacity 60s linear } .row.fade { opacity: 0.2 }</style>",
+        1,
+    );
+    let mut app = app(&html);
+    let fading: Vec<Node> = app
+        .query_all(None, ".row")
+        .unwrap()
+        .into_iter()
+        .step_by(20)
+        .collect();
+    let result = measure(
+        &mut app,
+        30,
+        "B18",
+        "100 rows fade on 10 000 elements, nothing else changing",
+        |app, run| {
+            if run == 0 {
+                for row in &fading {
+                    app.add_class(*row, "fade").unwrap();
+                }
+            }
+        },
+    );
+    // Still fading at the last frame, each row styled again.
+    assert!(app.next_tick().is_some());
+    assert!(result.stats.styled >= 100, "{}", result.stats.styled);
+    result
+}
+
 fn b7() -> Result {
     // Dragging: a box follows the pointer every frame, at 120 Hz the
     // budget is 8.3 ms.
@@ -503,7 +537,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 15] = [
+    let all: [Scenario; 16] = [
         ("B1", b1),
         ("B2", b2),
         ("B2b", b2b),
@@ -519,6 +553,7 @@ fn main() {
         ("B14", b14),
         ("B15", b15),
         ("B17", b17),
+        ("B18", b18),
     ];
     let mut afters = Vec::new();
     println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");

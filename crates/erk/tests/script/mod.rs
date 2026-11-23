@@ -76,6 +76,10 @@ const VALUES: &[&str] = &[
     "reset",
     "dialog",
     "align-content: start; height: 30px",
+    // Transitions (M5.12): one that also moves the box, one held by a
+    // delay and taken in steps.
+    "transition: all 40ms; color: red; transform: scale(2); width: 10px",
+    "transition: opacity 30ms steps(2) 10ms; opacity: 0.4",
 ];
 
 /// What an input method composes or commits: kana, Turkish, a line break,
@@ -94,6 +98,8 @@ const PROPERTIES: &[&str] = &[
     "colour",
     "",
     "appearance",
+    "transition",
+    "opacity",
 ];
 
 const PROPERTY_VALUES: &[&str] = &[
@@ -105,6 +111,8 @@ const PROPERTY_VALUES: &[&str] = &[
     "50%",
     "1e30px",
     "url(\"a;b\")",
+    "all 30ms ease-in",
+    "0.5",
 ];
 
 const SELECTORS: &[&str] = &[
@@ -171,6 +179,12 @@ const PAGES: &[&str] = &[
     "<select id=s><option>a</option><option selected>uzun seçenek</option>\
      <optgroup label=g><option disabled>d</option><option label=e>f</option></optgroup>\
      </select><select disabled><option>x</option></select><select></select>",
+    // Transitions (M5.12): a class, the pointer or the focus starts them;
+    // one changes layout, one is inside a box that can be hidden.
+    "<style>.a { transition: all 50ms linear; color: blue }\
+     .a:hover, .a.b, .a:focus { color: red; transform: translateX(5px); opacity: 0.5;\
+     margin-left: 9px } .h .a { display: none }</style>\
+     <div id=h><p class=a>t</p><button class=a>b</button></div><input class=a>",
 ];
 
 /// Reads the script's bytes; past the end every read is 0, so any prefix of
@@ -451,7 +465,9 @@ pub fn run(app: &mut App, script: &[u8]) {
                 }
             }
             10 => {
-                now += 16_000_000;
+                // A frame's time on, the clock standing still, or a jump
+                // past the transitions' ends (M5.12).
+                now += [16_000_000, 0, 1_000_000, 40_000_000][bytes.below(4)];
                 app.tick(now);
                 check(app);
             }

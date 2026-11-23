@@ -83,7 +83,22 @@ const FOUND: &[&[u8]] = &[
     ],
 ];
 
+/// The page every script starts from.
+const START: &str = "<ul id=a><li class=a>bir<li>iki</ul><p tabindex=0>p</p>";
+
+/// The same page where everything transitions (M5.12), for long enough
+/// to run through most of a script and end in some: a class, an
+/// attribute, the pointer or the focus starts one, and the frames after it
+/// are checked against the oracle while it runs.
+const TRANSITIONS: &str = "<style>* { transition: all 120ms linear }\
+    .a, .b, :hover, :focus, [data-x] { color: red; opacity: 0.5; transform: translateX(3px) }\
+    </style><ul id=a><li class=a>bir<li>iki</ul><p tabindex=0>p</p>";
+
 fn app() -> App {
+    app_with(START)
+}
+
+fn app_with(html: &str) -> App {
     let mut app = App::headless(Config {
         width: 64,
         height: 48,
@@ -91,7 +106,7 @@ fn app() -> App {
         ..Config::default()
     })
     .unwrap();
-    app.load_html("<ul id=a><li class=a>bir<li>iki</ul><p tabindex=0>p</p>");
+    app.load_html(html);
     app.tick(0);
     app
 }
@@ -99,9 +114,22 @@ fn app() -> App {
 #[test]
 fn random_scripts_of_host_calls_never_panic() {
     let mut rng = Rng(0x00e4_4b1e_5eed_0042);
-    for _ in 0..200 {
+    for run in 0..200 {
         let script: Vec<u8> = (0..160).map(|_| rng.next() as u8).collect();
-        script::run(&mut app(), &script);
+        if run % 2 == 0 {
+            script::run(&mut app(), &script);
+            continue;
+        }
+        // Each script starts with every element's transition just begun:
+        // a script rarely makes the change that starts one and then ticks
+        // while it runs.
+        let mut app = app_with(TRANSITIONS);
+        for node in app.query_all(None, "*").unwrap() {
+            app.add_class(node, "b").unwrap();
+        }
+        app.tick(0);
+        assert!(app.next_tick().is_some(), "the transitions run");
+        script::run(&mut app, &script);
     }
 }
 
