@@ -515,6 +515,36 @@ Erk'in bağımlılık kurallarına göre düzeltilmiş hâli):
 - **Zaman.** Cihaz profili ve CPU/GPU kararı M5.13'te, ölçümle; `erk`'in
   özellik ayrımı ve kiosk host'u M8'de (ürünleşme) ya da ayrı bir taşta.
 
+#### PR dökümü (2026-11-23, B16'nın ilk ölçümünden sonra)
+
+B16'nın bulguları yürütme notlarında (M5.13). Sıra, ölçülen paya göre:
+
+1. **Ölçüm (M5.13-A).** B16: `erk`'in `memory` örneği, dhat'i global
+   ayırıcı yapıp (yalnızca dev-dependency, hiçbir host'a gitmiyor) iki
+   sayfayı açıyor, çiziyor, kaydırıyor, bekletiyor; her adımda canlı ve
+   tepe yığın, sonunda canlı yığın ayırma yerine göre katmanlara bölünmüş.
+   Süreç düzeyindeki sayılar (özel bellek, çalışma kümesi) kabukla, aynı
+   gün. Hiçbir şey kısılmıyor.
+2. **Yerleşim düğümü.** `erk-10000.html`'de yığının yarısı (221,6 MB) tek
+   bir dizi: arenanın her yuvası için bir `LayoutNode` (2064 bayt), kutusu
+   olmayan yuvalar (metin, boşluk, `display: none`) dahil. Kutusu olmayan
+   yuvanın bedeli küçülür, paragrafa özgü alanlar (`Paragraph`,
+   `InlineLayout`, sonuç, seçenek etiketleri) tek bir kutuya girer.
+   Kâhin, B1 ve B15'in p95'i korunur (3. ilke).
+3. **Paragrafın tek kopyası (M5.13-C).** Her paragrafın Parley düzeni üç
+   kez tutuluyor (önbellekteki kırılmamış düzen, `shape_text`'in kopyası,
+   yerleşimin kopyası): kartlı sayfada metnin 150 MB'ının çoğu. Paylaşım
+   ya da tek kopya, kare süresi ölçülerek.
+4. **Küçük sayfa.** 27,5 MB özel belleğin 7,6 MB'ı yığın; kalanın
+   kaynağı (iş parçacığı yığınları, sistem yazı tiplerinin taranması,
+   pencerenin tamponları, ayırıcının kendi payı) ölçülür. Yığının içinde:
+   raster'ın kare boyunda iki tamponu (3,7 MB), yazı tiplerinin raster
+   tablolarına kopyası (1,2 MB), yerleşimin ayırdığı boş yuvalar (1,6 MB).
+5. **GPU yolu (M5.13-B).** Sayfadan bağımsız ~320 MB'ın kaynağı.
+6. **DOM ve Stylo (M5.13-D, E).** DOM 17,9 MB (arena 15 MB), Stylo 0,2 MB:
+   ölçüm şimdilik bunları öne almıyor.
+7. **Bütçe muhafızı (M5.13-F)** ve Sciter/Slint karşılaştırması.
+
 ### M5.14: Kabul
 
 - [ ] 10 bin düğümlü belgede metin alanına yazarken p95 hedefi tutuyor;
@@ -1340,3 +1370,19 @@ Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
 | Altın testin kasıtlı ihlalleri | Restyler'ın saati görmemesi, saatin iki kat hızlı işlemesi, saatin tek başına kare istememesi: üçü de yakalandı |
 | B18 | B1'in sayfasında (10 bin eleman) 100 satır bir dakika boyunca solarken, başka hiçbir şey değişmeden. Yayın derlemesi, geliştirme makinesi, aynı oturumda: B18 medyan 19,57 ms, p95 22,67 ms; stil 9,37 ms, yerleşim 0, liste 5,41 ms, raster 4,48 ms; 500 eleman yeniden stilleniyor (100 satır ve çocukları: saydamlık değişen satırın çocukları da yeniden basamaklanıyor). B13 (tek elemanın satır içi rengi) 17,73 ms, stili 8,19 ms; B1 32,15 ms. Açık sorunun cevabı: geçişteki düğümlerin kare başına maliyeti düğüm sayısından çok restyle'ın 10 bin elemanlık sayfadaki sabit tabanından geliyor (bir elemanı stillemek bile ~8 ms); 500 düğümün geçişi bunun üstüne ~1–2 ms ekliyor. Taban M5.13'ün ölçümleriyle birlikte ele alınacak |
 | Taşın kabulü | Dört özellik, standart eğriler, host'un saati ve belirli zamanlarda altın görüntüler: kutusu işaretlendi |
+
+### M5.13
+
+İlk PR: ölçüm (B16).
+
+| Konu | Not |
+|---|---|
+| Araç | `crates/erk/examples/memory.rs` (B16). dhat 0.3.3 global ayırıcı (`dhat::Alloc`, `unsafe` istemiyor: `erk`'in `forbid`'i yerinde) ve profili okumak için `serde_json`, ikisi de dev-dependency: hiçbir host'a ve ikiliye gitmiyor; lisanslar (MIT, Apache-2.0) listede. Sayfalar 2026-10-12'nin sayfaları (`examples/m2-demo.html`, `examples/erk-10000.html`), 800×600, pencere yok, CPU raster'ı, gömülü yazı tipleri. Adımlar: uygulama, sayfa ayrıştırıldı, ilk kare, 30 tık kaydırma, boşta 10 tur; her adımda canlı ve tepe yığın. Sonunda canlı yığın ayırma yerine göre: çağrı yığınında ayırmadan dışarı ilk tanınan crate (kapsayıcılar, `std` ve dhat sayılmıyor). Bölüm satır tabloları ister: `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only` |
+| Yığın, sayfa sayfa | Küçük sayfa (104 eleman): ilk karede 7,7 MB, boşta 7,6 MB, tepe 9,6 MB. Kartlı sayfa (30 008 eleman): ayrıştırmadan sonra 18,3 MB, ilk karede 437,1 MB, boşta 437,1 MB, tepe 446,6 MB; eleman başına 14,9 KB. Kaydırma ve boşta bekleme yığını büyütmüyor |
+| Kartlı sayfanın bölümü | Erk'in yerleşimi 246,6 MB (%56), Parley ve yazı tipleri 120,4 MB (%28), Erk'in metni 31,6 MB (%7), DOM 17,9 MB (%4), erk-style'ın yuvaları 9,1 MB, motorun geri kalanı 6,2 MB, raster 3,7 MB, display list 1,1 MB, Stylo 0,2 MB |
+| En büyük kalemler | `layout::Builder::full`'un düğüm dizisi 221,6 MB, tek blok: arenanın her yuvası (`reserved`: kapasite + %25 + 64) için bir `LayoutNode`, 2064 bayt (`Style` 488, `Option<InlineLayout>` 368, Taffy'nin önbelleği 384, `Option<Paragraph>` 288, iki `Layout` 184). Paragrafın Parley düzeni: oluşturulurken (`push_cluster` 32,8 MB, glifler 13,4 MB), `shape_text`'in kopyası (19,2 MB), yerleşimin kopyası (`layout` kapanışı, 19,2 MB) ve satırları: üç kopya. DOM'un arenası 15 MB tek blok |
+| Küçük sayfanın bölümü | Raster 3,7 MB (kare boyunda iki tampon, 1,83 MB'lık), Erk'in yerleşimi 1,7 MB (yerleşimin boş yuvaları, 1,62 MB tek blok), motorun geri kalanı 1,3 MB (yazı tiplerinin raster tablolarına kopyası: `table_updates` her yüzün baytlarını `to_vec` ile kopyalıyor, 1,2 MB), Stylo 0,3 MB |
+| Süreç (kabuk, 2026-11-23) | Yayın kabuğu, ilk kareden sonra bellek oturunca: `m2-demo.html` CPU 46,4 MB çalışma kümesi / 27,5 MB özel, GPU 198,3 / 345,8 MB; `erk-10000.html` CPU 493,6 / 482,9 MB, GPU 644,1 / 802,0 MB. 2026-10-12'ye göre küçük sayfa CPU'da 23,7'den 27,5 MB'a çıkmış (aradaki taşlar: erişilebilirlik, formlar, geçişler; ayrıştırılmadı) |
+| Okuma | Kartlı sayfada özel belleğin %90'ı yığın: hedef (eleman başına 3–4 KB) yerleşim düğümünden ve paragraf kopyalarından geçiyor. Küçük sayfada tersi: 27,5 MB'ın 7,6 MB'ı yığın, 12–14 MB hedefi yığın dışını (iş parçacığı yığınları, sistem yazı tiplerinin taranması: B16 gömülü yazı tipleriyle, kabuk sistemin yazı tipleriyle; pencere tamponları, ayırıcı) ölçmeden tutmaz. GPU yolu sayfadan bağımsız ~320 MB ekliyor |
+| M5.12'nin UA kuralı | `animation-name: none !important` her elemanın UI yapısını kopyalatıyor mu diye bakıldı: küçük sayfada 0,03 MB, kartlı sayfada 0,004 MB; kopya Stylo'nun stil paylaşımıyla paylaşılıyor. Düzeltme gerekmiyor |
+| Gömülü hedefin önerileri (2026-11-05) | Ölçümle ilk değerlendirme. **Stylo'yu çatallamak:** RAM için gerekçesi yok, Stylo'nun payı 0,2–0,3 MB; ikili boyutu için ayrı bir karar olarak kalıyor. **Önbellekleri kısmak:** Erk'in ağır olanları önbellek değil, tutulan yerleşim ağacı ve paragraf kopyaları; kısmak değil tekilleştirmek (2. ve 3. PR). **winit'i bırakmak:** küçük sayfanın yığın dışı payı ölçülünce (4. PR) karar; bugün winit'in payı görünmüyor. **CPU mu GPU mu:** Windows'ta GPU yolu ~320 MB ekliyor; paylaşımlı belleği olan kartta bu doğrudan sistem RAM'i, karar cihazda ölçülerek |
