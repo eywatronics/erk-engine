@@ -67,6 +67,19 @@ pub(crate) const WINDOW_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 pub(crate) const WINDOW_BACKENDS: wgpu::Backends =
     wgpu::Backends::PRIMARY.union(wgpu::Backends::GL);
 
+/// The device Erk paints with. wgpu's default memory hint, `Performance`,
+/// lets its allocator take GPU memory in big blocks up front. Measured on
+/// Windows (DX12, the shell's window, 2026-11-23), the process held 343 MB
+/// private on a small page and 641 MB on a page of 10 000 cards, against
+/// 181 and 476 MB with `MemoryUsage`, with painting as fast (M5.13): Erk's
+/// GPU path paints a viewport-sized frame from strips.
+fn device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+    wgpu::DeviceDescriptor {
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        ..wgpu::DeviceDescriptor::default()
+    }
+}
+
 /// The formats vello_hybrid writes as they are: its colours are already
 /// sRGB-encoded, so an `…Srgb` format would encode them twice.
 const FORMATS: [wgpu::TextureFormat; 2] = [
@@ -157,7 +170,7 @@ impl Gpu {
         format: wgpu::TextureFormat,
         output: Output,
     ) -> Result<Self, String> {
-        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        let (device, queue) = block_on(adapter.request_device(&device_descriptor()))
             .map_err(|error| format!("no device: {error}"))?;
         let (renderer, resources) = Renderer::new(
             &device,
@@ -479,6 +492,17 @@ mod tests {
     use crate::messages::ResourceResponse;
     use crate::page::Page;
     use crate::resources::Resources as PageResources;
+
+    #[test]
+    fn the_device_asks_for_memory_before_speed() {
+        // wgpu's default hint takes GPU memory in big blocks up front: a
+        // small page's window held 343 MB, 181 MB with this one, painting
+        // as fast (M5.13).
+        assert!(matches!(
+            device_descriptor().memory_hints,
+            wgpu::MemoryHints::MemoryUsage
+        ));
+    }
 
     const LOGO: &[u8] = include_bytes!("../tests/reference/images/logo.png");
     const CHECKER: &[u8] = include_bytes!("../tests/reference/images/checker.png");
