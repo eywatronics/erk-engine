@@ -57,6 +57,7 @@ impl Page {
                     expanded: None,
                     level: None,
                     disabled: false,
+                    focusable: false,
                     focused: false,
                     bounds: None,
                     children: Vec::new(),
@@ -85,6 +86,7 @@ impl Page {
             level: self.heading_level(node, role),
             disabled: self.doc.disabled(node) == Some(true)
                 || self.attribute(node, "aria-disabled").as_deref() == Some("true"),
+            focusable: self.focusable(node),
             focused: self.focus == Some(node),
             bounds: self.access_bounds(node),
             children: Vec::new(),

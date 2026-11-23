@@ -13,6 +13,8 @@ use std::collections::{HashMap, HashSet};
 use accesskit::{Action, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use erk_renderer::{AccessNode, AccessRole};
 
+use crate::{Input, Modifiers, PointerButton, PointerInput, PointerKind};
+
 /// What was last sent to the platform, to send only what changed.
 #[derive(Default)]
 pub(crate) struct AccessSync {
@@ -88,9 +90,40 @@ impl AccessSync {
         }
     }
 
+    /// Do what a screen reader asked of engine node `node` in `app`: a
+    /// click is a press and release in the middle of its box as last sent,
+    /// as the pointer's would be; a focus request (its cursor moving,
+    /// Narrator's default) moves the focus there. Other actions are not
+    /// offered.
+    pub(crate) fn act(&self, app: &mut crate::App, action: Action, node: u64) {
+        match action {
+            Action::Click => {
+                let Some(at) = self.middle(node) else {
+                    return;
+                };
+                for kind in [PointerKind::Down, PointerKind::Up] {
+                    app.input(Input::Pointer(PointerInput {
+                        kind,
+                        x: at.0,
+                        y: at.1,
+                        button: PointerButton::Primary,
+                        modifiers: Modifiers::default(),
+                    }));
+                }
+            }
+            Action::Focus => {
+                // A node gone since the tree was sent: nothing to focus.
+                if let Some(node) = app.cx.outward(node) {
+                    let _ = app.focus(node);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The middle of `node`'s box in CSS pixels, as last sent: where a
     /// screen reader's click lands.
-    pub(crate) fn middle(&self, node: u64) -> Option<(f32, f32)> {
+    fn middle(&self, node: u64) -> Option<(f32, f32)> {
         let (x, y, width, height) = self.sent.get(&node)?.bounds?;
         Some((x + width / 2.0, y + height / 2.0))
     }
@@ -153,6 +186,12 @@ fn accesskit_node(node: &AccessNode, scale: f64) -> Node {
     }
     if clickable(node.role) && !node.disabled {
         out.add_action(Action::Click);
+    }
+    // What can take the focus says so: a screen reader moves the focus
+    // with its cursor (Narrator's default), and one that cannot leaves the
+    // focus on the document, which it then reads again and again.
+    if node.focusable {
+        out.add_action(Action::Focus);
     }
     out.set_children(
         node.children
@@ -225,6 +264,7 @@ mod tests {
             expanded: None,
             level: None,
             disabled: false,
+            focusable: false,
             focused: false,
             bounds: None,
             children: children.to_vec(),
@@ -345,6 +385,62 @@ mod tests {
         app.set_text(p, "iki").unwrap();
         app.tick(2);
         assert_eq!(app.prepared, first + 1);
+    }
+
+    #[test]
+    fn a_screen_readers_click_and_focus_reach_the_page() {
+        let mut app = crate::App::headless(crate::Config {
+            system_fonts: false,
+            ..crate::Config::default()
+        })
+        .unwrap();
+        app.load_html("<input id=t value=Ece><input type=checkbox id=c><p id=p>metin</p>");
+        app.tick(0);
+        let mut sync = AccessSync::default();
+        sync.full(app.cx.engine.access_tree(), 1.0, app.prepared);
+        let [t, c, p] = ["#t", "#c", "#p"].map(|selector| {
+            let node = app.query(None, selector).unwrap().unwrap();
+            app.cx.inward(node)
+        });
+        let state = |app: &crate::App, id: u64| {
+            let tree = app.cx.engine.access_tree();
+            let node = tree.iter().find(|node| node.node == id).unwrap().clone();
+            (node.focused, node.checked)
+        };
+        // Its cursor moving takes the focus along.
+        sync.act(&mut app, Action::Focus, t);
+        app.tick(1);
+        assert_eq!(state(&app, t), (true, None));
+        // A click checks the box, which takes the focus as a press does.
+        sync.act(&mut app, Action::Click, c);
+        app.tick(2);
+        assert_eq!(state(&app, c), (true, Some(true)));
+        // Text cannot take the focus; an action not offered does nothing.
+        sync.act(&mut app, Action::Focus, p);
+        sync.act(&mut app, Action::Expand, c);
+        app.tick(3);
+        assert_eq!(state(&app, c), (true, Some(true)));
+    }
+
+    #[test]
+    fn what_can_take_the_focus_lets_a_screen_reader_move_it_there() {
+        let mut field = node(1, AccessRole::TextInput, &[]);
+        field.focusable = true;
+        let out = accesskit_node(&field, 1.0);
+        assert!(out.supports_action(Action::Focus));
+        // A field clicks nowhere; a button does, and takes the focus too.
+        assert!(!out.supports_action(Action::Click));
+        let mut button = node(2, AccessRole::Button, &[]);
+        button.focusable = true;
+        let out = accesskit_node(&button, 1.0);
+        assert!(out.supports_action(Action::Focus) && out.supports_action(Action::Click));
+        // Text, and a control that cannot take the focus (disabled), do
+        // not offer it.
+        let text = node(3, AccessRole::Text, &[]);
+        assert!(!accesskit_node(&text, 1.0).supports_action(Action::Focus));
+        let mut disabled = node(4, AccessRole::Button, &[]);
+        disabled.disabled = true;
+        assert!(!accesskit_node(&disabled, 1.0).supports_action(Action::Focus));
     }
 
     #[test]

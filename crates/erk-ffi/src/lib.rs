@@ -504,6 +504,9 @@ pub const ERK_ACCESS_DISABLED: u32 = 256;
 pub const ERK_ACCESS_FOCUSED: u32 = 512;
 /// `x`, `y`, `width` and `height` hold its box.
 pub const ERK_ACCESS_HAS_BOUNDS: u32 = 1024;
+/// It can take the focus: a screen reader that asks to move the focus
+/// there is answered with `erk_node_focus`.
+pub const ERK_ACCESS_FOCUSABLE: u32 = 2048;
 
 /// A node of the accessibility tree `erk_access_tree` took. `name` and
 /// `value` are lent: valid until the next `erk_access_tree` or the app's
@@ -581,6 +584,7 @@ fn access_node(node: &AccessNode, child_count: usize) -> ErkAccessNode {
             | state(node.selected, ERK_ACCESS_SELECTABLE, ERK_ACCESS_SELECTED)
             | state(node.expanded, ERK_ACCESS_EXPANDABLE, ERK_ACCESS_EXPANDED)
             | flag(node.disabled, ERK_ACCESS_DISABLED)
+            | flag(node.focusable, ERK_ACCESS_FOCUSABLE)
             | flag(node.focused, ERK_ACCESS_FOCUSED)
             | flag(node.bounds.is_some(), ERK_ACCESS_HAS_BOUNDS),
         level: node.level.map_or(0, u32::from),
@@ -1304,6 +1308,20 @@ pub extern "C" fn erk_app_frame(app: *mut ErkApp, out: *mut ErkFrame) -> ErkStat
                 len: frame.rgba().len(),
             },
         )
+    })
+}
+
+/// Move the focus to `node` without a pointer, as a screen reader does
+/// when it asks (DOM's `focus()`): a focusable element
+/// (`ERK_ACCESS_FOCUSABLE`) takes it and shows it (`:focus-visible`); any
+/// other node leaves it where it is. The blur and focus events reach their
+/// subscriptions before this returns, so it is not called from inside one,
+/// as `erk_app_input` is not.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_focus(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Loop, |app| {
+        app.app().focus(node(node_id)?).abi()
     })
 }
 

@@ -87,6 +87,9 @@ pub struct AccessNode {
     /// A heading's level, 1 to 6.
     pub level: Option<u8>,
     pub disabled: bool,
+    /// Whether it can take the focus: a screen reader that asks moves it
+    /// there with [`App::focus`](crate::App::focus).
+    pub focusable: bool,
     pub focused: bool,
     /// Its border box in CSS pixels on the viewport, as the last frame
     /// laid it out (x, y, width, height); `None` for text and for what has
@@ -530,6 +533,7 @@ impl Context {
                 expanded: from.expanded,
                 level: from.level,
                 disabled: from.disabled,
+                focusable: from.focusable,
                 focused: from.focused,
                 bounds: from.bounds,
                 children: from.children.into_iter().map(node).collect(),
@@ -785,7 +789,7 @@ impl Context {
         self.listeners.retain_nodes(|node| engine.contains(node));
     }
 
-    fn inward(&self, node: Node) -> u64 {
+    pub(crate) fn inward(&self, node: Node) -> u64 {
         ids::inward(node, self.key)
     }
 

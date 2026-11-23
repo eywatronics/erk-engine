@@ -437,6 +437,19 @@ impl App {
         }
     }
 
+    /// Move the focus to `node` without a pointer, as a screen reader does
+    /// when it asks (DOM's `focus()`): a focusable element takes it and
+    /// shows it (`:focus-visible`); any other node leaves it where it is.
+    /// The blur and focus events reach their subscriptions before this
+    /// returns.
+    pub fn focus(&mut self, node: Node) -> Result<(), Status> {
+        let node = self.cx.inward(node);
+        for event in self.cx.engine.focus(node)? {
+            self.deliver(event);
+        }
+        Ok(())
+    }
+
     /// Dispatch `event`, then what follows it, each the same way: a click
     /// does what it does by default (a summary opens its `details`, a
     /// button its popover) unless a subscription prevented it, and a

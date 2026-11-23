@@ -274,26 +274,8 @@ impl Host<'_> {
                 self.access = Some(sync);
             }
             accesskit_winit::WindowEvent::ActionRequested(request) => {
-                if request.action != accesskit::Action::Click {
-                    return;
-                }
-                // A click is a press and release in the middle of the
-                // node's box, as the pointer's would be.
-                let Some(at) = self
-                    .access
-                    .as_ref()
-                    .and_then(|sync| sync.middle(request.target_node.0))
-                else {
-                    return;
-                };
-                for kind in [PointerKind::Down, PointerKind::Up] {
-                    self.app.input(Input::Pointer(PointerInput {
-                        kind,
-                        x: at.0,
-                        y: at.1,
-                        button: PointerButton::Primary,
-                        modifiers: Modifiers::default(),
-                    }));
+                if let Some(sync) = &self.access {
+                    sync.act(self.app, request.action, request.target_node.0);
                 }
             }
             accesskit_winit::WindowEvent::AccessibilityDeactivated => self.access = None,

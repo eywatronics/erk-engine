@@ -1635,6 +1635,20 @@ fn a_host_reads_the_access_tree_node_by_node() {
     short.flags = 77;
     assert_eq!(erk_access_node(app, 0, &mut short), ERK_OK);
     assert_eq!((short.node, short.flags), (root, 77));
+    // What can take the focus says so, and a screen reader's request moves
+    // it there; text and a disabled control cannot take it.
+    assert_ne!(field.flags & ERK_ACCESS_FOCUSABLE, 0);
+    assert_ne!(check.flags & ERK_ACCESS_FOCUSABLE, 0);
+    assert_eq!(heading.flags & ERK_ACCESS_FOCUSABLE, 0);
+    assert_eq!(button.flags & ERK_ACCESS_FOCUSABLE, 0);
+    assert_eq!(check.flags & ERK_ACCESS_FOCUSED, 0);
+    assert_eq!(erk_node_focus(app, query(app, "#c")), ERK_OK);
+    assert_eq!(erk_node_focus(app, query(app, "#h")), ERK_OK);
+    assert_eq!(erk_node_focus(app, 0), ERK_ERR_INVALID_ARGUMENT);
+    assert_eq!(erk_app_tick(app, 1), ERK_OK);
+    assert_eq!(erk_access_tree(app, &mut count), ERK_OK);
+    assert_ne!(of("#c", count).flags & ERK_ACCESS_FOCUSED, 0);
+    assert_eq!(of("#h", count).flags & ERK_ACCESS_FOCUSED, 0);
     // A node the host unchecks is unchecked in the next frame's tree.
     let mut node = query(app, "#c");
     assert_eq!(erk_node_set_checked(app, node, 0), ERK_OK);

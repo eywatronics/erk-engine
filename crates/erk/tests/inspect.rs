@@ -1,5 +1,8 @@
 //! The inspection queries and frame timings of p1-contract §8.1.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use erk::{App, BoxModel, Config, NodeKind, Status};
 
 fn app(html: &str) -> App {
@@ -279,4 +282,39 @@ fn the_access_tree_names_nodes_by_the_hosts_ids() {
     app.remove(gone).unwrap();
     app.tick(1);
     assert!(app.access_tree().iter().all(|n| n.node != gone));
+}
+
+#[test]
+fn a_host_moves_the_focus_where_its_screen_reader_asks() {
+    let mut app = app(
+        r#"<!DOCTYPE html><body><p id="p">Ayarlar</p><input id="ad" value="Ece"><input type="checkbox" id="c"></body>"#,
+    );
+    let (p, field, check) = (node(&app, "#p"), node(&app, "#ad"), node(&app, "#c"));
+    let focusable = |app: &erk::App, node: erk::Node| {
+        let tree = app.access_tree();
+        tree.iter()
+            .find(|n| n.node == node)
+            .expect("in the tree")
+            .focusable
+    };
+    assert_eq!(
+        [p, field, check].map(|node| focusable(&app, node)),
+        [false, true, true]
+    );
+    // The focus event reaches its subscription before `focus` returns.
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let log = Rc::clone(&seen);
+    app.on(check, erk::EventKind::Focus, move |_, event| {
+        log.borrow_mut().push(event.target);
+    })
+    .unwrap();
+    app.focus(field).unwrap();
+    app.focus(check).unwrap();
+    assert_eq!(*seen.borrow(), [check]);
+    // Text cannot take it: it stays where it is.
+    app.focus(p).unwrap();
+    app.tick(1);
+    let tree = app.access_tree();
+    let focused: Vec<erk::Node> = tree.iter().filter(|n| n.focused).map(|n| n.node).collect();
+    assert_eq!(focused, [check]);
 }

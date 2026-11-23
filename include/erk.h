@@ -323,6 +323,12 @@
 #define ERK_ACCESS_HAS_BOUNDS 1024
 
 /*
+ It can take the focus: a screen reader that asks to move the focus
+ there is answered with `erk_node_focus`.
+ */
+#define ERK_ACCESS_FOCUSABLE 2048
+
+/*
  An app: one document and its window. Opaque.
  */
 typedef struct ErkApp ErkApp;
@@ -793,6 +799,16 @@ ErkStatus erk_app_input(ErkApp *app, const ErkInput *input);
  A headless app's last frame; `ERK_ERR_NOT_FOUND` before the first.
  */
 ErkStatus erk_app_frame(ErkApp *app, ErkFrame *out);
+
+/*
+ Move the focus to `node` without a pointer, as a screen reader does
+ when it asks (DOM's `focus()`): a focusable element
+ (`ERK_ACCESS_FOCUSABLE`) takes it and shows it (`:focus-visible`); any
+ other node leaves it where it is. The blur and focus events reach their
+ subscriptions before this returns, so it is not called from inside one,
+ as `erk_app_input` is not.
+ */
+ErkStatus erk_node_focus(ErkApp *app, ErkNodeId node_id);
 
 /*
  Show `html` instead of the document; the old ids go stale.

@@ -214,6 +214,18 @@ impl Engine {
         self.restyled_by(|page| page.key(input))
     }
 
+    /// Move the focus to `node` without a pointer, as a screen reader or
+    /// the host does (DOM's `focus()`): a focusable element takes it and
+    /// shows it (`:focus-visible`); any other node leaves it where it is.
+    /// The blur and focus events it causes. `StaleNode` for a node that
+    /// is gone.
+    pub fn focus(&mut self, node: u64) -> Result<Vec<Event>, Status> {
+        let events = self.restyled_by(|page| page.focus_node(node))?;
+        // The caret of a text field that took it (M5.8).
+        self.changed |= self.page.take_edited();
+        Ok(events)
+    }
+
     /// What `input` does by default: Tab moves the focus, Enter and Space
     /// click the focused link or button. The events that follow from it.
     pub fn key_default(&mut self, input: &KeyInput) -> Vec<Event> {
@@ -5368,6 +5380,9 @@ mod tests {
             if node.disabled {
                 line.push_str(" disabled");
             }
+            if node.focusable {
+                line.push_str(" focusable");
+            }
             if node.focused {
                 line.push_str(" focused");
             }
@@ -5401,22 +5416,23 @@ mod tests {
                 "      Form",
                 "        Label \"Ad\"",
                 "          Text \"Ad\"",
-                "        TextInput \"Ad\" value=\"Ece\"",
+                "        TextInput \"Ad\" value=\"Ece\" focusable",
                 "        Label \"Haberler\"",
-                "          CheckBox \"Haberler\" checked=true",
+                "          CheckBox \"Haberler\" checked=true focusable",
                 "          Text \"Haberler\"",
                 "        Label \"Şehir Muş\"",
                 "          Text \"Şehir\"",
-                "          ComboBox \"Şehir\" value=\"Muş\" expanded=false",
+                "          ComboBox \"Şehir\" value=\"Muş\" expanded=false focusable",
                 "            Option \"Van\" selected=false",
                 "            Option \"Muş\" selected=true",
-                "        MultilineTextInput \"Not\" value=\"yazı\"",
+                "        MultilineTextInput \"Not\" value=\"yazı\" focusable",
                 "        PasswordInput disabled",
-                "        Button \"Kaydet\"",
-                "        Button \"Submit\"",
+                "        Button \"Kaydet\" focusable",
+                "        Button \"Submit\" focusable",
                 "      Image \"Logo\"",
-                "      Link \"Yardım\"",
+                "      Link \"Yardım\" focusable",
                 "        Text \"Yardım\"",
+                // A role makes no element focusable; `tabindex` does.
                 "      Button \"Kapat\"",
             ]
         );
@@ -5465,6 +5481,61 @@ mod tests {
     }
 
     #[test]
+    fn a_screen_reader_moves_the_focus_to_what_can_take_it() {
+        let mut engine = verifying(
+            "<style>:focus-visible { background-color: rgb(255, 0, 0) }</style>\
+             <input id=t value=Ece><input type=checkbox id=c><p id=p>metin</p>\
+             <button id=b disabled>Kapalı</button><span id=r>gider</span>",
+        );
+        let [t, c, p, b, r] = ids(&engine, ["t", "c", "p", "b", "r"]);
+        let focused = |engine: &Engine| -> Vec<u64> {
+            let tree = engine.access_tree();
+            tree.iter()
+                .filter(|node| node.focused)
+                .map(|node| node.node)
+                .collect()
+        };
+        let kinds = |events: Vec<Event>| -> Vec<(EventKind, u64)> {
+            events
+                .into_iter()
+                .map(|event| (event.kind, event.target))
+                .collect()
+        };
+        let shown = |engine: &Engine, node| {
+            engine
+                .computed_style(node)
+                .unwrap()
+                .unwrap()
+                .contains("background-color: rgb(255, 0, 0)")
+        };
+        assert_eq!(kinds(engine.focus(t).unwrap()), [(EventKind::Focus, t)]);
+        // The page looks different: a frame is due.
+        assert!(engine.needs_frame());
+        checked_frame(&mut engine);
+        assert_eq!(focused(&engine), [t]);
+        // A text field takes it with its caret at the end.
+        assert!(engine.caret_rect().is_some());
+        assert_eq!(
+            kinds(engine.focus(c).unwrap()),
+            [(EventKind::Blur, t), (EventKind::Focus, c)]
+        );
+        // Shown as the keyboard's focus is, even on a control that takes
+        // no typing (a press would not show it there).
+        checked_frame(&mut engine);
+        assert!(shown(&engine, c) && !shown(&engine, t));
+        // What cannot take the focus leaves it where it is: text, a
+        // disabled control, the focused element itself.
+        for node in [p, b, c] {
+            assert_eq!(kinds(engine.focus(node).unwrap()), []);
+        }
+        // Nothing changed, so no frame is due.
+        assert!(!engine.needs_frame());
+        assert_eq!(focused(&engine), [c]);
+        engine.remove(r).unwrap();
+        assert_eq!(engine.focus(r), Err(Status::StaleNode));
+    }
+
+    #[test]
     fn the_access_tree_takes_names_from_references_titles_and_known_roles() {
         let engine = verifying(
             "<span id=a>İlk</span><span id=b>ikinci</span>\
@@ -5475,8 +5546,8 @@ mod tests {
         );
         let lines = access_lines(&engine);
         for wanted in [
-            "TextInput \"İlk ikinci\" value=\"\"",
-            "TextInput \"İpucu\" value=\"\"",
+            "TextInput \"İlk ikinci\" value=\"\" focusable",
+            "TextInput \"İpucu\" value=\"\" focusable",
             "Navigation",
             "Generic",
             "CheckBox checked=false disabled",

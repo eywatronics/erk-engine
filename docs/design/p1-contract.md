@@ -238,13 +238,18 @@ kipinde `erk` onu AccessKit'le platforma verir (`accesskit_winit`): ekran
 okuyucu isteyene kadar ağaç kurulmaz, sonra her turda yalnızca değişen
 düğümler gider. Ekran okuyucunun tıklaması düğümün kutusunun ortasına bir
 basış olarak gelir; host'un abonelikleri onu sıradan bir tıklama olarak
-görür. Ağaç yalnızca bir kare hazırlanınca ya da ölçek değişince
+görür. Odak alabilen düğüm bunu ağaçta söyler, ve ekran okuyucunun odak
+isteği (imlecinin taşınması, Narrator'ın varsayılanı) odağı oraya
+taşır: klavyenin taşıdığı gibi görünür (`:focus-visible`), blur ve
+focus olayları aboneliklere gider. Odak alamayan bir düğüm odağı yerinde
+bırakır. Ağaç yalnızca bir kare hazırlanınca ya da ölçek değişince
 yeniden çıkarılır: hiçbir şeyin değişmediği bir tur ekran okuyucuya bir
 şey söylemez.
 
 Kendi penceresini süren host ağacı `erk`'in kimlikleriyle alır
 (`Context::access_tree`; C-ABI'de `erk_access_tree`, `erk_access_node`,
-`erk_access_child`) ve platforma kendisi verir. C-ABI ağacın bir
+`erk_access_child`) ve platforma kendisi verir; ekran okuyucunun odak
+isteğini `App::focus` (C-ABI'de `erk_node_focus`) ile karşılar. C-ABI ağacın bir
 anlık görüntüsünü uygulamada tutar: düğümler konumlarıyla okunur (belge
 0'da), adlar ve değerler ödünç verilir ve bir sonraki `erk_access_tree`'ye
 ya da uygulamanın sonuna kadar geçerlidir (`ErkFrame`'in pikselleri
@@ -602,10 +607,14 @@ gerekçeli bir daraltma:
   konumdaki düğümü `ErkAccessNode`'a yazar (rol `ERK_ROLE_*`, düğüm,
   `ERK_ACCESS_*` bayrakları: adı, değeri, işaretlenebilirliği ve
   işaretliliği, seçilebilirliği ve seçiliği, açılabilirliği ve açıklığı,
-  devre dışılığı, odağı ve kutusunun olup olmadığı; başlık düzeyi, ad ve
-  değer, kutu, çocuk sayısı); `erk_access_child` bir çocuğun konumunu
-  verir. Ad ve değer ödünç: bir sonraki `erk_access_tree`'ye kadar.
-  Konumların dışı `ERK_ERR_NOT_FOUND`.
+  devre dışılığı, odak alabilirliği ve odağı, kutusunun olup olmadığı;
+  başlık düzeyi, ad ve değer, kutu, çocuk sayısı); `erk_access_child`
+  bir çocuğun konumunu verir. Ad ve değer ödünç: bir sonraki
+  `erk_access_tree`'ye kadar. Konumların dışı `ERK_ERR_NOT_FOUND`.
+  `erk_node_focus` odağı işaretçisiz taşır (DOM'un `focus()`'u, ekran
+  okuyucunun odak isteği): odak alabilen eleman alır ve gösterir, başka
+  düğüm odağı yerinde bırakır; blur ve focus olayları dönmeden
+  aboneliklere gider, bu yüzden bir aboneliğin içinden çağrılamaz.
 - **Kütüphanenin adı:** workspace'te `erk` crate'i ve `erk` ikilisi olduğu
   için (Windows'ta aynı adlı `.pdb` birbirini ezer) derleme çıktısı
   `erk_ffi.dll`/`liberk_ffi.so`/`liberk_ffi.dylib`; dağıtılan kütüphanenin
