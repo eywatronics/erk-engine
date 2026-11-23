@@ -399,6 +399,15 @@ Erk'in hedefi az bellek; 2026-10-12'nin ölçümü bunu tutmuyor. Kabulden
   ön tahsisi küçültülmüş (sayı ölçümden sonra).
 - [ ] Sciter ve Slint gibi hafif motorlarla karşılaştırma aynı sayfalarla ve
   aynı yöntemle ölçülür; ölçülmemiş sayı yayımlanmaz.
+- [ ] **Electron ve Chrome'la karşılaştırma (proje sahibinin kararı,
+  2026-11-23; Sciter ve Slint'in yerine).** Aynı sayfalar, aynı boyut, GPU
+  açık ve kapalı; Electron ve Chrome'un bütün süreç ağacı (tarayıcı, GPU,
+  sayfa ve yardımcı süreçler) toplanarak, özel bellek ve çalışma kümesi.
+  Sonuçlar testlerde, proje sahibinin göreceği bir tabloyla. Çıta: **en
+  kötü senaryoda Erk, Electron'un belleğinin en fazla yarısı**, GPU
+  yolunda da CPU yolunda da; olağan bir sayfada Electron ~200 MB iken Erk
+  ~20 MB civarında (proje sahibinin gerekçesi: saf Rust bir motor).
+  Electron'un indirilmesi (npm) proje sahibinin onayıyla.
 
 Dışarıdan gelen öneriler (2026-10-13), Erk'in koduna ve kurallarına göre
 değerlendirildi; tahmini kazançları ölçülmeden alınmadı:
@@ -543,7 +552,10 @@ B16'nın bulguları yürütme notlarında (M5.13). Sıra, ölçülen paya göre:
 5. **GPU yolu (M5.13-B).** Sayfadan bağımsız ~320 MB'ın kaynağı.
 6. **DOM ve Stylo (M5.13-D, E).** DOM 17,9 MB (arena 15 MB), Stylo 0,2 MB:
    ölçüm şimdilik bunları öne almıyor.
-7. **Bütçe muhafızı (M5.13-F)** ve Sciter/Slint karşılaştırması.
+7. **Electron ve Chrome'la karşılaştırma** (2026-11-23): aynı sayfalar,
+   GPU açık ve kapalı, süreç ağacının toplamı; çıta en kötü senaryoda
+   Electron'un yarısı. Diyetin her adımından sonra yeniden koşar.
+8. **Bütçe muhafızı (M5.13-F).**
 
 ### M5.14: Kabul
 
@@ -1386,3 +1398,14 @@ Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
 | Okuma | Kartlı sayfada özel belleğin %90'ı yığın: hedef (eleman başına 3–4 KB) yerleşim düğümünden ve paragraf kopyalarından geçiyor. Küçük sayfada tersi: 27,5 MB'ın 7,6 MB'ı yığın, 12–14 MB hedefi yığın dışını (iş parçacığı yığınları, sistem yazı tiplerinin taranması: B16 gömülü yazı tipleriyle, kabuk sistemin yazı tipleriyle; pencere tamponları, ayırıcı) ölçmeden tutmaz. GPU yolu sayfadan bağımsız ~320 MB ekliyor |
 | M5.12'nin UA kuralı | `animation-name: none !important` her elemanın UI yapısını kopyalatıyor mu diye bakıldı: küçük sayfada 0,03 MB, kartlı sayfada 0,004 MB; kopya Stylo'nun stil paylaşımıyla paylaşılıyor. Düzeltme gerekmiyor |
 | Gömülü hedefin önerileri (2026-11-05) | Ölçümle ilk değerlendirme. **Stylo'yu çatallamak:** RAM için gerekçesi yok, Stylo'nun payı 0,2–0,3 MB; ikili boyutu için ayrı bir karar olarak kalıyor. **Önbellekleri kısmak:** Erk'in ağır olanları önbellek değil, tutulan yerleşim ağacı ve paragraf kopyaları; kısmak değil tekilleştirmek (2. ve 3. PR). **winit'i bırakmak:** küçük sayfanın yığın dışı payı ölçülünce (4. PR) karar; bugün winit'in payı görünmüyor. **CPU mu GPU mu:** Windows'ta GPU yolu ~320 MB ekliyor; paylaşımlı belleği olan kartta bu doğrudan sistem RAM'i, karar cihazda ölçülerek |
+
+İkinci PR: yerleşim düğümü.
+
+| Konu | Not |
+|---|---|
+| Değişiklik | `LayoutNode` artık bir işaretçi: `Option<Box<BoxData>>`, alanlar `BoxData`'da. Okuma (`Deref`) boş bir yuvada iş parçacığının boş kutusunu gösteriyor, yazma (`DerefMut`) kutuyu ilk yazışta açıyor; bu yüzden düğümün alanlarına erişen yüzlerce satır değişmedi, yalnızca kutunun kurulduğu iki yer (`LayoutNode::new`). Boş kutu iş parçacığı başına bir kez yapılıp tutuluyor (`Box::leak`): Taffy'nin `calc()` uzunlukları işaretçi, kutu iş parçacıkları arasında paylaşılamıyor (`static` derlenmedi) |
+| Tuzak | Arena büyüyünce (`grow`) bütün yuvaları gezip çocuk indekslerini kaydıran döngü, `DerefMut` yüzünden her boş yuvaya bir kutu açardı: yalnızca yazılmış yuvaları geziyor (`LayoutNode::written`). Başka bir döngü boş yuvaya yazmıyor: yerleşimden sonraki geçişler ya ağacı izliyor ya `in_tree`'ye ya da yalnızca paragrafa bakıyor; bunu B16 da gösteriyor |
+| B16 | Kartlı sayfa: canlı yığın 437,1 MB'tan 275,3 MB'a (−161,8 MB), eleman başına 14,9 KB'tan 9,4 KB'a; Erk'in yerleşimi 246,6 MB'tan 84,9 MB'a. Küçük sayfa: 7,6 MB'tan 6,2 MB'a, yerleşim 1,7 MB'tan 0,3 MB'a. Kalan 84,9 MB ağaçtaki ~41 bin kutu (2064 bayt): paragrafa özgü alanları (`Paragraph`, `InlineLayout`, sonuç, seçenek etiketleri; ~800 bayt) ayrı bir kutuya almak paragraf olmayan kutularda ~16 MB daha kazandırır, paragraf kopyalarının PR'ından sonra ölçülerek |
+| Kare süresi | Makine bu oturumda çok gürültülü (CPU yükü %65, Chrome açık): aynı senaryo turdan tura 2–3 kat oynuyor, bu değişikliğin dokunmadığı aşamalar da (B15'in raster'ı 9,9–24,4 ms). Dal ve main sırayla iki kez ölçüldü. Sakin turda B1 dal 28,68 / main 28,16 ms (p95 37,60 / 31,44). B14'te (sayfanın açılışı) dalın yerleşim aşaması main'in ~2 katı, ama aynı turda dokunulmayan stil aşaması da ~1,8 katı: fark yükü izliyor, ölçülebilir bir gerileme görülmedi. Kesin karşılaştırma sakin bir makinede, bellek bütçesiyle birlikte (M5.13-F) |
+| Testler | `only_the_slots_that_make_a_box_hold_one`: metin ve boşluk, `display: none` içindeki eleman ve arenanın büyüme payı kutu tutmuyor, kutu tutan her yuva ağaçta. `room_made_for_the_arena_holds_no_box`: arena büyüyünce araya giren yuvalar boş, kutu sayısı aynı, anonim kutuları tutan blok onları taşındıkları yerde adlandırıyor. Yerleşimin doğruluğu kâhinle (bütün workspace testleri, fuzz) |
+| Mutasyonlar | 4 mutasyonun 4'ü yakalandı: `grow`'un her yuvaya yazması, her yuvanın kutuyla yapılması, büyüme payının kutuyla yapılması, çocukların kaydırılmaması. İlk turda sonuncusu kaçtı: test anonim kutunun çocuklarına bakıyordu (elemanlar, zaten kaymıyorlar); test anonim kutuları tutan bloğun çocuk listesini denetleyecek biçimde güçlendirildi |
