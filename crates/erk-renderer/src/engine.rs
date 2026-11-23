@@ -295,15 +295,15 @@ impl Engine {
     }
 
     /// The host's clock is at `now_ns` (p1-contract §7): what depends on
-    /// time, the caret's blink, catches up, and a frame is due if it looks
-    /// different.
+    /// time, the caret's blink and transitions, catches up, and a frame is
+    /// due if it looks different.
     pub fn set_time(&mut self, now_ns: u64) {
         self.changed |= self.page.set_time(now_ns);
     }
 
     /// When the page next looks different with nothing done to it, on the
-    /// host's clock: the caret's next blink. `None` while nothing on the
-    /// page moves by itself.
+    /// host's clock: the caret's next blink, or the next frame while a
+    /// transition runs. `None` while nothing on the page moves by itself.
     pub fn next_tick(&self) -> Option<u64> {
         self.page.next_tick()
     }
@@ -1947,6 +1947,60 @@ mod tests {
         assert!(engine.prepare().0.is_some(), "the caret goes");
         engine.set_time(1900 * MS);
         assert!(engine.prepare().0.is_none(), "no caret, no blink");
+    }
+
+    #[test]
+    fn a_transition_asks_for_frames_on_the_hosts_clock_until_it_ends() {
+        const MS: u64 = 1_000_000;
+        const FRAME: u64 = 16_666_667;
+        let mut engine = verifying(
+            "<style>#a { width: 100px; height: 50px; background-color: rgb(0, 0, 0);\
+             transition: background-color 1s linear } #a.on { background-color: rgb(200, 0, 0) }\
+             </style><div id=a></div>",
+        );
+        let red = |prepared: Option<Prepared>| {
+            prepared
+                .expect("a frame")
+                .list
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    crate::list::DisplayItem::Rect { width, color, .. } if *width == 100.0 => {
+                        Some(color[0])
+                    }
+                    _ => None,
+                })
+                .expect("the box")
+        };
+        assert_eq!(engine.next_tick(), None, "nothing moves by itself");
+        let a = engine.query(None, "#a").unwrap().unwrap();
+        engine.set_time(100 * MS);
+        engine.set_attr(a, "class", "on").unwrap();
+        assert_eq!(red(engine.prepare().0), 0, "it starts from the old value");
+        assert_eq!(engine.verify(), Ok(()));
+        // The next frame is due at the display's pace, with nothing else
+        // done to the page.
+        assert_eq!(engine.next_tick(), Some(100 * MS + FRAME));
+        assert!(!engine.needs_frame());
+        engine.set_time(600 * MS);
+        assert!(engine.needs_frame());
+        assert_eq!(red(engine.prepare().0), 100);
+        assert_eq!(engine.verify(), Ok(()));
+        // The clock standing still moves nothing.
+        engine.set_time(600 * MS);
+        assert!(!engine.needs_frame());
+        // A new viewport does not cut the transition short.
+        engine.resize(320, 200);
+        engine.set_time(850 * MS);
+        assert_eq!(red(engine.prepare().0), 150);
+        assert_eq!(engine.verify(), Ok(()));
+        // Its end: the new value, and nothing more to tick for.
+        engine.set_time(1100 * MS);
+        assert_eq!(red(engine.prepare().0), 200);
+        assert_eq!(engine.verify(), Ok(()));
+        assert_eq!(engine.next_tick(), None);
+        engine.set_time(1200 * MS);
+        assert!(engine.prepare().0.is_none(), "ended: no frame");
     }
 
     fn click(engine: &mut Engine, (x, y): (f32, f32)) {

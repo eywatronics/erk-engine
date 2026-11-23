@@ -760,9 +760,9 @@ ErkStatus erk_app_tick(ErkApp *app, uint64_t now_ns);
 
 /*
  When the app's page next looks different with nothing done to it, on
- the clock `erk_app_tick` is given (§7): the caret's next blink. A host
- running its own loop ticks then. `ERK_ERR_NOT_FOUND` while nothing on
- the page moves by itself.
+ the clock `erk_app_tick` is given (§7): the caret's next blink, or the
+ next frame while a transition runs. A host running its own loop ticks
+ then. `ERK_ERR_NOT_FOUND` while nothing on the page moves by itself.
  */
 ErkStatus erk_app_next_tick(ErkApp *app, uint64_t *out_ns);
 

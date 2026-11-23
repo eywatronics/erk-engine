@@ -336,6 +336,42 @@ Dört PR (2026-11-09):
   doğrusal enterpolasyon ve standart zamanlama eğrileri, zaman host'un
   `now_ns`'inden; altın görüntüler belirli zamanlarda.
 
+Stylo 0.20'nin servo kipi geçişin kendisini yapıyor (2026-11-23'te
+okundu): `process_animations` stil değişince geçişi başlatır, çalışan
+geçişi tersine çevirir, ara değeri zamanlama eğrisiyle hesaplar ve geçiş
+kuralını basamağın `Transitions` düzeyine koyar. Bunun için bir
+`DocumentAnimationSet` ve `current_time_for_animations` ister; Erk bugün
+her karede boş bir küme ve 0 veriyor. Geçişin durumunu (bekliyor,
+çalışıyor, bitti) ilerletmek ve geçişteki elemanı her karede yeniden
+stillemek Servo'da betik iş parçacığının işi: Erk'te restyler'ın.
+
+İki PR (2026-11-23):
+
+1. **Geçişlerin çekirdeği.** `Restyler` kareler arasında bir
+   `DocumentAnimationSet` tutar; zaman sayfanın saatinden (`now_ns`,
+   saniyeye çevrilmiş) gelir. Her karede önce geçişler saate göre
+   ilerler: başlama zamanı gelen çalışır, süresi dolan biter. Geçişi süren
+   ve yeni biten her eleman `RESTYLE_SELF` ipucuyla yeniden stillenir; değer
+   Stylo'nun eğrisinden gelir, hasar (boyama, yerleşim) var olan yoldan
+   çıkar. Belgeden çıkan elemanın kümesi silinir: `OpaqueNode` arena
+   indeksidir, aynı yuvaya gelen başka bir eleman onu devralmamalı.
+   Görüntü alanı değişip restyler yenilenince küme yenisine taşınır, geçiş
+   yarıda kesilmez. Kâhin (sıfırdan stil) kümenin bir kopyasını aynı anda
+   görür: aynı belge aynı zamanda aynı değerleri vermeli (karar 9).
+   Geçiş sürerken kare her turda gereklidir ve `next_tick` bir sonraki
+   karenin zamanını söyler (60 Hz: şimdi + 16,67 ms; host vsync'e göre
+   erken ya da geç çağırabilir, değer saatten hesaplandığı için kayma
+   olmaz). `@keyframes` animasyonları kapsam dışı (sözleşme §7: M9);
+   Stylo onları da başlatırdı, ama Erk onları ilerletmediği için yarım
+   çalışırlardı. Ne olduğu bu PR'da denenir, kararı notlara yazılır.
+   Sözleşme §7 ve `css-support` bu PR'da: özellik onunla geliyor.
+2. **Altın görüntüler, fuzz ve ölçüm.** Dört özellik ve standart eğriler
+   (`linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `steps()`,
+   `cubic-bezier()`) için belirli zamanlarda altın görüntüler; fuzz
+   yorumlayıcısına saati ileri alan bir işlem (kâhin geçişin ortasında da
+   denetler); geçişteki düğümlerin kare başına maliyeti için bir ölçüm
+   (açık soru: "geçişler ve artımlılık").
+
 ### M5.13: Bellek
 
 Erk'in hedefi az bellek; 2026-10-12'nin ölçümü bunu tutmuyor. Kabulden
@@ -1276,3 +1312,20 @@ Dördüncü PR: açılır `select`'in listesi. M5.10 bununla bitti.
 | Elle deneme, ilk tur (2026-11-23) | Proje sahibi Narrator'la denedi: "Adınız", "Bülten almak istiyorum" ve "Şehir, açılan kutu, İzmir" okundu, Narrator'ın tıklaması kutuyu işaretledi. Ama Narrator durmadan "Erişilebilirlik denemesi, belge" dedi, ve kutu kaldırılırken bir şey söylemedi |
 | Elle denemenin bulduğu | Hiçbir kontrol UIA'da klavyeyle odaklanabilir değildi (`IsKeyboardFocusable` yanlış) ve `SetFocus` reddediliyordu ("Hedef öğeye odaklanılamıyor"): ağaç düğümlerin odak alabildiğini söylemiyor, AccessKit'in odak eylemi (`Action::Focus`) de karşılanmıyordu. Narrator imlecini bir kontrole taşıyınca sistem odağını da oraya taşımak ister (varsayılan ayar); taşıyamayınca odak belgede kalıyor, Narrator belgeyi yeniden okuyordu. Plan "odak ve tıkla eylemleri ekran okuyucudan gelir" diyordu, ikinci PR yalnızca tıklamayı yapmıştı. Düzeltme: ağaç düğümü odak alabilirliğini taşıyor (`focusable`, motorun Tab sırasındaki `focusable` ile aynı: gizli, inert ve devre dışı olan alamaz), odak alabilen düğüm AccessKit'te `Focus` eylemini sunuyor, ve istek odağı taşıyor (`Engine::focus`, `App::focus`; C-ABI'de `ERK_ACCESS_FOCUSABLE` ve `erk_node_focus`, kendi penceresini süren host için). Odak klavyeninki gibi gösteriliyor (`:focus-visible`): ekran okuyucu kullanıcısı fareyle değil klavyeyle geziyor. Pencerenin eylem işleyişi başsız sınanabilsin diye `AccessSync::act`'a taşındı. Sonra UIA'da dört kontrol de odaklanabilir, `SetFocus` her birine odağı taşıyor. Testler: `a_screen_reader_moves_the_focus_to_what_can_take_it` (motor), `a_host_moves_the_focus_where_its_screen_reader_asks` (`erk`), `a_screen_readers_click_and_focus_reach_the_page` ve `what_can_take_the_focus_lets_a_screen_reader_move_it_there` (pencere tarafı), C-ABI testinde bayrak ve `erk_node_focus`. İki düzeltmenin mutasyonları: 14'ün 14'ü yakalandı. İlk turda ikisi kaçtı: `:focus-visible` metin alanında denetleniyordu, metin alanı odağını zaten gösteriyor, denetim onay kutusuna taşındı; karenin gerektiğini işaretleyen iki yol birbirini örtüyor, birlikte mutasyona uğratılıp "kare gerekiyor" denetimine karşı denendi |
 | Elle deneme, ikinci tur (2026-11-23) | Düzeltmeden sonra proje sahibi Narrator'la yeniden denedi: düzeldi. Form etiketleri okunuyor, belge adı yinelenmiyor, Narrator'ın tıklaması kutuyu işaretliyor ve kaldırıyor. Taşın kabulü bu deneme; kutusu işaretlendi |
+
+### M5.12
+
+İlk PR: geçişlerin çekirdeği.
+
+| Konu | Not |
+|---|---|
+| Yer | `erk-style`'da `Transitions` (`transition.rs`): Stylo'nun `DocumentAnimationSet`'i ve saniye cinsinden saat. `Restyler` onu kareler arasında tutuyor; `set_time` saati sayfanın `now_ns`'inden alıyor. Stylo'ya her traversal'da kümenin kendisi veriliyor (`Arc` paylaşımı), kâhine bir kopyası (`Transitions::clone` hiçbir şey paylaşmıyor: kâhinin stillemesi canlı kümeye dokunmamalı) |
+| Her kare | Stillemeden önce `tick`: başlama zamanı gelmemiş ya da süren geçişlerden sonu gelen bitmiş sayılıyor, iptal edilenler atılıyor, boşalan küme siliniyor; geçişi kalan her eleman `RESTYLE_SELF` ipucu alıyor. Değeri Stylo hesaplıyor: yeniden stillenen eleman eşleşmede geçiş kuralını saatin anındaki değerle alıyor. Hasar ve artımlı yerleşim, bir stil değişikliğinin zaten izlediği yoldan. "Bekliyor"dan "çalışıyor"a geçiş yazılmadı: Erk olay göndermiyor (`transitionstart` yok), değer iki durumda da saatten |
+| `may_have_animations` | Artık hep evet. Eşleşme geçiş kuralını yalnızca bu evet derken istiyor; geçişteki eleman yeniden stillenirken de, sıfırdan stillenirken (kâhin) de saatin anındaki değeri almalı. Bedeli eleman başına kümede bir arama: B1, B2, B3 bu dalda (yayın, geliştirme makinesi) medyan 19,80 / 30,80 / 7,71 ms; B1 #111'in koşusunda 30,86 ms'ydi, fark makinenin gürültüsü, gerileme görünmüyor |
+| Kimlik | Stylo kümeyi `OpaqueNode`'la, yani arena yuvasıyla anahtarlıyor. Yuvası başka bir düğüme geçen (aynı karede silinip yerine gelen), artık stillenmeyen (`display: none` içinde, silinmiş) elemanın kümesi siliniyor; yeni belge (`changes.everything`) kümeyi boşaltıyor. Tarayıcı da gösterilmeyen elemanın geçişini iptal ediyor |
+| Görüntü alanı | Yeni görüntü alanı yeni bir restyler istiyor (medya sorguları); kesintisiz kareler gördüyse eskisinin kümesini devralıyor (`Restyler::taking_over`), geçiş yarıda kesilmiyor. Kare kaçırmış bir restyler'ınki alınmıyor: aradaki silinmeleri görmedi |
+| Saat ve kare | Geçiş sürerken saat ilerleyince kare gerekiyor (`Page::set_time`), sayfanın "hiçbir şey değişmedi" kısa yolu restyle'ı atlamıyor, ve `next_tick` son turdan 16,67 ms sonrasını veriyor (imlecin yanıp sönmesiyle birlikte en yakını). Sözleşme §7 buna göre; yeni çağrı yok, sürüm değişmiyor. Bir stil değişikliğinin başlattığı geçiş, onu gösteren karenin hazırlandığı turun saatinde başlıyor |
+| `@keyframes` | Denendi: Stylo servo kipinde `animation-name`'i olan elemanda animasyonu başlatıyor, ama ilerletmeyi (yineleme, bitiş) betik iş parçacığına bırakıyor; Erk'te yarım çalışırdı. Karar: UA stil sayfası `animation-name: none !important` (UA'nın önemli bildirimi sayfanınkini yener), hiçbir animasyon başlamıyor. Animasyonları getiren taş (M9) kuralı kaldıracak. `css-support`'ta yazılı |
+| Reddedilen | Dört özelliği Erk'in kendisinin enterpole etmesi: Stylo CSS Transitions'ı zaten izliyor (tersine dönme, kısaltma katsayısı, gecikme, `steps()`), ikinci bir hesap ondan kayardı |
+| Testler | `erk-style/tests/transitions.rs` (her karede bütün stiller aynı andaki kâhinle karşılaştırılıyor): `a_colour_goes_from_the_old_value_to_the_new_on_the_hosts_clock`, `a_frame_with_nothing_changed_still_moves_a_transition`, `opacity_and_transform_follow_their_timing_functions`, `the_standard_curves_shape_the_value_between_the_ends`, `a_delay_holds_the_old_value_until_the_transition_starts`, `going_back_halfway_turns_the_transition_around_from_where_it_is`, `a_transition_ends_when_its_element_stops_being_shown`, `a_removed_elements_transition_does_not_pass_to_the_next_in_its_place`, `an_element_put_in_a_removed_ones_place_in_the_same_frame_starts_afresh`, `a_new_document_starts_without_the_old_ones_transitions`, `keyframe_animations_do_not_run_yet`. Motor: `a_transition_asks_for_frames_on_the_hosts_clock_until_it_ends` (kare isteği, `next_tick`, duran saat, görüntü alanı değişimi, her karede `verify`) |
+| Mutasyonlar | 21 mutasyonun 21'i yakalandı: bitişin işaretlenmemesi, iptallerin tutulması, 200 ms erken bitiş, saatin yanlış birimi, ipucunun verilmemesi, yuvası geçen elemanın kümesinin, stillenmeyen elemanın kümesinin, eski belgenin kümesinin tutulması, hiç "sürüyor" denmemesi, görüntü alanında kümenin düşmesi, Stylo'ya boş küme, eşleşmenin geçiş kuralını atlaması, sessiz karenin restyle'ı atlaması, saatin kare istememesi, duran saatin kare istemesi, yarı hızda ya da hiç `next_tick`, restyler'ın saati görmemesi, kâhinin geçişleri yok sayması, yeniden boyutlanmada restyler'ın baştan kurulması, `@keyframes`'in susturulmaması. İlk turda ikisi kaçtı: erken bitişi hiçbir test bitişe yakın bir anda yoklamıyordu (renk testine bitişten 10 ms önceki kare eklendi); yuvası geçen elemanın kümesini, silme ile yeni eleman ayrı karelerde olduğu için başka bir yol (stillenmeyenin silinmesi) zaten temizliyordu (silme ve eklemeyi aynı karede yapan test eklendi; ilk yazılışında arena önce silinen metin düğümünün yuvasını verdi, eleman boş yapıldı). Tekrarlanan bir silme işareti (yürüyüşte silinen düğümün yuvası) hiçbir testle ayırt edilemediği için kaldırıldı: aynı işi traversal sonrası temizlik yapıyor |

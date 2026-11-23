@@ -10,6 +10,7 @@ mod inline;
 mod node;
 mod restyle;
 mod side;
+mod transition;
 
 use std::sync::Arc as StdArc;
 
@@ -47,6 +48,7 @@ pub use crate::inline::{
     InvalidProperty, remove_style_property, set_style_property, style_property,
 };
 pub use crate::restyle::Restyler;
+pub use crate::transition::Transitions;
 pub use erk_invalidation::Invalidation;
 
 use crate::node::{ErkNode, NoPainters, RecalcStyle};
@@ -125,13 +127,26 @@ impl StyleEngine {
     /// `:focus-within` matching what the user is doing. Everything is styled
     /// from nothing: the oracle a [`Restyler`]'s frames must agree with.
     pub fn style_with(&self, doc: &Document, interaction: &Interaction) -> Styles {
+        self.style_at(doc, interaction, &Transitions::default())
+    }
+
+    /// Like [`StyleEngine::style_with`], with `transitions` running at
+    /// their time (M5.12): the oracle for a [`Restyler`]'s frame, given
+    /// [`Restyler::transitions`]. They are left as they were.
+    pub fn style_at(
+        &self,
+        doc: &Document,
+        interaction: &Interaction,
+        transitions: &Transitions,
+    ) -> Styles {
+        let transitions = transitions.clone();
         let sheets: Vec<_> = author_styles(doc)
             .iter()
             .map(|css| self.sheet(css))
             .collect();
         let mut stylist = self.stylist(&sheets);
         let slots = fresh_slots(doc, &self.url, &self.guard, &states(doc, interaction));
-        let backdrops = self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new());
+        let backdrops = self.traverse(&mut stylist, doc, &slots, &SnapshotMap::new(), &transitions);
         let computed: Vec<_> = slots.iter().map(primary).collect();
         Styles {
             backdrops,
@@ -139,6 +154,7 @@ impl StyleEngine {
             styled: computed.iter().flatten().count(),
             damage: Vec::new(),
             moved: Vec::new(),
+            animating: false,
             computed,
         }
     }
@@ -166,12 +182,15 @@ impl StyleEngine {
     /// Style what `slots` say needs it, and return the `::backdrop` style
     /// of each modal dialog: Stylo computes it when asked (a lazy
     /// pseudo-element), from the dialog's style, every frame.
+    /// `transitions` run at their time; Stylo starts, turns and cancels
+    /// them as styles change.
     fn traverse(
         &self,
         stylist: &mut Stylist,
         doc: &Document,
         slots: &[Slot],
         snapshots: &SnapshotMap,
+        transitions: &Transitions,
     ) -> Vec<(NodeId, Arc<ComputedValues>)> {
         let tree = StyledTree::new(doc, &self.guard, slots);
         tree.link();
@@ -194,8 +213,8 @@ impl StyleEngine {
             options: GLOBAL_STYLE_DATA.options.clone(),
             guards,
             visited_styles_enabled: false,
-            animations: Default::default(),
-            current_time_for_animations: 0.0,
+            animations: transitions.set.clone(),
+            current_time_for_animations: transitions.now,
             snapshot_map: snapshots,
             registered_speculative_painters: &NoPainters,
         };
@@ -345,6 +364,8 @@ pub struct Styles {
     damage: Vec<(NodeId, Invalidation)>,
     /// The elements that moved to another parent since the last frame.
     moved: Vec<NodeId>,
+    /// Whether a transition is still running (M5.12).
+    animating: bool,
 }
 
 /// Which parts of an [`Interaction`] some selector of the document's
@@ -411,6 +432,13 @@ impl Styles {
     /// may not show in their style. Empty when styling from nothing.
     pub fn moved(&self) -> &[NodeId] {
         &self.moved
+    }
+
+    /// Whether a transition is still running or waiting for its delay: the
+    /// styles change with the clock alone, and a frame is due at the next
+    /// tick (M5.12). False when styling from nothing.
+    pub fn animating(&self) -> bool {
+        self.animating
     }
 }
 
