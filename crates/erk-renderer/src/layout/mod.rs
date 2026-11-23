@@ -586,8 +586,52 @@ fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
     }
 }
 
+/// An arena slot's box in the layout tree, or nothing (M5.13). Most slots
+/// make no box: text and white space, elements inside `display: none`,
+/// the room kept for the arena to grow. B16 found a full node for each of
+/// them, 2064 bytes, half the heap on a page of 10 000 cards; a slot
+/// without a box now holds a pointer. Reading it gives an empty box's
+/// fields; writing to it makes one.
 #[derive(Default)]
-struct LayoutNode {
+struct LayoutNode(Option<Box<BoxData>>);
+
+thread_local! {
+    /// The fields of a box no one has written: what an empty slot reads.
+    /// One a thread, made once and kept for the thread's life: Taffy's
+    /// `calc()` lengths are pointers, so a box is not shared between
+    /// threads, and layout runs on the frame thread.
+    static EMPTY: &'static BoxData = Box::leak(Box::default());
+}
+
+impl LayoutNode {
+    fn new(data: BoxData) -> Self {
+        Self(Some(Box::new(data)))
+    }
+
+    /// The box, if anything was written to this slot.
+    fn written(&mut self) -> Option<&mut BoxData> {
+        self.0.as_deref_mut()
+    }
+}
+
+impl std::ops::Deref for LayoutNode {
+    type Target = BoxData;
+
+    fn deref(&self) -> &BoxData {
+        self.0
+            .as_deref()
+            .unwrap_or_else(|| EMPTY.with(|empty| *empty))
+    }
+}
+
+impl std::ops::DerefMut for LayoutNode {
+    fn deref_mut(&mut self) -> &mut BoxData {
+        self.0.get_or_insert_with(Box::default)
+    }
+}
+
+#[derive(Default)]
+struct BoxData {
     /// Whether this arena slot generates a box in the layout tree.
     in_tree: bool,
     /// For a paragraph, its atomic inlines.
@@ -725,7 +769,9 @@ impl LayoutState {
     fn grow(&mut self, slots: usize) {
         let (old, delta) = (self.slots, slots - self.slots);
         let shift = |index: usize| if index >= old { index + delta } else { index };
-        for node in &mut self.nodes {
+        // Only the slots written to: the others hold nothing to shift, and
+        // writing to them would make each a box.
+        for node in self.nodes.iter_mut().filter_map(LayoutNode::written) {
             for child in &mut node.children {
                 *child = taffy::NodeId::from(shift(usize::from(*child)));
             }
@@ -1212,15 +1258,15 @@ impl<'a> Builder<'a> {
                         run.tokens.push(InlineToken::Anchor(child.index() as usize));
                     } else {
                         self.close(&mut run, &mut children, parent, &parent_style, container);
-                        let placeholder = self.push(LayoutNode {
+                        let placeholder = self.push(LayoutNode::new(BoxData {
                             in_tree: true,
                             style: Style {
                                 display: Display::Block,
                                 ..Style::DEFAULT
                             },
                             key: Some(BoxKey::Placeholder(child.to_bits())),
-                            ..LayoutNode::default()
-                        });
+                            ..BoxData::default()
+                        }));
                         self.write(child).static_position =
                             Some(StaticPosition::Placeholder(placeholder));
                         children.push(taffy::NodeId::from(placeholder));
@@ -1318,7 +1364,7 @@ impl<'a> Builder<'a> {
             container
         };
         let atoms = self.add_atoms(atoms, container);
-        let anonymous = self.push(LayoutNode {
+        let anonymous = self.push(LayoutNode::new(BoxData {
             in_tree: true,
             style: Style {
                 display: Display::Block,
@@ -1331,8 +1377,8 @@ impl<'a> Builder<'a> {
             )),
             paragraph: Some(paragraph),
             anonymous_parent: Some(parent.index() as usize),
-            ..LayoutNode::default()
-        });
+            ..BoxData::default()
+        }));
         self.set_children(anonymous, atoms);
         children.push(taffy::NodeId::from(anonymous));
     }

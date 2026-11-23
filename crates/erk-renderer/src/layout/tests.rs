@@ -1246,3 +1246,115 @@ fn a_drop_down_select_leaves_chromes_room_and_counts_grouped_options_indented() 
     let high = label(selects[4]);
     assert_eq!(high.location.y, 1.0 + (38.0 - high.size.height) / 2.0);
 }
+
+/// Lay out `html` from nothing, and keep the tree it leaves.
+fn tree_of(html: &str) -> (Document, super::LayoutState) {
+    let doc = Document::parse_html(html);
+    let styles = StyleEngine::with_font_metrics(
+        WIDTH,
+        HEIGHT,
+        std::sync::Arc::new(crate::text::EmbeddedFontMetrics),
+    )
+    .style(&doc);
+    let (_, state) = layout(
+        &doc,
+        &styles,
+        &crate::resources::Resources::default(),
+        &mut TextEngine::new(),
+        (WIDTH, HEIGHT),
+        None,
+    );
+    (doc, state)
+}
+
+#[test]
+fn only_the_slots_that_make_a_box_hold_one() {
+    // Text and white space, an element inside `display: none` and the room
+    // kept for the arena to grow make no box, and hold none (M5.13: B16
+    // found a full node, 2064 bytes, in each).
+    let (doc, state) = tree_of(
+        "<body>\n<div>a <span>b</span></div>\n<div style='display: none'><p>c</p></div>\n<p>d</p></body>",
+    );
+    let boxed = |at: usize| state.nodes[at].0.is_some();
+    let mut stack = vec![(doc.root(), false)];
+    let mut texts = 0;
+    while let Some((id, hidden)) = stack.pop() {
+        let element = doc.node(id).and_then(|node| node.as_element());
+        let hidden = hidden
+            || element.is_some_and(|element| {
+                element
+                    .attr(&local_name!("style"))
+                    .is_some_and(|style| style.contains("none"))
+            });
+        if element.is_none() && id != doc.root() {
+            texts += 1;
+            assert!(!boxed(id.index() as usize), "text {id:?} holds a box");
+        }
+        if hidden {
+            assert!(!boxed(id.index() as usize), "{id:?} inside display: none");
+        }
+        stack.extend(doc.children(id).map(|child| (child, hidden)));
+    }
+    assert!(texts >= 5, "the page has text and white space");
+    let arena = doc.capacity_hint();
+    assert!(state.slots > arena, "room to grow");
+    assert!((arena..state.slots).all(|at| !boxed(at)));
+    // Each box made is in the tree: nothing is written where none is.
+    for (at, node) in state.nodes.iter().enumerate() {
+        assert!(
+            node.0.is_none() || node.in_tree,
+            "slot {at} holds a box out of the tree"
+        );
+    }
+}
+
+#[test]
+fn room_made_for_the_arena_holds_no_box() {
+    // The arena outgrew the room kept: the anonymous boxes move up, and
+    // the slots between stay empty; the boxes keep naming their children.
+    let (_, mut state) =
+        tree_of("<body><div>a<img style='display: inline-block'><div>b</div>c</div></body>");
+    let boxes =
+        |state: &super::LayoutState| state.nodes.iter().filter(|node| node.0.is_some()).count();
+    let before = boxes(&state);
+    let anonymous: Vec<usize> = (state.slots..state.nodes.len())
+        .filter(|at| state.nodes[*at].0.is_some())
+        .collect();
+    assert!(anonymous.len() >= 2, "the anonymous boxes around the block");
+    let old = state.slots;
+    // The block that holds the anonymous boxes, and its children.
+    let holder = (0..old)
+        .find(|at| {
+            state.nodes[*at]
+                .children
+                .iter()
+                .any(|child| usize::from(*child) >= old)
+        })
+        .expect("a block holds them");
+    let children: Vec<usize> = state.nodes[holder]
+        .children
+        .iter()
+        .map(|child| usize::from(*child))
+        .collect();
+    state.grow(old + 100);
+    // It names them where they moved to.
+    let moved: Vec<usize> = children
+        .iter()
+        .map(|at| if *at >= old { at + 100 } else { *at })
+        .collect();
+    let now: Vec<usize> = state.nodes[holder]
+        .children
+        .iter()
+        .map(|child| usize::from(*child))
+        .collect();
+    assert_eq!(now, moved);
+    assert_eq!(state.slots, old + 100);
+    assert!((old..old + 100).all(|at| state.nodes[at].0.is_none()));
+    assert_eq!(boxes(&state), before);
+    for at in anonymous {
+        let moved = &state.nodes[at + 100];
+        assert!(moved.in_tree);
+        // Its atomic inline, an element, kept its slot.
+        assert!(moved.children.iter().all(|child| usize::from(*child) < old));
+    }
+}
