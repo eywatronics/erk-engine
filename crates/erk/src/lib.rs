@@ -75,10 +75,10 @@ use std::time::{Duration, Instant};
 
 use erk_renderer::{ClipboardRequest, Engine, Painted, Prepared, RasterThread, Stage};
 
-pub use context::{BatchError, Context, Mutation, Ref};
+pub use context::{AccessNode, BatchError, Context, Mutation, Ref};
 pub use erk_renderer::{
-    BoxModel, CaretRect, Frame, FrameStats, KeyInput, KeyState, NodeKind, PointerButton,
-    PointerInput, PointerKind, ResourceKind, ResourceRequest,
+    AccessRole, BoxModel, CaretRect, Frame, FrameStats, KeyInput, KeyState, NodeKind,
+    PointerButton, PointerInput, PointerKind, ResourceKind, ResourceRequest,
 };
 pub use events::{Event, EventKind, Key, Modifiers, Phase, Subscription};
 pub use handle::{AppHandle, Responder};
@@ -280,6 +280,9 @@ pub struct App {
     /// The last frame painted.
     timings: Option<FrameTimings>,
     frames: u64,
+    /// How many frames were prepared: a window's screen reader is told
+    /// again only after one.
+    pub(crate) prepared: u64,
     /// Not `Send`, not `Sync`: the UI thread's alone.
     _ui_thread: PhantomData<*const ()>,
 }
@@ -347,6 +350,7 @@ impl App {
             painting: None,
             timings: None,
             frames: 0,
+            prepared: 0,
             _ui_thread: PhantomData,
         }
     }
@@ -431,6 +435,19 @@ impl App {
         for event in events {
             self.deliver(event);
         }
+    }
+
+    /// Move the focus to `node` without a pointer, as a screen reader does
+    /// when it asks (DOM's `focus()`): a focusable element takes it and
+    /// shows it (`:focus-visible`); any other node leaves it where it is.
+    /// The blur and focus events reach their subscriptions before this
+    /// returns.
+    pub fn focus(&mut self, node: Node) -> Result<(), Status> {
+        let node = self.cx.inward(node);
+        for event in self.cx.engine.focus(node)? {
+            self.deliver(event);
+        }
+        Ok(())
     }
 
     /// Dispatch `event`, then what follows it, each the same way: a click
@@ -549,6 +566,7 @@ impl App {
             }
             let answered = self.cx.collect();
             let last = round == ROUNDS || !answered;
+            self.prepared += u64::from(prepared.is_some());
             match prepared {
                 Some(prepared) if !last => self.skip(prepared),
                 Some(prepared) => return Some((prepared, timings)),

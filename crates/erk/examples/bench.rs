@@ -1,4 +1,4 @@
-//! M5's measurements (p2-incremental §4, B1–B11) against the full
+//! M5's measurements (p2-incremental §4, B1–B17) against the full
 //! recompute every frame does today: the baseline M5's incremental steps
 //! are measured against, and the numbers its acceptance is set from.
 //!
@@ -17,11 +17,12 @@
 //! An example, not engine code: it reads the clock, which the core never
 //! does.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use erk::{
-    App, Config, FrameStats, FrameTimings, Input, Key, KeyInput, KeyState, Modifiers, Mutation,
-    Node, Ref,
+    AccessNode, App, Config, FrameStats, FrameTimings, Input, Key, KeyInput, KeyState, Modifiers,
+    Mutation, Node, Ref,
 };
 
 const WIDTH: u32 = 800;
@@ -66,6 +67,8 @@ struct Result {
     times: Vec<Duration>,
     stages: Vec<FrameTimings>,
     stats: FrameStats,
+    /// What each frame spent after its tick, inside its time: B8's tree.
+    after: Vec<Duration>,
 }
 
 /// Time `runs` frames, each after `change` with the run's number.
@@ -74,7 +77,22 @@ fn measure(
     runs: usize,
     name: &'static str,
     what: &'static str,
+    change: impl FnMut(&mut App, usize),
+) -> Result {
+    let mut result = measure_then(app, runs, name, what, change, |_| {});
+    result.after.clear();
+    result
+}
+
+/// Time `runs` frames, each after `change` with the run's number and with
+/// `then` after its tick, as part of its time.
+fn measure_then(
+    app: &mut App,
+    runs: usize,
+    name: &'static str,
+    what: &'static str,
     mut change: impl FnMut(&mut App, usize),
+    mut then: impl FnMut(&mut App),
 ) -> Result {
     // Each turn half a second after the last on the host's clock: what
     // moves by itself (a caret's blink) moves once a turn.
@@ -83,14 +101,19 @@ fn measure(
     for run in 0..3 {
         change(app, run);
         app.tick(at(run));
+        then(app);
     }
     let mut times = Vec::with_capacity(runs);
     let mut stages = Vec::with_capacity(runs);
+    let mut after = Vec::with_capacity(runs);
     for run in 0..runs {
         change(app, run + 3);
         let start = Instant::now();
         app.tick(at(run + 3));
+        let ticked = Instant::now();
+        then(app);
         times.push(start.elapsed());
+        after.push(ticked.elapsed());
         stages.extend(app.last_frame_timings());
     }
     Result {
@@ -99,6 +122,7 @@ fn measure(
         times,
         stages,
         stats: app.frame_stats(),
+        after,
     }
 }
 
@@ -115,6 +139,44 @@ fn b1() -> Result {
             app.set_text(span, &format!("satır {run}")).unwrap();
         },
     )
+}
+
+fn b8() -> Result {
+    // B1 with a screen reader listening: after each frame the tree is
+    // taken and compared with the one sent last, node by node, as Erk's
+    // window does after a turn that prepared a frame (`access.rs`); B1 is
+    // the same without it.
+    let mut app = app(&rows(2000));
+    let span = node(&app, "#s1000");
+    let mut sent: HashMap<Node, AccessNode> = HashMap::new();
+    let mut changed = 0;
+    let result = measure_then(
+        &mut app,
+        30,
+        "B8",
+        "B1, the accessibility tree taken and compared each frame",
+        |app, run| {
+            app.set_text(span, &format!("satır {run}")).unwrap();
+        },
+        |app| {
+            // Kept node by node, as the window keeps it; nothing leaves
+            // this page's tree.
+            changed = 0;
+            for node in app.access_tree() {
+                if sent.get(&node.node) != Some(&node) {
+                    changed += 1;
+                    sent.insert(node.node, node);
+                }
+            }
+        },
+    );
+    // The tree holds every element and text, and the frame changed one.
+    assert!(
+        sent.len() > 10_000 && changed > 0,
+        "{} {changed}",
+        sent.len()
+    );
+    result
 }
 
 fn b2() -> Result {
@@ -441,7 +503,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 
 fn main() {
     let wanted: Vec<String> = std::env::args().skip(1).collect();
-    let all: [Scenario; 14] = [
+    let all: [Scenario; 15] = [
         ("B1", b1),
         ("B2", b2),
         ("B2b", b2b),
@@ -450,6 +512,7 @@ fn main() {
         ("B5", b5),
         ("B6", b6),
         ("B7", b7),
+        ("B8", b8),
         ("B10", b10),
         ("B12", b12),
         ("B13", b13),
@@ -457,6 +520,7 @@ fn main() {
         ("B15", b15),
         ("B17", b17),
     ];
+    let mut afters = Vec::new();
     println!("{WIDTH}x{HEIGHT}, incremental style, full layout and display list, CPU raster");
     println!(
         "| | Scenario | median | p95 | p99 | max | style | layout | display list | raster | styled | laid out | shaped | items | listed | recorded | changes |"
@@ -496,7 +560,20 @@ fn main() {
             s.recorded,
             s.changes
         );
+        if !result.after.is_empty() {
+            result.after.sort();
+            afters.push((
+                result.name,
+                ms(percentile(&result.after, 0.5)),
+                ms(percentile(&result.after, 0.95)),
+            ));
+        }
     }
-    println!("B8 (accessibility) comes with M5.11, B9 (incremental against full) once there is an");
-    println!("incremental path, B11 (tile sizes) with M5.6.");
+    for (name, median, p95) in afters {
+        println!(
+            "{name}: the accessibility tree took {median:.2} ms (median), {p95:.2} ms (p95) of each frame"
+        );
+    }
+    println!("B9 (incremental against full) once there is an incremental path, B11 (tile sizes)");
+    println!("with M5.6.");
 }

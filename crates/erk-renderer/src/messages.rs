@@ -477,6 +477,9 @@ pub struct AccessNode {
     /// A heading's level, 1 to 6.
     pub level: Option<u8>,
     pub disabled: bool,
+    /// Whether it can take the focus: a screen reader may move it there
+    /// ([`crate::Engine::focus`]).
+    pub focusable: bool,
     pub focused: bool,
     /// Its border box in CSS pixels on the viewport, as the last frame
     /// laid it out; `None` for text and for what has no box.

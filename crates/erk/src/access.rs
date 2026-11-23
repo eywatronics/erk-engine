@@ -4,67 +4,126 @@
 //! turns it into AccessKit's, which `accesskit_winit` hands to the
 //! platform: UI Automation on Windows, AT-SPI on Linux, NSAccessibility on
 //! macOS. Nothing is built until a screen reader asks: the first request
-//! gets the whole tree, every turn after it only the nodes that changed and
-//! the focus. A change of scale sends the whole tree again, every box being
-//! in device pixels.
+//! gets the whole tree, every turn that prepared a frame after it only the
+//! nodes that changed and the focus. A change of scale sends the whole
+//! tree again, every box being in device pixels.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use accesskit::{Action, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use erk_renderer::{AccessNode, AccessRole};
+
+use crate::{Input, Modifiers, PointerButton, PointerInput, PointerKind};
 
 /// What was last sent to the platform, to send only what changed.
 #[derive(Default)]
 pub(crate) struct AccessSync {
     sent: HashMap<u64, AccessNode>,
     scale: f64,
+    /// The app's count of prepared frames when the tree was taken.
+    frame: u64,
 }
 
 impl AccessSync {
-    /// The whole of `tree` at `scale` (device pixels per CSS pixel): what
-    /// a screen reader that has just asked gets.
-    pub(crate) fn full(&mut self, tree: &[AccessNode], scale: f64) -> TreeUpdate {
+    /// The whole of `tree`, taken after the app's `frame`th prepared
+    /// frame, at `scale` (device pixels per CSS pixel): what a screen
+    /// reader that has just asked gets.
+    pub(crate) fn full(&mut self, tree: Vec<AccessNode>, scale: f64, frame: u64) -> TreeUpdate {
         self.sent.clear();
         self.scale = scale;
-        let update = self.update(tree, |_| true);
+        self.frame = frame;
+        let root = tree.first().map(|root| TreeInfo::new(NodeId(root.node)));
         TreeUpdate {
-            tree: tree.first().map(|root| TreeInfo::new(NodeId(root.node))),
-            ..update
+            tree: root,
+            ..self.update(tree)
         }
+    }
+
+    /// Whether the tree may differ from what was sent: a frame was
+    /// prepared since, the tree being the last frame's, or the scale
+    /// changed. A turn that did neither needs no tree at all.
+    pub(crate) fn behind(&self, frame: u64, scale: f64) -> bool {
+        frame != self.frame || scale != self.scale
     }
 
     /// The nodes of `tree` that differ from what was sent, with the
     /// focus: `None` if none does. The focus is a node's own state, so it
     /// cannot move without a node changing. A new scale sends everything.
-    pub(crate) fn changes(&mut self, tree: &[AccessNode], scale: f64) -> Option<TreeUpdate> {
+    pub(crate) fn changes(
+        &mut self,
+        tree: Vec<AccessNode>,
+        scale: f64,
+        frame: u64,
+    ) -> Option<TreeUpdate> {
         if scale != self.scale {
-            return Some(self.full(tree, scale));
+            return Some(self.full(tree, scale, frame));
         }
-        let sent = std::mem::take(&mut self.sent);
-        let update = self.update(tree, |node| sent.get(&node.node) != Some(node));
+        self.frame = frame;
+        let update = self.update(tree);
         (!update.nodes.is_empty()).then_some(update)
     }
 
-    /// The update holding the nodes of `tree` that `send` picks, all of
-    /// them noted as sent, with the focus.
-    fn update(&mut self, tree: &[AccessNode], send: impl Fn(&AccessNode) -> bool) -> TreeUpdate {
-        let nodes = tree
-            .iter()
-            .filter(|node| send(node))
-            .map(|node| (NodeId(node.node), accesskit_node(node, self.scale)))
-            .collect();
-        self.sent = tree.iter().map(|node| (node.node, node.clone())).collect();
+    /// The update holding the nodes of `tree` that differ from what was
+    /// sent, with the focus; what was sent becomes `tree`, kept node by
+    /// node rather than copied: on a large page most of it is the same.
+    fn update(&mut self, tree: Vec<AccessNode>) -> TreeUpdate {
+        let focus = focus(&tree);
+        let ids: Vec<u64> = tree.iter().map(|node| node.node).collect();
+        let mut nodes = Vec::new();
+        for node in tree {
+            if self.sent.get(&node.node) == Some(&node) {
+                continue;
+            }
+            nodes.push((NodeId(node.node), accesskit_node(&node, self.scale)));
+            self.sent.insert(node.node, node);
+        }
+        // Nodes that left the tree: their parents changed and say so.
+        if self.sent.len() > ids.len() {
+            let kept: HashSet<u64> = ids.into_iter().collect();
+            self.sent.retain(|id, _| kept.contains(id));
+        }
         TreeUpdate {
             nodes,
             tree: None,
             tree_id: TreeId::ROOT,
-            focus: focus(tree),
+            focus,
+        }
+    }
+
+    /// Do what a screen reader asked of engine node `node` in `app`: a
+    /// click is a press and release in the middle of its box as last sent,
+    /// as the pointer's would be; a focus request (its cursor moving,
+    /// Narrator's default) moves the focus there. Other actions are not
+    /// offered.
+    pub(crate) fn act(&self, app: &mut crate::App, action: Action, node: u64) {
+        match action {
+            Action::Click => {
+                let Some(at) = self.middle(node) else {
+                    return;
+                };
+                for kind in [PointerKind::Down, PointerKind::Up] {
+                    app.input(Input::Pointer(PointerInput {
+                        kind,
+                        x: at.0,
+                        y: at.1,
+                        button: PointerButton::Primary,
+                        modifiers: Modifiers::default(),
+                    }));
+                }
+            }
+            Action::Focus => {
+                // A node gone since the tree was sent: nothing to focus.
+                if let Some(node) = app.cx.outward(node) {
+                    let _ = app.focus(node);
+                }
+            }
+            _ => {}
         }
     }
 
     /// The middle of `node`'s box in CSS pixels, as last sent: where a
     /// screen reader's click lands.
-    pub(crate) fn middle(&self, node: u64) -> Option<(f32, f32)> {
+    fn middle(&self, node: u64) -> Option<(f32, f32)> {
         let (x, y, width, height) = self.sent.get(&node)?.bounds?;
         Some((x + width / 2.0, y + height / 2.0))
     }
@@ -82,9 +141,16 @@ fn focus(tree: &[AccessNode]) -> NodeId {
 
 /// `node` as AccessKit's, its box in device pixels at `scale`.
 fn accesskit_node(node: &AccessNode, scale: f64) -> Node {
-    let mut out = Node::new(role(node.role));
+    let role = role(node.role);
+    let mut out = Node::new(role);
     if let Some(name) = &node.name {
-        out.set_label(name.as_str());
+        // AccessKit reads a label's name from its value (static text,
+        // `label_comes_from_value`); a label's own label is never read.
+        if role == Role::Label {
+            out.set_value(name.as_str());
+        } else {
+            out.set_label(name.as_str());
+        }
     }
     if let Some(value) = &node.value {
         out.set_value(value.as_str());
@@ -120,6 +186,12 @@ fn accesskit_node(node: &AccessNode, scale: f64) -> Node {
     }
     if clickable(node.role) && !node.disabled {
         out.add_action(Action::Click);
+    }
+    // What can take the focus says so: a screen reader moves the focus
+    // with its cursor (Narrator's default), and one that cannot leaves the
+    // focus on the document, which it then reads again and again.
+    if node.focusable {
+        out.add_action(Action::Focus);
     }
     out.set_children(
         node.children
@@ -192,6 +264,7 @@ mod tests {
             expanded: None,
             level: None,
             disabled: false,
+            focusable: false,
             focused: false,
             bounds: None,
             children: children.to_vec(),
@@ -217,7 +290,7 @@ mod tests {
     #[test]
     fn a_screen_reader_that_asks_gets_the_whole_tree_and_its_root() {
         let mut sync = AccessSync::default();
-        let update = sync.full(&page(), 1.0);
+        let update = sync.full(page(), 1.0, 0);
         assert_eq!(ids(&update), [1, 2, 3]);
         assert_eq!(update.tree.map(|tree| tree.root), Some(NodeId(1)));
         // Nothing focused: the root has the focus.
@@ -230,34 +303,151 @@ mod tests {
     }
 
     #[test]
+    fn text_reaches_a_screen_reader_as_the_value_its_name_is_read_from() {
+        // AccessKit names a label from its value, not its label (Windows'
+        // and the other adapters' `label_comes_from_value`): text kept in
+        // the label is never read.
+        for role in [AccessRole::Text, AccessRole::Label] {
+            let mut text = node(1, role, &[]);
+            text.name = Some("Kayıt formu".to_owned());
+            let out = accesskit_node(&text, 1.0);
+            assert_eq!(out.role(), Role::Label, "{role:?}");
+            assert_eq!(out.value(), Some("Kayıt formu"), "{role:?}");
+        }
+        // A control keeps its name in the label and its value apart.
+        let mut field = node(2, AccessRole::TextInput, &[]);
+        field.name = Some("Adınız".to_owned());
+        field.value = Some("Ece".to_owned());
+        let out = accesskit_node(&field, 1.0);
+        assert_eq!((out.label(), out.value()), (Some("Adınız"), Some("Ece")));
+    }
+
+    #[test]
     fn after_the_first_tree_only_what_changed_is_sent() {
         let mut sync = AccessSync::default();
-        sync.full(&page(), 1.0);
+        sync.full(page(), 1.0, 0);
         // The same tree: nothing.
-        assert_eq!(sync.changes(&page(), 1.0), None);
+        assert_eq!(sync.changes(page(), 1.0, 1), None);
         // A checkbox checked: that node alone.
         let mut tree = page();
         tree[2].checked = Some(true);
-        let update = sync.changes(&tree, 1.0).expect("a change");
+        let update = sync.changes(tree.clone(), 1.0, 2).expect("a change");
         assert_eq!(ids(&update), [3]);
         assert_eq!(update.nodes[0].1.toggled(), Some(Toggled::True));
         assert!(update.tree.is_none());
         // A node added: it and the parent that now holds it.
         tree[0].children.push(4);
         tree.push(node(4, AccessRole::Text, &[]));
-        assert_eq!(ids(&sync.changes(&tree, 1.0).unwrap()), [1, 4]);
+        assert_eq!(ids(&sync.changes(tree.clone(), 1.0, 3).unwrap()), [1, 4]);
         // The focus moving: the node that took it, the focus with it.
         tree[1].focused = true;
-        let update = sync.changes(&tree, 1.0).expect("the focus moved");
+        let update = sync.changes(tree.clone(), 1.0, 4).expect("the focus moved");
         assert_eq!(ids(&update), [2]);
         assert_eq!(update.focus, NodeId(2));
+        // A node removed: its parent, and it is no longer known.
+        tree[0].children = vec![3, 4];
+        tree.remove(1);
+        assert_eq!(ids(&sync.changes(tree.clone(), 1.0, 5).unwrap()), [1]);
+        assert_eq!(sync.middle(2), None);
+        // Put back as it was: sent again, though it was sent before.
+        assert_eq!(ids(&sync.changes(page(), 1.0, 6).unwrap()), [1, 2, 3]);
+    }
+
+    #[test]
+    fn the_tree_is_taken_again_only_after_a_frame_or_a_new_scale() {
+        let mut sync = AccessSync::default();
+        sync.full(page(), 1.0, 7);
+        assert!(!sync.behind(7, 1.0));
+        assert!(sync.behind(8, 1.0));
+        assert!(sync.behind(7, 2.0));
+        sync.changes(page(), 1.0, 8);
+        assert!(!sync.behind(8, 1.0));
+        sync.changes(page(), 2.0, 9);
+        assert!(!sync.behind(9, 2.0));
+    }
+
+    #[test]
+    fn an_app_counts_the_frames_it_prepares_and_only_those() {
+        let mut app = crate::App::headless(crate::Config {
+            system_fonts: false,
+            ..crate::Config::default()
+        })
+        .unwrap();
+        app.load_html("<p id=p>bir</p>");
+        app.tick(0);
+        let first = app.prepared;
+        assert!(first > 0);
+        // Nothing changed: no frame, and a window's screen reader is not
+        // told again.
+        app.tick(1);
+        assert_eq!(app.prepared, first);
+        let p = app.query(None, "#p").unwrap().unwrap();
+        app.set_text(p, "iki").unwrap();
+        app.tick(2);
+        assert_eq!(app.prepared, first + 1);
+    }
+
+    #[test]
+    fn a_screen_readers_click_and_focus_reach_the_page() {
+        let mut app = crate::App::headless(crate::Config {
+            system_fonts: false,
+            ..crate::Config::default()
+        })
+        .unwrap();
+        app.load_html("<input id=t value=Ece><input type=checkbox id=c><p id=p>metin</p>");
+        app.tick(0);
+        let mut sync = AccessSync::default();
+        sync.full(app.cx.engine.access_tree(), 1.0, app.prepared);
+        let [t, c, p] = ["#t", "#c", "#p"].map(|selector| {
+            let node = app.query(None, selector).unwrap().unwrap();
+            app.cx.inward(node)
+        });
+        let state = |app: &crate::App, id: u64| {
+            let tree = app.cx.engine.access_tree();
+            let node = tree.iter().find(|node| node.node == id).unwrap().clone();
+            (node.focused, node.checked)
+        };
+        // Its cursor moving takes the focus along.
+        sync.act(&mut app, Action::Focus, t);
+        app.tick(1);
+        assert_eq!(state(&app, t), (true, None));
+        // A click checks the box, which takes the focus as a press does.
+        sync.act(&mut app, Action::Click, c);
+        app.tick(2);
+        assert_eq!(state(&app, c), (true, Some(true)));
+        // Text cannot take the focus; an action not offered does nothing.
+        sync.act(&mut app, Action::Focus, p);
+        sync.act(&mut app, Action::Expand, c);
+        app.tick(3);
+        assert_eq!(state(&app, c), (true, Some(true)));
+    }
+
+    #[test]
+    fn what_can_take_the_focus_lets_a_screen_reader_move_it_there() {
+        let mut field = node(1, AccessRole::TextInput, &[]);
+        field.focusable = true;
+        let out = accesskit_node(&field, 1.0);
+        assert!(out.supports_action(Action::Focus));
+        // A field clicks nowhere; a button does, and takes the focus too.
+        assert!(!out.supports_action(Action::Click));
+        let mut button = node(2, AccessRole::Button, &[]);
+        button.focusable = true;
+        let out = accesskit_node(&button, 1.0);
+        assert!(out.supports_action(Action::Focus) && out.supports_action(Action::Click));
+        // Text, and a control that cannot take the focus (disabled), do
+        // not offer it.
+        let text = node(3, AccessRole::Text, &[]);
+        assert!(!accesskit_node(&text, 1.0).supports_action(Action::Focus));
+        let mut disabled = node(4, AccessRole::Button, &[]);
+        disabled.disabled = true;
+        assert!(!accesskit_node(&disabled, 1.0).supports_action(Action::Focus));
     }
 
     #[test]
     fn a_new_scale_sends_every_box_again_in_device_pixels() {
         let mut sync = AccessSync::default();
-        sync.full(&page(), 1.0);
-        let update = sync.changes(&page(), 2.0).expect("a new scale");
+        sync.full(page(), 1.0, 0);
+        let update = sync.changes(page(), 2.0, 0).expect("a new scale");
         assert_eq!(ids(&update), [1, 2, 3]);
         assert!(update.tree.is_some());
         let button = &update.nodes.iter().find(|(id, _)| id.0 == 2).unwrap().1;
@@ -279,7 +469,7 @@ mod tests {
     fn a_screen_reader_can_click_what_takes_a_click_unless_it_is_disabled() {
         let mut tree = page();
         tree[2].disabled = true;
-        let update = AccessSync::default().full(&tree, 1.0);
+        let update = AccessSync::default().full(tree, 1.0, 0);
         let actions = |id: u64| {
             let node = &update
                 .nodes

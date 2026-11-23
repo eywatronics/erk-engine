@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::mpsc::Receiver;
 
-use erk_renderer::{BoxModel, Engine, FrameStats, NodeKind};
+use erk_renderer::{AccessRole, BoxModel, Engine, FrameStats, NodeKind};
 
 use crate::Status;
 use crate::events::{self, Event, EventKind, Listener, Listeners, Phase, Subscription};
@@ -62,6 +62,42 @@ impl std::fmt::Display for BatchError {
 }
 
 impl std::error::Error for BatchError {}
+
+/// A node of the accessibility tree (M5.11, p1-contract §6.1): what a
+/// screen reader is told about an element or a run of text, from its
+/// meaning in HTML, its `role` and `aria-*` attributes and the last frame.
+/// A host that drives its own window hands it to the platform; Erk's own
+/// window does that itself.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AccessNode {
+    /// The node; the document's for the tree's root.
+    pub node: Node,
+    pub role: AccessRole,
+    /// What it is called: its label, its alternative text, the text it
+    /// holds, as the role takes it.
+    pub name: Option<String>,
+    /// A text field's value, a select's selected option.
+    pub value: Option<String>,
+    /// A checkbox's or radio button's checkedness.
+    pub checked: Option<bool>,
+    /// An option's selectedness.
+    pub selected: Option<bool>,
+    /// Whether a `details` (and its summary) or a select's list is open.
+    pub expanded: Option<bool>,
+    /// A heading's level, 1 to 6.
+    pub level: Option<u8>,
+    pub disabled: bool,
+    /// Whether it can take the focus: a screen reader that asks moves it
+    /// there with [`App::focus`](crate::App::focus).
+    pub focusable: bool,
+    pub focused: bool,
+    /// Its border box in CSS pixels on the viewport, as the last frame
+    /// laid it out (x, y, width, height); `None` for text and for what has
+    /// no box.
+    pub bounds: Option<(f32, f32, f32, f32)>,
+    /// Its children, in order, each a node of the same tree.
+    pub children: Vec<Node>,
+}
 
 pub struct Context {
     pub(crate) engine: Engine,
@@ -478,6 +514,33 @@ impl Context {
         self.engine.inspect_at(x, y).and_then(|id| self.outward(id))
     }
 
+    /// The accessibility tree of the last frame, the document's node first
+    /// and each node before what it holds. Only the document's node before
+    /// the first frame. Built anew on each call: a host that keeps it
+    /// compares it with what it sent.
+    pub fn access_tree(&self) -> Vec<AccessNode> {
+        let node = |id: u64| self.outward(id).expect("every node of the tree has an id");
+        self.engine
+            .access_tree()
+            .into_iter()
+            .map(|from| AccessNode {
+                node: node(from.node),
+                role: from.role,
+                name: from.name,
+                value: from.value,
+                checked: from.checked,
+                selected: from.selected,
+                expanded: from.expanded,
+                level: from.level,
+                disabled: from.disabled,
+                focusable: from.focusable,
+                focused: from.focused,
+                bounds: from.bounds,
+                children: from.children.into_iter().map(node).collect(),
+            })
+            .collect()
+    }
+
     /// What the last frame did, counted: elements styled, boxes laid out,
     /// paragraphs shaped, display list items (M5.0).
     pub fn frame_stats(&self) -> FrameStats {
@@ -726,7 +789,7 @@ impl Context {
         self.listeners.retain_nodes(|node| engine.contains(node));
     }
 
-    fn inward(&self, node: Node) -> u64 {
+    pub(crate) fn inward(&self, node: Node) -> u64 {
         ids::inward(node, self.key)
     }
 

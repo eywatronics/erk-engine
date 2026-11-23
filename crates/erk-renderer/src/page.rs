@@ -1217,6 +1217,18 @@ impl Page {
         }
     }
 
+    /// Move the focus to `node` without a pointer, as a screen reader or
+    /// the host does (DOM's `focus()`): a focusable element takes it and
+    /// shows it (`:focus-visible`), as the keyboard's would; any other
+    /// node leaves it where it is.
+    pub(crate) fn focus_node(&mut self, node: u64) -> Result<Vec<Event>, Status> {
+        let node = self.node(node)?;
+        if !self.focusable(node) {
+            return Ok(Vec::new());
+        }
+        Ok(self.move_focus(Some(node), Modifiers::default(), true))
+    }
+
     /// Move the focus to `focus`: a blur event for the element that had it,
     /// then a focus event for the one that has it. It shows the focus
     /// (`:focus-visible`) when the keyboard moved it, or when it takes

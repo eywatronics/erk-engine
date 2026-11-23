@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 18
+#define ERK_ABI_VERSION 19
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -211,6 +211,122 @@
 #define ERK_NODE_COMMENT 4
 
 #define ERK_NODE_OTHER 5
+
+/*
+ A node's role in the accessibility tree (p1-contract §6.1).
+ */
+#define ERK_ROLE_DOCUMENT 1
+
+/*
+ An element with no meaning of its own: a `div`, a `span`.
+ */
+#define ERK_ROLE_GENERIC 2
+
+/*
+ A run of text.
+ */
+#define ERK_ROLE_TEXT 3
+
+#define ERK_ROLE_PARAGRAPH 4
+
+#define ERK_ROLE_HEADING 5
+
+#define ERK_ROLE_LINK 6
+
+#define ERK_ROLE_BUTTON 7
+
+#define ERK_ROLE_CHECK_BOX 8
+
+#define ERK_ROLE_RADIO_BUTTON 9
+
+#define ERK_ROLE_TEXT_INPUT 10
+
+#define ERK_ROLE_MULTILINE_TEXT_INPUT 11
+
+#define ERK_ROLE_PASSWORD_INPUT 12
+
+/*
+ A drop-down select.
+ */
+#define ERK_ROLE_COMBO_BOX 13
+
+/*
+ A select's option.
+ */
+#define ERK_ROLE_OPTION 14
+
+#define ERK_ROLE_IMAGE 15
+
+#define ERK_ROLE_LIST 16
+
+#define ERK_ROLE_LIST_ITEM 17
+
+#define ERK_ROLE_DIALOG 18
+
+/*
+ A `fieldset`, or a `details`.
+ */
+#define ERK_ROLE_GROUP 19
+
+#define ERK_ROLE_FORM 20
+
+#define ERK_ROLE_LABEL 21
+
+#define ERK_ROLE_NAVIGATION 22
+
+#define ERK_ROLE_MAIN 23
+
+#define ERK_ROLE_ARTICLE 24
+
+#define ERK_ROLE_TABLE 25
+
+#define ERK_ROLE_TABLE_ROW 26
+
+#define ERK_ROLE_TABLE_CELL 27
+
+/*
+ What an `ErkAccessNode` says besides its role: `ERK_ACCESS_*` flags.
+ */
+#define ERK_ACCESS_HAS_NAME 1
+
+#define ERK_ACCESS_HAS_VALUE 2
+
+/*
+ A checkbox or radio button; `ERK_ACCESS_CHECKED` says whether it is.
+ */
+#define ERK_ACCESS_CHECKABLE 4
+
+#define ERK_ACCESS_CHECKED 8
+
+/*
+ An option; `ERK_ACCESS_SELECTED` says whether it is.
+ */
+#define ERK_ACCESS_SELECTABLE 16
+
+#define ERK_ACCESS_SELECTED 32
+
+/*
+ A `details`, its summary or a select; `ERK_ACCESS_EXPANDED` says
+ whether it is open.
+ */
+#define ERK_ACCESS_EXPANDABLE 64
+
+#define ERK_ACCESS_EXPANDED 128
+
+#define ERK_ACCESS_DISABLED 256
+
+#define ERK_ACCESS_FOCUSED 512
+
+/*
+ `x`, `y`, `width` and `height` hold its box.
+ */
+#define ERK_ACCESS_HAS_BOUNDS 1024
+
+/*
+ It can take the focus: a screen reader that asks to move the focus
+ there is answered with `erk_node_focus`.
+ */
+#define ERK_ACCESS_FOCUSABLE 2048
 
 /*
  An app: one document and its window. Opaque.
@@ -490,6 +606,51 @@ typedef struct {
   uint64_t raster_ns;
 } ErkFrameTimings;
 
+/*
+ A node of the accessibility tree `erk_access_tree` took. `name` and
+ `value` are lent: valid until the next `erk_access_tree` or the app's
+ end, and empty unless `ERK_ACCESS_HAS_NAME` or `ERK_ACCESS_HAS_VALUE`
+ says there is one.
+ */
+typedef struct {
+  uint32_t struct_size;
+  /*
+   `ERK_ROLE_*`.
+   */
+  uint32_t role;
+  /*
+   The node; the document's for the tree's root.
+   */
+  ErkNodeId node;
+  /*
+   `ERK_ACCESS_*` flags.
+   */
+  uint32_t flags;
+  /*
+   A heading's level, 1 to 6; 0 for anything else.
+   */
+  uint32_t level;
+  /*
+   What it is called: its label, its alternative text, its text.
+   */
+  ErkStr name;
+  /*
+   A text field's value, a select's selected option.
+   */
+  ErkStr value;
+  /*
+   Its border box in CSS pixels relative to the viewport.
+   */
+  float x;
+  float y;
+  float width;
+  float height;
+  /*
+   How many children it has; `erk_access_child` gives each.
+   */
+  size_t child_count;
+} ErkAccessNode;
+
 #define ERK_OK 0
 
 /*
@@ -638,6 +799,16 @@ ErkStatus erk_app_input(ErkApp *app, const ErkInput *input);
  A headless app's last frame; `ERK_ERR_NOT_FOUND` before the first.
  */
 ErkStatus erk_app_frame(ErkApp *app, ErkFrame *out);
+
+/*
+ Move the focus to `node` without a pointer, as a screen reader does
+ when it asks (DOM's `focus()`): a focusable element
+ (`ERK_ACCESS_FOCUSABLE`) takes it and shows it (`:focus-visible`); any
+ other node leaves it where it is. The blur and focus events reach their
+ subscriptions before this returns, so it is not called from inside one,
+ as `erk_app_input` is not.
+ */
+ErkStatus erk_node_focus(ErkApp *app, ErkNodeId node_id);
 
 /*
  Show `html` instead of the document; the old ids go stale.
@@ -960,6 +1131,26 @@ ErkStatus erk_highlight(ErkApp *app, ErkNodeId node_id);
  before the first.
  */
 ErkStatus erk_last_frame_timings(ErkApp *app, ErkFrameTimings *out);
+
+/*
+ Take the last frame's accessibility tree (p1-contract §6.1), for a host
+ that hands it to the platform itself: `*count` nodes, the document's at
+ position 0 and each node before what it holds. It is kept until the
+ next call, which the strings `erk_access_node` lends last until.
+ */
+ErkStatus erk_access_tree(ErkApp *app, size_t *count);
+
+/*
+ The node at `index` of the tree `erk_access_tree` took;
+ `ERK_ERR_NOT_FOUND` past the last.
+ */
+ErkStatus erk_access_node(ErkApp *app, size_t index, ErkAccessNode *out);
+
+/*
+ The position, in the tree `erk_access_tree` took, of child `at` of the
+ node at `index`; `ERK_ERR_NOT_FOUND` past either's last.
+ */
+ErkStatus erk_access_child(ErkApp *app, size_t index, size_t at, size_t *out);
 
 #ifdef __cplusplus
 }  // extern "C"

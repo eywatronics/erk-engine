@@ -27,7 +27,7 @@
 //! library is for its own tests.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::mem::{offset_of, size_of};
@@ -38,16 +38,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use erk::{
-    App, AppHandle, Config, Context, Event, EventKind, Input, Key, KeyInput, KeyState, LogLevel,
-    Modifiers, Mutation, Node, NodeKind, Phase, PointerButton, PointerInput, PointerKind, Ref,
-    ResourceKind, Responder, Status, Subscription,
+    AccessNode, AccessRole, App, AppHandle, Config, Context, Event, EventKind, Input, Key,
+    KeyInput, KeyState, LogLevel, Modifiers, Mutation, Node, NodeKind, Phase, PointerButton,
+    PointerInput, PointerKind, Ref, ResourceKind, Responder, Status, Subscription,
 };
 
 // ---- Versions, status codes --------------------------------------------------
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 18;
+pub const ERK_ABI_VERSION: u32 = 19;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -109,6 +109,37 @@ pub struct ErkApp {
     /// The app; only ever touched on the UI thread. Set once made, before
     /// the host sees the pointer.
     app: UnsafeCell<Option<App>>,
+    /// The accessibility tree `erk_access_tree` took last, whose strings
+    /// the host borrows until the next one; only touched on the UI thread.
+    access: RefCell<AccessSnapshot>,
+}
+
+/// An accessibility tree as the host reads it, node by node.
+#[derive(Default)]
+struct AccessSnapshot {
+    nodes: Vec<AccessNode>,
+    /// Each node's children, as positions in `nodes`.
+    children: Vec<Vec<usize>>,
+}
+
+impl AccessSnapshot {
+    fn new(nodes: Vec<AccessNode>) -> Self {
+        let at: HashMap<Node, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(at, node)| (node.node, at))
+            .collect();
+        let children = nodes
+            .iter()
+            .map(|node| {
+                node.children
+                    .iter()
+                    .filter_map(|child| at.get(child).copied())
+                    .collect()
+            })
+            .collect();
+        Self { nodes, children }
+    }
 }
 
 /// A subscription, to cancel with `erk_off`; never 0.
@@ -418,6 +449,153 @@ pub struct ErkFrameTimings {
     pub layout_ns: u64,
     pub display_list_ns: u64,
     pub raster_ns: u64,
+}
+
+// ---- Accessibility -----------------------------------------------------------
+
+/// A node's role in the accessibility tree (p1-contract §6.1).
+pub const ERK_ROLE_DOCUMENT: u32 = 1;
+/// An element with no meaning of its own: a `div`, a `span`.
+pub const ERK_ROLE_GENERIC: u32 = 2;
+/// A run of text.
+pub const ERK_ROLE_TEXT: u32 = 3;
+pub const ERK_ROLE_PARAGRAPH: u32 = 4;
+pub const ERK_ROLE_HEADING: u32 = 5;
+pub const ERK_ROLE_LINK: u32 = 6;
+pub const ERK_ROLE_BUTTON: u32 = 7;
+pub const ERK_ROLE_CHECK_BOX: u32 = 8;
+pub const ERK_ROLE_RADIO_BUTTON: u32 = 9;
+pub const ERK_ROLE_TEXT_INPUT: u32 = 10;
+pub const ERK_ROLE_MULTILINE_TEXT_INPUT: u32 = 11;
+pub const ERK_ROLE_PASSWORD_INPUT: u32 = 12;
+/// A drop-down select.
+pub const ERK_ROLE_COMBO_BOX: u32 = 13;
+/// A select's option.
+pub const ERK_ROLE_OPTION: u32 = 14;
+pub const ERK_ROLE_IMAGE: u32 = 15;
+pub const ERK_ROLE_LIST: u32 = 16;
+pub const ERK_ROLE_LIST_ITEM: u32 = 17;
+pub const ERK_ROLE_DIALOG: u32 = 18;
+/// A `fieldset`, or a `details`.
+pub const ERK_ROLE_GROUP: u32 = 19;
+pub const ERK_ROLE_FORM: u32 = 20;
+pub const ERK_ROLE_LABEL: u32 = 21;
+pub const ERK_ROLE_NAVIGATION: u32 = 22;
+pub const ERK_ROLE_MAIN: u32 = 23;
+pub const ERK_ROLE_ARTICLE: u32 = 24;
+pub const ERK_ROLE_TABLE: u32 = 25;
+pub const ERK_ROLE_TABLE_ROW: u32 = 26;
+pub const ERK_ROLE_TABLE_CELL: u32 = 27;
+
+/// What an `ErkAccessNode` says besides its role: `ERK_ACCESS_*` flags.
+pub const ERK_ACCESS_HAS_NAME: u32 = 1;
+pub const ERK_ACCESS_HAS_VALUE: u32 = 2;
+/// A checkbox or radio button; `ERK_ACCESS_CHECKED` says whether it is.
+pub const ERK_ACCESS_CHECKABLE: u32 = 4;
+pub const ERK_ACCESS_CHECKED: u32 = 8;
+/// An option; `ERK_ACCESS_SELECTED` says whether it is.
+pub const ERK_ACCESS_SELECTABLE: u32 = 16;
+pub const ERK_ACCESS_SELECTED: u32 = 32;
+/// A `details`, its summary or a select; `ERK_ACCESS_EXPANDED` says
+/// whether it is open.
+pub const ERK_ACCESS_EXPANDABLE: u32 = 64;
+pub const ERK_ACCESS_EXPANDED: u32 = 128;
+pub const ERK_ACCESS_DISABLED: u32 = 256;
+pub const ERK_ACCESS_FOCUSED: u32 = 512;
+/// `x`, `y`, `width` and `height` hold its box.
+pub const ERK_ACCESS_HAS_BOUNDS: u32 = 1024;
+/// It can take the focus: a screen reader that asks to move the focus
+/// there is answered with `erk_node_focus`.
+pub const ERK_ACCESS_FOCUSABLE: u32 = 2048;
+
+/// A node of the accessibility tree `erk_access_tree` took. `name` and
+/// `value` are lent: valid until the next `erk_access_tree` or the app's
+/// end, and empty unless `ERK_ACCESS_HAS_NAME` or `ERK_ACCESS_HAS_VALUE`
+/// says there is one.
+#[repr(C)]
+pub struct ErkAccessNode {
+    pub struct_size: u32,
+    /// `ERK_ROLE_*`.
+    pub role: u32,
+    /// The node; the document's for the tree's root.
+    pub node: ErkNodeId,
+    /// `ERK_ACCESS_*` flags.
+    pub flags: u32,
+    /// A heading's level, 1 to 6; 0 for anything else.
+    pub level: u32,
+    /// What it is called: its label, its alternative text, its text.
+    pub name: ErkStr,
+    /// A text field's value, a select's selected option.
+    pub value: ErkStr,
+    /// Its border box in CSS pixels relative to the viewport.
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// How many children it has; `erk_access_child` gives each.
+    pub child_count: usize,
+}
+
+fn role(role: AccessRole) -> u32 {
+    match role {
+        AccessRole::Document => ERK_ROLE_DOCUMENT,
+        AccessRole::Generic => ERK_ROLE_GENERIC,
+        AccessRole::Text => ERK_ROLE_TEXT,
+        AccessRole::Paragraph => ERK_ROLE_PARAGRAPH,
+        AccessRole::Heading => ERK_ROLE_HEADING,
+        AccessRole::Link => ERK_ROLE_LINK,
+        AccessRole::Button => ERK_ROLE_BUTTON,
+        AccessRole::CheckBox => ERK_ROLE_CHECK_BOX,
+        AccessRole::RadioButton => ERK_ROLE_RADIO_BUTTON,
+        AccessRole::TextInput => ERK_ROLE_TEXT_INPUT,
+        AccessRole::MultilineTextInput => ERK_ROLE_MULTILINE_TEXT_INPUT,
+        AccessRole::PasswordInput => ERK_ROLE_PASSWORD_INPUT,
+        AccessRole::ComboBox => ERK_ROLE_COMBO_BOX,
+        AccessRole::Option => ERK_ROLE_OPTION,
+        AccessRole::Image => ERK_ROLE_IMAGE,
+        AccessRole::List => ERK_ROLE_LIST,
+        AccessRole::ListItem => ERK_ROLE_LIST_ITEM,
+        AccessRole::Dialog => ERK_ROLE_DIALOG,
+        AccessRole::Group => ERK_ROLE_GROUP,
+        AccessRole::Form => ERK_ROLE_FORM,
+        AccessRole::Label => ERK_ROLE_LABEL,
+        AccessRole::Navigation => ERK_ROLE_NAVIGATION,
+        AccessRole::Main => ERK_ROLE_MAIN,
+        AccessRole::Article => ERK_ROLE_ARTICLE,
+        AccessRole::Table => ERK_ROLE_TABLE,
+        AccessRole::TableRow => ERK_ROLE_TABLE_ROW,
+        AccessRole::TableCell => ERK_ROLE_TABLE_CELL,
+    }
+}
+
+/// `node` as the ABI's, its strings lent from it.
+fn access_node(node: &AccessNode, child_count: usize) -> ErkAccessNode {
+    let flag = |on: bool, flag: u32| if on { flag } else { 0 };
+    let state =
+        |state: Option<bool>, has: u32, is: u32| state.map_or(0, |state| has | flag(state, is));
+    let (x, y, width, height) = node.bounds.unwrap_or_default();
+    ErkAccessNode {
+        struct_size: 0,
+        role: role(node.role),
+        node: node.node.to_raw(),
+        flags: flag(node.name.is_some(), ERK_ACCESS_HAS_NAME)
+            | flag(node.value.is_some(), ERK_ACCESS_HAS_VALUE)
+            | state(node.checked, ERK_ACCESS_CHECKABLE, ERK_ACCESS_CHECKED)
+            | state(node.selected, ERK_ACCESS_SELECTABLE, ERK_ACCESS_SELECTED)
+            | state(node.expanded, ERK_ACCESS_EXPANDABLE, ERK_ACCESS_EXPANDED)
+            | flag(node.disabled, ERK_ACCESS_DISABLED)
+            | flag(node.focusable, ERK_ACCESS_FOCUSABLE)
+            | flag(node.focused, ERK_ACCESS_FOCUSED)
+            | flag(node.bounds.is_some(), ERK_ACCESS_HAS_BOUNDS),
+        level: node.level.map_or(0, u32::from),
+        name: lent(node.name.as_deref().unwrap_or_default()),
+        value: lent(node.value.as_deref().unwrap_or_default()),
+        x,
+        y,
+        width,
+        height,
+        child_count,
+    }
 }
 
 // ---- The guard ---------------------------------------------------------------
@@ -766,6 +944,7 @@ pub extern "C" fn erk_app_create(config: *const ErkConfig, out: *mut *mut ErkApp
             pending: Arc::default(),
             // Set below, once the callbacks know the app's address.
             app: UnsafeCell::new(None),
+            access: RefCell::default(),
         }));
         // SAFETY: just made; not shared yet.
         let shared = unsafe { &*erk_app };
@@ -1129,6 +1308,20 @@ pub extern "C" fn erk_app_frame(app: *mut ErkApp, out: *mut ErkFrame) -> ErkStat
                 len: frame.rgba().len(),
             },
         )
+    })
+}
+
+/// Move the focus to `node` without a pointer, as a screen reader does
+/// when it asks (DOM's `focus()`): a focusable element
+/// (`ERK_ACCESS_FOCUSABLE`) takes it and shows it (`:focus-visible`); any
+/// other node leaves it where it is. The blur and focus events reach their
+/// subscriptions before this returns, so it is not called from inside one,
+/// as `erk_app_input` is not.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_node_focus(app: *mut ErkApp, node_id: ErkNodeId) -> ErkStatus {
+    guard(app, Calls::Loop, |app| {
+        app.app().focus(node(node_id)?).abi()
     })
 }
 
@@ -2151,6 +2344,57 @@ pub extern "C" fn erk_last_frame_timings(app: *mut ErkApp, out: *mut ErkFrameTim
                 raster_ns: timings.raster_ns,
             },
         )
+    })
+}
+
+/// Take the last frame's accessibility tree (p1-contract §6.1), for a host
+/// that hands it to the platform itself: `*count` nodes, the document's at
+/// position 0 and each node before what it holds. It is kept until the
+/// next call, which the strings `erk_access_node` lends last until.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_access_tree(app: *mut ErkApp, count: *mut usize) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        if count.is_null() {
+            return Err(ERK_ERR_INVALID_ARGUMENT);
+        }
+        let snapshot = AccessSnapshot::new(app.cx().access_tree());
+        put(count, snapshot.nodes.len())?;
+        *app.access.borrow_mut() = snapshot;
+        Ok(())
+    })
+}
+
+/// The node at `index` of the tree `erk_access_tree` took;
+/// `ERK_ERR_NOT_FOUND` past the last.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_access_node(
+    app: *mut ErkApp,
+    index: usize,
+    out: *mut ErkAccessNode,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let snapshot = app.access.borrow();
+        let found = snapshot.nodes.get(index).ok_or(ERK_ERR_NOT_FOUND)?;
+        put_sized(out, access_node(found, snapshot.children[index].len()))
+    })
+}
+
+/// The position, in the tree `erk_access_tree` took, of child `at` of the
+/// node at `index`; `ERK_ERR_NOT_FOUND` past either's last.
+#[allow(unsafe_code)] // SAFETY: an exported symbol; the guard checks the app pointer.
+#[unsafe(no_mangle)]
+pub extern "C" fn erk_access_child(
+    app: *mut ErkApp,
+    index: usize,
+    at: usize,
+    out: *mut usize,
+) -> ErkStatus {
+    guard(app, Calls::Document, |app| {
+        let snapshot = app.access.borrow();
+        let children = snapshot.children.get(index).ok_or(ERK_ERR_NOT_FOUND)?;
+        put(out, *children.get(at).ok_or(ERK_ERR_NOT_FOUND)?)
     })
 }
 

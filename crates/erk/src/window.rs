@@ -269,44 +269,31 @@ impl Host<'_> {
         match event {
             accesskit_winit::WindowEvent::InitialTreeRequested => {
                 let mut sync = crate::access::AccessSync::default();
-                let update = sync.full(&self.app.cx.engine.access_tree(), scale);
+                let update = sync.full(self.app.cx.engine.access_tree(), scale, self.app.prepared);
                 state.access.update_if_active(|| update);
                 self.access = Some(sync);
             }
             accesskit_winit::WindowEvent::ActionRequested(request) => {
-                if request.action != accesskit::Action::Click {
-                    return;
-                }
-                // A click is a press and release in the middle of the
-                // node's box, as the pointer's would be.
-                let Some(at) = self
-                    .access
-                    .as_ref()
-                    .and_then(|sync| sync.middle(request.target_node.0))
-                else {
-                    return;
-                };
-                for kind in [PointerKind::Down, PointerKind::Up] {
-                    self.app.input(Input::Pointer(PointerInput {
-                        kind,
-                        x: at.0,
-                        y: at.1,
-                        button: PointerButton::Primary,
-                        modifiers: Modifiers::default(),
-                    }));
+                if let Some(sync) = &self.access {
+                    sync.act(self.app, request.action, request.target_node.0);
                 }
             }
             accesskit_winit::WindowEvent::AccessibilityDeactivated => self.access = None,
         }
     }
 
-    /// While a screen reader listens, tell it what changed this turn.
+    /// While a screen reader listens, tell it what changed this turn. The
+    /// tree comes from the last frame: a turn that prepared none, and
+    /// kept the scale, has nothing new to tell.
     fn tell_screen_reader(&mut self) {
-        let scale = self.scale();
+        let (scale, frame) = (self.scale(), self.app.prepared);
         let (Some(sync), Some(state)) = (&mut self.access, &mut self.window) else {
             return;
         };
-        if let Some(update) = sync.changes(&self.app.cx.engine.access_tree(), scale) {
+        if !sync.behind(frame, scale) {
+            return;
+        }
+        if let Some(update) = sync.changes(self.app.cx.engine.access_tree(), scale, frame) {
             state.access.update_if_active(|| update);
         }
     }
