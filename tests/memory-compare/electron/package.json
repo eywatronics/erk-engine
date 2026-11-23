@@ -1,0 +1,10 @@
+{
+  "name": "erk-memory-compare",
+  "private": true,
+  "description": "Electron for Erk's memory comparison (tests/memory-compare/compare.ps1). Not part of Erk.",
+  "main": "main.js",
+  "license": "MIT OR Apache-2.0",
+  "devDependencies": {
+    "electron": "45.4.1"
+  }
+}
