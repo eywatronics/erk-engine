@@ -1961,8 +1961,14 @@ impl TextEngine {
         let has_atoms = paragraph.atoms().next().is_some();
         // Styled ranges too: Parley 0.11 gives a line the height of its last
         // run when that run is smaller than the rest, so a line ending in
-        // small text came out short. The strut corrects it below.
-        if has_atoms || !paragraph.raised.is_empty() || !paragraph.spans.is_empty() {
+        // small text came out short. The strut corrects it below. Text in a
+        // language too: its fallback fonts can differ from the base's, as a
+        // styled range's do. (Until M5.13 such text was always a styled
+        // range, the base style having no language; WPT's
+        // hyphens-shaping-001 sets a test with a range against a
+        // reference without one.)
+        let in_language = paragraph.base.language.is_some() && !paragraph.text.is_empty();
+        if has_atoms || !paragraph.raised.is_empty() || !paragraph.spans.is_empty() || in_language {
             // Parley ids are positions in `items`; atoms are measured in order.
             let mut sizes = atoms.iter();
             let atom_of: Vec<Option<(usize, AtomBox, VerticalAlign, ParentBox)>> = paragraph
