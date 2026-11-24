@@ -1673,8 +1673,17 @@ struct ShapedEntry {
     paragraph: Paragraph,
     /// The width of each inline box, which Parley takes when it shapes.
     boxes: Vec<f32>,
-    /// As built, before any line breaking.
-    layout: Layout<TextBrush>,
+    /// The sizes of the atomic inlines it was last laid out with.
+    atoms: Vec<AtomBox>,
+    /// As last laid out (M5.13): the layout the paragraph's box holds and
+    /// draws, not a copy. The same lines again cost nothing; other lines
+    /// break a copy of it again, which Parley allows.
+    shaped: Arc<InlineLayout>,
+    /// A justified paragraph's layout before any line breaking. Parley
+    /// widens a justified line's spaces and narrows them back before
+    /// breaking again, and the sum is not exact: the lines would drift from
+    /// a fresh layout's. Other alignments only move whole lines.
+    unbroken: Option<Layout<TextBrush>>,
     used: bool,
 }
 
@@ -1798,14 +1807,92 @@ impl TextEngine {
     /// holding atoms or raised text are therefore sized here, from the
     /// strut, the text's own extent and each box's extent above and below
     /// the baseline (CSS 2 §10.8); the lines after them move down.
+    ///
+    /// A paragraph whose box at `key` was laid out alike before gets the
+    /// layout it had back: one layout, held by the box and the cache alike.
     pub(crate) fn shape(
         &mut self,
         paragraph: &Paragraph,
         key: Option<ShapeKey>,
         max_advance: Option<f32>,
         atoms: &[AtomBox],
+    ) -> Arc<InlineLayout> {
+        let mut atom_widths = atoms.iter();
+        let boxes: Vec<f32> = paragraph
+            .items
+            .iter()
+            .map(|item| match item.kind {
+                InlineItemKind::Spacer { width, .. } => width,
+                InlineItemKind::Anchor(_) => 0.0,
+                InlineItemKind::Atom(..) => atom_widths.next().map_or(0.0, |atom| atom.width),
+            })
+            .collect();
+        let kept = key
+            .and_then(|key| self.cache.entries.get_mut(&key))
+            .filter(|entry| entry.paragraph == *paragraph && entry.boxes == boxes);
+        let hit = kept.is_some();
+        let mut layout = match kept {
+            Some(entry) => {
+                entry.used = true;
+                if entry.shaped.max_advance == max_advance && entry.atoms == atoms {
+                    return entry.shaped.clone();
+                }
+                entry
+                    .unbroken
+                    .clone()
+                    .unwrap_or_else(|| entry.shaped.layout.clone())
+            }
+            None => {
+                self.cache.shaped += 1;
+                self.build(paragraph, &boxes)
+            }
+        };
+        let unbroken = (key.is_some() && !hit && paragraph.align == Alignment::Justify)
+            .then(|| layout.clone());
+        break_lines(&mut layout, paragraph, max_advance);
+        let shaped = Arc::new(Self::lines(layout, paragraph, max_advance, atoms));
+        if let Some(key) = key {
+            match self.cache.entries.get_mut(&key) {
+                Some(entry) if hit => {
+                    entry.atoms = atoms.to_vec();
+                    entry.shaped = shaped.clone();
+                }
+                _ => {
+                    self.cache.entries.insert(
+                        key,
+                        ShapedEntry {
+                            paragraph: paragraph.clone(),
+                            boxes,
+                            atoms: atoms.to_vec(),
+                            shaped: shaped.clone(),
+                            unbroken,
+                            used: true,
+                        },
+                    );
+                }
+            }
+        }
+        shaped
+    }
+
+    /// Whether the cache keeps `shaped` itself, not a copy.
+    #[cfg(test)]
+    pub(crate) fn keeps(&self, shaped: &Arc<InlineLayout>) -> bool {
+        self.cache
+            .entries
+            .values()
+            .any(|entry| Arc::ptr_eq(&entry.shaped, shaped))
+    }
+
+    /// `layout`, already broken into lines at `max_advance`, aligned and
+    /// with its line boxes sized for `paragraph`'s atomic inlines and raised
+    /// text.
+    fn lines(
+        mut layout: Layout<TextBrush>,
+        paragraph: &Paragraph,
+        max_advance: Option<f32>,
+        atoms: &[AtomBox],
     ) -> InlineLayout {
-        let mut layout = self.shape_text(paragraph, key, max_advance, atoms);
         layout.align(paragraph.align, AlignmentOptions::default());
         let mut shifts = vec![0.0; layout.len()];
         let mut height = layout.height();
@@ -1949,54 +2036,6 @@ impl TextEngine {
         self
     }
 
-    /// `paragraph` shaped (its box at `key`, when it has one that lasts) and
-    /// broken into lines at `max_advance`.
-    fn shape_text(
-        &mut self,
-        paragraph: &Paragraph,
-        key: Option<ShapeKey>,
-        max_advance: Option<f32>,
-        atoms: &[AtomBox],
-    ) -> Layout<TextBrush> {
-        let mut atom_widths = atoms.iter();
-        let boxes: Vec<f32> = paragraph
-            .items
-            .iter()
-            .map(|item| match item.kind {
-                InlineItemKind::Spacer { width, .. } => width,
-                InlineItemKind::Anchor(_) => 0.0,
-                InlineItemKind::Atom(..) => atom_widths.next().map_or(0.0, |atom| atom.width),
-            })
-            .collect();
-        let kept = key
-            .and_then(|key| self.cache.entries.get_mut(&key))
-            .filter(|entry| entry.paragraph == *paragraph && entry.boxes == boxes);
-        let mut layout = match kept {
-            Some(entry) => {
-                entry.used = true;
-                entry.layout.clone()
-            }
-            None => {
-                self.cache.shaped += 1;
-                let built = self.build(paragraph, &boxes);
-                if let Some(key) = key {
-                    self.cache.entries.insert(
-                        key,
-                        ShapedEntry {
-                            paragraph: paragraph.clone(),
-                            boxes,
-                            layout: built.clone(),
-                            used: true,
-                        },
-                    );
-                }
-                built
-            }
-        };
-        break_lines(&mut layout, paragraph, max_advance);
-        layout
-    }
-
     /// Shape `paragraph` with its inline boxes `boxes` wide: Parley's
     /// layout before line breaking.
     fn build(&mut self, paragraph: &Paragraph, boxes: &[f32]) -> Layout<TextBrush> {
@@ -2121,14 +2160,13 @@ mod tests {
     #[test]
     fn turkish_letters_all_have_glyphs() {
         let mut engine = TextEngine::new();
-        let layout = engine
-            .shape(
-                &paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0),
-                None,
-                None,
-                &[],
-            )
-            .layout;
+        let shaped = engine.shape(
+            &paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0),
+            None,
+            None,
+            &[],
+        );
+        let layout = &shaped.layout;
         let mut glyphs = 0;
         for line in layout.lines() {
             for item in line.items() {
@@ -2150,8 +2188,9 @@ mod tests {
             "Erk sayfayı önce çizer, sonra izole eder, en son betik çalıştırır.",
             400.0,
         );
-        let one_line = engine.shape(&text, None, None, &[]).layout;
-        let wrapped = engine.shape(&text, None, Some(120.0), &[]).layout;
+        let one_line = engine.shape(&text, None, None, &[]);
+        let wrapped = engine.shape(&text, None, Some(120.0), &[]);
+        let (one_line, wrapped) = (&one_line.layout, &wrapped.layout);
 
         assert_eq!(one_line.len(), 1);
         assert!(
@@ -2162,6 +2201,65 @@ mod tests {
         assert!(wrapped.width() <= 120.0);
         let line = one_line.height();
         assert!((wrapped.height() - line * wrapped.len() as f32).abs() < 0.5);
+    }
+
+    /// Where each glyph of `shaped` is drawn: its line, x, y with the line's
+    /// shift, and the glyph.
+    fn glyphs(shaped: &InlineLayout) -> Vec<(usize, f32, f32, u32)> {
+        let mut glyphs = Vec::new();
+        for (index, line) in shaped.layout.lines().enumerate() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    for glyph in run.positioned_glyphs() {
+                        glyphs.push((index, glyph.x, glyph.y + shaped.shifts[index], glyph.id));
+                    }
+                }
+            }
+        }
+        glyphs
+    }
+
+    #[test]
+    fn a_paragraph_laid_out_alike_again_is_the_layout_it_had() {
+        let mut engine = TextEngine::new();
+        let text = paragraph("Erk sayfayı önce çizer, sonra izole eder.", 400.0);
+        let first = engine.shape(&text, Some((1, 1)), Some(120.0), &[]);
+        let again = engine.shape(&text, Some((1, 1)), Some(120.0), &[]);
+        // The box and the cache hold one layout, not a copy each.
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(engine.keeps(&first));
+    }
+
+    #[test]
+    fn a_kept_paragraph_broken_at_another_width_is_broken_as_if_new() {
+        let mut text = paragraph(
+            "Erk sayfayı önce çizer, sonra izole eder, en son betik çalıştırır.",
+            400.0,
+        );
+        // Justified lines widen their spaces, which breaking them again
+        // undoes, not exactly: the oracle sees a hundred-thousandth of a
+        // pixel.
+        for align in [
+            Alignment::Start,
+            Alignment::Center,
+            Alignment::End,
+            Alignment::Justify,
+        ] {
+            text.align = align;
+            let mut engine = TextEngine::new();
+            for width in [Some(120.0), Some(200.0), None, Some(90.0), Some(200.0)] {
+                let kept = engine.shape(&text, Some((1, 1)), width, &[]);
+                let fresh = TextEngine::new().shape(&text, None, width, &[]);
+                assert!(kept.layout.len() > 1 || width.is_none(), "{width:?}");
+                assert_eq!(glyphs(&kept), glyphs(&fresh), "{align:?} {width:?}");
+                assert_eq!(
+                    (kept.width(), kept.height),
+                    (fresh.width(), fresh.height),
+                    "{align:?} {width:?}"
+                );
+            }
+            assert_eq!(engine.shaped(), 1, "{align:?}: the text is shaped once");
+        }
     }
 
     #[test]
