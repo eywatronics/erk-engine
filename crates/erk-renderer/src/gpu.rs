@@ -7,16 +7,20 @@
 //! be made, the thread falls back to vello_cpu and sends frames as before.
 //! Golden images, the Chrome reference and the WPT runner stay on vello_cpu.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use vello_cpu::kurbo::{Affine, BezPath, Rect};
+use vello_cpu::peniko::color::PremulRgba8;
 use vello_cpu::peniko::{Fill, Gradient as GradientPaint};
 use vello_cpu::{ImageSource, Pixmap};
-use vello_hybrid::{RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TextureBindings};
+use vello_hybrid::{
+    AtlasConfig, MemorySettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer,
+    Resources, Scene, TextureBindings,
+};
 use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 
 use crate::color::Rgba;
@@ -53,9 +57,82 @@ pub(crate) struct Gpu {
     resources: Resources,
     /// The images uploaded to the atlas, by the number the display list
     /// names them by.
-    images: HashMap<ImageId, vello_common::paint::ImageId>,
+    images: HashMap<ImageId, Uploaded>,
+    /// The images the atlas had no room for: not drawn, and not tried
+    /// again while the display list paints them.
+    unplaceable: HashSet<ImageId>,
+    /// The largest image an atlas holds, `(width, height)`: a larger one is
+    /// uploaded smaller ([`fitted`]).
+    atlas_limit: (u32, u32),
     /// What the adapter is, for the host's information.
     pub(crate) adapter: String,
+}
+
+/// An image in the atlas, and how much smaller than the image it is
+/// there, `(x, y)`: 1 unless it was larger than an atlas.
+#[derive(Clone, Copy)]
+struct Uploaded {
+    id: vello_common::paint::ImageId,
+    shrunk: (f64, f64),
+}
+
+/// The image atlas: vello_hybrid's defaults (4096 × 4096 layers, made
+/// when the first image arrives, up to eight), named here because the
+/// layer's size bounds an image.
+fn atlas_config() -> AtlasConfig {
+    AtlasConfig::default()
+}
+
+/// `image` made small enough for an atlas of `limit`, averaging the pixels
+/// each new one covers; `None` when it fits. vello_hybrid panics on an
+/// image larger than its atlas (M5.13: a 5000-pixel-wide image stopped the
+/// GPU path), where vello_cpu paints it.
+fn fitted(image: &Pixmap, limit: (u32, u32)) -> Option<Pixmap> {
+    let (width, height) = (u32::from(image.width()), u32::from(image.height()));
+    if width <= limit.0 && height <= limit.1 {
+        return None;
+    }
+    let factor = (f64::from(width) / f64::from(limit.0.max(1)))
+        .max(f64::from(height) / f64::from(limit.1.max(1)));
+    let to_width = ((f64::from(width) / factor) as u32).clamp(1, limit.0.max(1));
+    let to_height = ((f64::from(height) / factor) as u32).clamp(1, limit.1.max(1));
+    let source = image.data();
+    let span = |at: u32, to: u32, from: u32| {
+        let start = (u64::from(at) * u64::from(from) / u64::from(to)) as u32;
+        let end = ((u64::from(at) + 1) * u64::from(from) / u64::from(to)) as u32;
+        start..end.max(start + 1).min(from)
+    };
+    let mut pixels = Vec::with_capacity((to_width * to_height) as usize);
+    for y in 0..to_height {
+        let rows = span(y, to_height, height);
+        for x in 0..to_width {
+            let columns = span(x, to_width, width);
+            let mut sum = [0u64; 4];
+            let mut count = 0u64;
+            for row in rows.clone() {
+                for column in columns.clone() {
+                    let pixel = source[(row * width + column) as usize];
+                    sum[0] += u64::from(pixel.r);
+                    sum[1] += u64::from(pixel.g);
+                    sum[2] += u64::from(pixel.b);
+                    sum[3] += u64::from(pixel.a);
+                    count += 1;
+                }
+            }
+            let average = |channel: u64| ((channel + count / 2) / count) as u8;
+            pixels.push(PremulRgba8 {
+                r: average(sum[0]),
+                g: average(sum[1]),
+                b: average(sum[2]),
+                a: average(sum[3]),
+            });
+        }
+    }
+    Some(Pixmap::from_parts(
+        pixels,
+        to_width as u16,
+        to_height as u16,
+    ))
 }
 
 /// The backends a window is drawn with. On Windows DX12 alone: its instance
@@ -159,12 +236,22 @@ impl Gpu {
                 alpha_mode: capabilities.alpha_modes[0],
                 view_formats: Vec::new(),
             };
-            Self::new(&adapter, format, Output::Surface { surface, config })
+            Self::new(
+                &adapter,
+                format,
+                Output::Surface { surface, config },
+                atlas_config(),
+            )
         })
     }
 
     /// The GPU path into a texture, or why there is none.
     pub(crate) fn offscreen(backends: wgpu::Backends) -> Result<Self, String> {
+        Self::offscreen_with(backends, atlas_config())
+    }
+
+    /// [`Gpu::offscreen`] with images in an atlas of `atlas`.
+    fn offscreen_with(backends: wgpu::Backends, atlas: AtlasConfig) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -179,6 +266,7 @@ impl Gpu {
             &adapter,
             wgpu::TextureFormat::Rgba8Unorm,
             Output::Texture(None),
+            atlas,
         )
     }
 
@@ -186,16 +274,30 @@ impl Gpu {
         adapter: &wgpu::Adapter,
         format: wgpu::TextureFormat,
         output: Output,
+        atlas: AtlasConfig,
     ) -> Result<Self, String> {
         let (device, queue) =
             block_on(adapter.request_device(&device_descriptor(&adapter.limits())))
                 .map_err(|error| format!("no device: {error}"))?;
-        let (renderer, resources) = Renderer::new(
+        // vello_hybrid keeps each side of a layer within the device's limit.
+        let largest = device.limits().max_texture_dimension_2d;
+        let atlas_limit = (
+            atlas.atlas_size.0.min(largest),
+            atlas.atlas_size.1.min(largest),
+        );
+        let (renderer, resources) = Renderer::new_with(
             &device,
             &RenderTargetConfig {
                 format,
                 width: 1,
                 height: 1,
+            },
+            RenderSettings {
+                memory_settings: MemorySettings {
+                    image_atlas_config: atlas,
+                    ..MemorySettings::default()
+                },
+                ..RenderSettings::default()
             },
         );
         let info = adapter.get_info();
@@ -207,6 +309,8 @@ impl Gpu {
             renderer,
             resources,
             images: HashMap::new(),
+            unplaceable: HashSet::new(),
+            atlas_limit,
             adapter: format!("{} ({:?})", info.name, info.backend),
         })
     }
@@ -231,6 +335,7 @@ impl Gpu {
                 scene: &mut scene,
                 resources: &mut self.resources,
                 images: &self.images,
+                shrunk: None,
             };
             paint_list(&mut canvas, list, tables, w as u16, h as u16, scale, None);
         }
@@ -312,17 +417,37 @@ impl Gpu {
                 continue;
             };
             used.insert(*key);
-            if !self.images.contains_key(key) {
-                let id = self.renderer.upload_image(
-                    &mut self.resources,
-                    &self.device,
-                    &self.queue,
-                    encoder,
-                    image,
-                );
-                self.images.insert(*key, id);
+            if self.images.contains_key(key) || self.unplaceable.contains(key) {
+                continue;
+            }
+            let smaller = fitted(image, self.atlas_limit);
+            let upload: &Pixmap = smaller.as_ref().unwrap_or(image);
+            // vello_hybrid unwraps the atlas's allocation: with no room
+            // left in it, it panics before it changes anything. The image
+            // is not drawn; the page and the GPU path go on.
+            let (renderer, resources, device, queue) = (
+                &mut self.renderer,
+                &mut self.resources,
+                &self.device,
+                &self.queue,
+            );
+            let uploaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                renderer.upload_image(resources, device, queue, encoder, upload)
+            }));
+            match uploaded {
+                Ok(id) => {
+                    let shrunk = (
+                        f64::from(image.width()) / f64::from(upload.width()),
+                        f64::from(image.height()) / f64::from(upload.height()),
+                    );
+                    self.images.insert(*key, Uploaded { id, shrunk });
+                }
+                Err(_) => {
+                    self.unplaceable.insert(*key);
+                }
             }
         }
+        self.unplaceable.retain(|key| used.contains(key));
         let gone: Vec<ImageId> = self
             .images
             .keys()
@@ -330,9 +455,9 @@ impl Gpu {
             .copied()
             .collect();
         for key in gone {
-            if let Some(id) = self.images.remove(&key) {
+            if let Some(uploaded) = self.images.remove(&key) {
                 self.renderer
-                    .destroy_image(&mut self.resources, encoder, id);
+                    .destroy_image(&mut self.resources, encoder, uploaded.id);
             }
         }
     }
@@ -408,7 +533,11 @@ fn target_texture(
 struct Hybrid<'a> {
     scene: &'a mut Scene,
     resources: &'a mut Resources,
-    images: &'a HashMap<ImageId, vello_common::paint::ImageId>,
+    images: &'a HashMap<ImageId, Uploaded>,
+    /// How much smaller than the image the paint's atlas copy is, while
+    /// the paint is an image: its paint transform, which maps the image's
+    /// own pixels, is scaled by it.
+    shrunk: Option<(f64, f64)>,
 }
 
 impl Canvas for Hybrid<'_> {
@@ -416,21 +545,35 @@ impl Canvas for Hybrid<'_> {
         self.scene.set_transform(transform);
     }
     fn set_color(&mut self, rgba: Rgba) {
+        self.shrunk = None;
         self.scene.set_paint(color(rgba));
     }
     fn set_image(&mut self, key: ImageId, _: &Arc<Pixmap>, repeat: (bool, bool)) {
-        if let Some(id) = self.images.get(&key) {
-            let source = ImageSource::OpaqueId {
-                id: *id,
-                may_have_transparency: true,
-            };
-            self.scene.set_paint(image_paint(source, repeat));
+        match self.images.get(&key) {
+            Some(uploaded) => {
+                let source = ImageSource::OpaqueId {
+                    id: uploaded.id,
+                    may_have_transparency: true,
+                };
+                self.shrunk = Some(uploaded.shrunk);
+                self.scene.set_paint(image_paint(source, repeat));
+            }
+            // Not in the atlas: nothing is drawn, not the paint before.
+            None => {
+                self.shrunk = None;
+                self.scene.set_paint(color([0, 0, 0, 0]));
+            }
         }
     }
     fn set_gradient(&mut self, gradient: GradientPaint) {
+        self.shrunk = None;
         self.scene.set_paint(gradient);
     }
     fn set_paint_transform(&mut self, transform: Affine) {
+        let transform = match self.shrunk {
+            Some((x, y)) => transform * Affine::scale_non_uniform(x, y),
+            None => transform,
+        };
         self.scene.set_paint_transform(transform);
     }
     fn reset_paint_transform(&mut self) {
@@ -595,6 +738,182 @@ mod tests {
         gpu.render(&list, &tables, width, height, crate::device_scale(scale))
             .unwrap();
         (cpu.data_as_u8_slice().to_vec(), gpu.read_back())
+    }
+
+    /// A PNG of `width` × `height`, its left half `left` and the rest
+    /// `right`.
+    fn halves_png(width: u32, height: u32, left: [u8; 4], right: [u8; 4]) -> Vec<u8> {
+        let mut data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut data, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            let pixels: Vec<u8> = (0..width * height)
+                .flat_map(|at| if at % width < width / 2 { left } else { right })
+                .collect();
+            writer.write_image_data(&pixels).unwrap();
+        }
+        data
+    }
+
+    /// `html` with its images (by a word in their URL) through both
+    /// rasterizers, the GPU's images in a 64 × 64 atlas of one layer.
+    fn small_atlas(html: &str, images: &[(&str, Vec<u8>)], size: (u16, u16)) -> Painted {
+        let (width, height) = size;
+        let mut page = Page::parse(html);
+        let mut resources = PageResources::default();
+        let (_, requests) = page.prepare(width, height, 1.0, &mut resources, &mut |_| {});
+        for request in requests {
+            let (_, data) = images
+                .iter()
+                .find(|(word, _)| request.url.contains(word))
+                .expect("an image the test has");
+            resources.complete(&ResourceResponse {
+                id: request.id,
+                mime: "image/png".to_owned(),
+                data: data.clone(),
+            });
+        }
+        let (list, _) = page.prepare(width, height, 1.0, &mut resources, &mut |_| {});
+        let mut tables = Tables::default();
+        tables.apply(resources.table_updates(&list));
+        let cpu = crate::paint::paint(&list, &tables, width, height, 1.0);
+        let atlas = AtlasConfig {
+            initial_atlas_count: 1,
+            max_atlases: 1,
+            atlas_size: (64, 64),
+            auto_grow: false,
+            ..AtlasConfig::default()
+        };
+        let mut gpu = Gpu::offscreen_with(wgpu::Backends::all(), atlas)
+            .expect("a GPU adapter, or WARP or lavapipe");
+        gpu.render(&list, &tables, width, height, 1.0).unwrap();
+        Painted {
+            cpu: cpu.data_as_u8_slice().to_vec(),
+            frame: gpu.read_back(),
+            gpu,
+            list,
+            tables,
+        }
+    }
+
+    /// What [`small_atlas`] painted, and with what.
+    struct Painted {
+        cpu: Vec<u8>,
+        frame: Vec<u8>,
+        gpu: Gpu,
+        list: DisplayList,
+        tables: Tables,
+    }
+
+    /// The pixel at `(x, y)` of a frame `width` wide.
+    fn at(frame: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+        let at = (y * width + x) * 4;
+        frame[at..at + 4].try_into().unwrap()
+    }
+
+    fn near(a: [u8; 4], b: [u8; 4]) -> bool {
+        a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 12)
+    }
+
+    #[test]
+    fn an_image_larger_than_the_atlas_is_drawn_smaller() {
+        // vello_hybrid panicked on it (M5.13). Red, then blue: drawn from a
+        // smaller copy at the image's own scale, the halves stay halves.
+        let (red, blue) = ([220, 38, 38, 255], [37, 99, 235, 255]);
+        let wide = halves_png(200, 20, red, blue);
+        let Painted {
+            cpu, frame: gpu, ..
+        } = small_atlas(
+            "<body style='margin: 0; background: #fff'><img src='wide.png'></body>",
+            &[("wide", wide)],
+            (300, 60),
+        );
+        for (x, colour) in [(20, red), (90, red), (110, blue), (180, blue)] {
+            assert!(near(at(&cpu, 300, x, 10), colour), "the CPU at {x}");
+            assert!(
+                near(at(&gpu, 300, x, 10), colour),
+                "the GPU at {x}: {:?}",
+                at(&gpu, 300, x, 10)
+            );
+        }
+    }
+
+    #[test]
+    fn an_image_the_atlas_has_no_room_for_is_not_drawn() {
+        // The first fills the atlas; the second is not drawn, and neither
+        // is the colour painted before it.
+        let (green, red) = ([22, 163, 74, 255], [220, 38, 38, 255]);
+        let Painted {
+            cpu,
+            frame,
+            mut gpu,
+            list,
+            tables,
+        } = small_atlas(
+            "<body style='margin: 0; background: #fff'>\
+             <div style='height: 10px; background: #2563eb'></div>\
+             <img src='first.png'><img src='second.png'></body>",
+            &[
+                ("first", halves_png(64, 64, green, green)),
+                ("second", halves_png(64, 64, red, red)),
+            ],
+            (200, 100),
+        );
+        assert!(near(at(&cpu, 200, 96, 40), red), "the CPU draws both");
+        assert!(near(at(&frame, 200, 32, 40), green), "the first is drawn");
+        assert!(
+            near(at(&frame, 200, 96, 40), [255, 255, 255, 255]),
+            "the second is not: {:?}",
+            at(&frame, 200, 96, 40)
+        );
+        // Not tried again each frame while the page paints it, and
+        // forgotten once it does not.
+        assert_eq!(gpu.unplaceable.len(), 1);
+        gpu.render(&list, &tables, 200, 100, 1.0).unwrap();
+        assert_eq!(gpu.unplaceable.len(), 1);
+        let without = DisplayList {
+            canvas: [255, 255, 255, 255],
+            items: Vec::new(),
+        };
+        gpu.render(&without, &tables, 200, 100, 1.0).unwrap();
+        assert!(gpu.unplaceable.is_empty());
+    }
+
+    #[test]
+    fn fitting_averages_what_it_shrinks() {
+        let pixel = |v: u8| PremulRgba8 {
+            r: v,
+            g: v,
+            b: v,
+            a: 255,
+        };
+        // 4 × 2: the left 2 × 2 block four greys, the right one white.
+        let image = Pixmap::from_parts(
+            vec![
+                pixel(0),
+                pixel(101),
+                pixel(255),
+                pixel(255),
+                pixel(50),
+                pixel(151),
+                pixel(255),
+                pixel(255),
+            ],
+            4,
+            2,
+        );
+        assert!(fitted(&image, (4, 2)).is_none(), "it fits");
+        let smaller = fitted(&image, (2, 2)).expect("too wide");
+        assert_eq!((smaller.width(), smaller.height()), (2, 1));
+        // (0 + 101 + 50 + 151) / 4 = 75.5, rounded.
+        assert_eq!(smaller.data()[0].r, 76);
+        assert_eq!(smaller.data()[1].r, 255);
+        // The shape is kept.
+        let long = Pixmap::from_parts(vec![pixel(9); 300 * 30], 300, 30);
+        let fit = fitted(&long, (100, 100)).expect("too wide");
+        assert_eq!((fit.width(), fit.height()), (100, 10));
     }
 
     #[test]

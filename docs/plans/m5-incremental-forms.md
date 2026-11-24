@@ -1489,3 +1489,12 @@ Sekizinci PR: GPU yolunun belleği; arka uçlar, adaptör ve görünüm bağlama
 | Mutasyonlar | 3 mutasyonun 3'ü yakalandı: wgpu'nun varsayılan limiti, adaptörün limitinden fazlasını istemek, diğer limitleri adaptörünkinden almak. Sonuncusu ilk turda kaçtı: testin adaptörü varsayılan limitlerdeydi; testin adaptörüne daha büyük bir doku limiti verildi |
 | Testler | `the_device_asks_for_few_view_bindings`; GPU modülünün boyayan testleri (resimler dahil) yeni limitle geçiyor |
 | Kalan | DX12'nin GL'ye göre ~90 MB'ı (küçük sayfada 152,6'ya karşı ~57 MB): sürücünün ve D3D12 çalışma zamanının süreç başına payı. Açık soru: Windows'ta GL'yi seçenek olarak sunmak (adaptör seçilemiyor, wgpu'da GL ikinci sınıf) ya da iş uygulamalarında CPU yolunu varsayılan yapmak. Bu ürün kararı ölçümlerle birlikte sahibine sorulacak |
+
+Dokuzuncu PR: GPU yolunda atlasa sığmayan resim (GL denemesinde bulunan çökme).
+
+| Konu | Not |
+|---|---|
+| Bulgu | vello_hybrid her resmi 4096 × 4096'lık katmanlardan (en çok sekiz) oluşan bir atlasa koyuyor ve ayırmayı `unwrap` ediyor. Bir kenarı katmandan büyük resim (5000 × 20) ve atlas dolduğunda gelen resim raster iş parçacığını paniğe düşürüyordu. vello_cpu ikisini de çiziyor: fuzz, sağlamlık testleri ve altın görüntüler CPU yolunda olduğu için hiç görülmedi |
+| Düzeltme | Katmandan büyük resim küçültülerek yükleniyor (`fitted`: biçim korunuyor, her yeni piksel kapladıklarının ortalaması), boyama dönüşümü oranla geri ölçekleniyor. Atlasta yer yoksa (vello_hybrid atlası dışarı açmıyor, önceden denenemiyor) yükleme hiçbir şeyi değiştirmeden paniğe düşüyor: yakalanıyor, resim çizilmiyor ve sayfa onu boyadıkça yeniden denenmiyor. Atlasta olmayan resim için boya temizleniyor: önceden önceki boya resmin alanını dolduruyordu |
+| GL'nin resimleri | wgpu'nun GL arka ucu tek katmanlı dokuyu düz `TEXTURE_2D` yapıyor (wgpu #1614, #1574), vello_hybrid atlası dizi olarak örnekliyor: GL'de resim hiç çizilmiyor. GL seçeneğinin PR'ı iki katmanlı bir atlas istiyor |
+| Mutasyonlar | 8 mutasyonun 8'i yakalandı; ortalamanın ikisi ilk turda kaçtı (testin değerleri tam bölünüyordu), değerler değiştirildi |
