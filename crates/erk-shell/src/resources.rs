@@ -73,6 +73,8 @@ impl Provider {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     fn request(url: &str) -> ResourceRequest {
@@ -83,10 +85,26 @@ mod tests {
         }
     }
 
+    /// A test's own directory, removed when the test ends.
+    struct Base(PathBuf);
+
+    impl Drop for Base {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// A page in a fresh directory with an image beside it and a secret one
     /// level up.
-    fn site() -> (PathBuf, Provider) {
-        let base = std::env::temp_dir().join(format!("erk-provider-{}", std::process::id()));
+    ///
+    /// The tests run in parallel threads of one process, so the directory
+    /// is per call, not per process: a shared one had two tests writing the
+    /// same files at once, and Windows refuses a write to a file another
+    /// thread has open.
+    fn site() -> (Base, Provider) {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let call = CALLS.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!("erk-provider-{}-{call}", std::process::id()));
         let site = base.join("site");
         std::fs::create_dir_all(site.join("img")).unwrap();
         std::fs::write(site.join("img/logo.png"), b"\x89PNG\r\n\x1a\nrest").unwrap();
@@ -94,7 +112,7 @@ mod tests {
         let page = site.join("page.html");
         std::fs::write(&page, "<p>x</p>").unwrap();
         let provider = Provider::for_page(&page);
-        (base, provider)
+        (Base(base), provider)
     }
 
     #[test]
@@ -110,10 +128,10 @@ mod tests {
     #[test]
     fn nothing_outside_the_page_directory_is_served() {
         let (base, provider) = site();
-        let outside = base.join("secret.png");
+        let outside = base.0.join("secret.png");
         // Inside the directory, but absolute: content names resources by
         // relative URL, never by a path on this machine.
-        let inside = base.join("site/img/logo.png");
+        let inside = base.0.join("site/img/logo.png");
         for url in [
             "../secret.png",
             "img/../../secret.png",
