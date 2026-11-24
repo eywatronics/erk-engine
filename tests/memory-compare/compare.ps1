@@ -44,13 +44,16 @@ foreach ($exe in @($Erk, $Chrome, $Electron)) {
     if (-not (Test-Path $exe)) { throw "not found: $exe (see the notes at the top)" }
 }
 
-# The process `root` and every process it started, and they started.
+# The process `root` and every process it started, and they started. Windows
+# reuses process ids: a process whose parent is long gone may name, as its
+# parent, the id `root` now has. Only those started after `root` count.
 function Get-Tree([int]$root) {
-    $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId
+    $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate
+    $born = ($all | Where-Object { $_.ProcessId -eq $root }).CreationDate
     $ids = [System.Collections.Generic.List[int]]::new()
     $ids.Add($root)
     for ($at = 0; $at -lt $ids.Count; $at++) {
-        foreach ($child in $all | Where-Object { $_.ParentProcessId -eq $ids[$at] }) {
+        foreach ($child in $all | Where-Object { $_.ParentProcessId -eq $ids[$at] -and $_.CreationDate -ge $born }) {
             if (-not $ids.Contains([int]$child.ProcessId)) { $ids.Add([int]$child.ProcessId) }
         }
     }
