@@ -1325,6 +1325,80 @@ fn text_in_its_block_s_language_needs_no_styled_range() {
     );
 }
 
+/// Boxes styled alike hold one Taffy style between them (M5.13: B16 found
+/// 488 bytes of it in each of the card page's 30 000 boxes, which Stylo
+/// gives five computed styles).
+#[test]
+fn boxes_styled_alike_share_one_style() {
+    let cards: String = (0..50)
+        .map(|i| {
+            format!(
+                "<div class=card><div class=title>Kart {i}</div><div class=text>Metin {i}.</div></div>"
+            )
+        })
+        .collect();
+    let (_doc, state) = tree_of(&format!(
+        "<style>.card {{ padding: 8px; border: 1px solid #ccc }} .title {{ font-weight: bold }} \
+         .text {{ color: #555 }}</style><body>{cards}</body>"
+    ));
+    let boxes: Vec<&super::BoxData> = state
+        .nodes
+        .iter()
+        .filter_map(|node| node.0.as_deref())
+        .filter(|node| node.in_tree)
+        .collect();
+    // Equal styles are looked for among the boxes of one computed style:
+    // one held per computed style and value.
+    let mut values: Vec<(usize, &taffy::Style<super::Atom>)> = Vec::new();
+    let mut held: Vec<*const taffy::Style<super::Atom>> = Vec::new();
+    for node in &boxes {
+        let source = node
+            .style_source
+            .as_ref()
+            .map_or(0, |source| &**source as *const _ as usize);
+        if !values
+            .iter()
+            .any(|(from, style)| *from == source && **style == *node.style)
+        {
+            values.push((source, &node.style));
+        }
+        let at: *const taffy::Style<super::Atom> = &*node.style;
+        if !held.contains(&at) {
+            held.push(at);
+        }
+    }
+    assert!(boxes.len() > 150, "{}", boxes.len());
+    assert!(values.len() < 10, "{}", values.len());
+    assert_eq!(
+        held.len(),
+        values.len(),
+        "one style per computed style and value"
+    );
+}
+
+/// A style shared and then changed for one box changes for that box only.
+#[test]
+fn a_shared_style_changed_changes_one_box() {
+    let mut style = super::SharedStyle::from(taffy::Style::DEFAULT);
+    let other = style.clone();
+    style.flex_grow = 2.0;
+    assert_eq!(other.flex_grow, 0.0);
+    assert_eq!(style.flex_grow, 2.0);
+}
+
+/// Styles are compared by value, wherever they are held: a box built again
+/// alike keeps Taffy's cache (`keep_unchanged`) though its style was made
+/// again.
+#[test]
+fn equal_styles_held_apart_are_equal() {
+    let one = super::SharedStyle::from(taffy::Style::DEFAULT);
+    let other = super::SharedStyle::from(taffy::Style::DEFAULT);
+    assert!(one == other);
+    let mut grown = other.clone();
+    grown.flex_grow = 1.0;
+    assert!(one != grown);
+}
+
 #[test]
 fn only_the_slots_that_make_a_box_hold_one() {
     // Text and white space, an element inside `display: none` and the room

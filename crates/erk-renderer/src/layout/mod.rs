@@ -61,6 +61,7 @@ use taffy::{
 };
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use self::calc::CalcTable;
@@ -631,13 +632,61 @@ impl std::ops::DerefMut for LayoutNode {
     }
 }
 
+/// A box's Taffy style, one for all the boxes built alike (M5.13): B16
+/// found 488 bytes of style in each of the card page's 30 000 boxes, which
+/// Stylo gives five computed styles. Reading is reading the style; writing
+/// to a shared one makes this box's own copy first, so a change never
+/// reaches another box. An `Rc`: a style is not `Send`, its `calc()`
+/// values being pointers, and layout runs on the frame thread.
+/// [`Builder::share_styles`] makes equal ones one.
+#[derive(Clone)]
+struct SharedStyle(Rc<Style<Atom>>);
+
+thread_local! {
+    /// The style of a box built with no style yet: one a thread, as
+    /// [`EMPTY`].
+    static DEFAULT_STYLE: SharedStyle = SharedStyle(Rc::new(Style::DEFAULT));
+}
+
+impl Default for SharedStyle {
+    fn default() -> Self {
+        DEFAULT_STYLE.with(SharedStyle::clone)
+    }
+}
+
+impl From<Style<Atom>> for SharedStyle {
+    fn from(style: Style<Atom>) -> Self {
+        Self(Rc::new(style))
+    }
+}
+
+impl PartialEq for SharedStyle {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
+    }
+}
+
+impl std::ops::Deref for SharedStyle {
+    type Target = Style<Atom>;
+
+    fn deref(&self) -> &Style<Atom> {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for SharedStyle {
+    fn deref_mut(&mut self) -> &mut Style<Atom> {
+        Rc::make_mut(&mut self.0)
+    }
+}
+
 #[derive(Default)]
 struct BoxData {
     /// Whether this arena slot generates a box in the layout tree.
     in_tree: bool,
     /// For a paragraph, its atomic inlines.
     children: Vec<taffy::NodeId>,
-    style: Style<Atom>,
+    style: SharedStyle,
     /// Set for paragraphs: blocks laid out as one run of inline content.
     /// Shared with the shape cache, which compares it with the next.
     paragraph: Option<Arc<Paragraph>>,
@@ -1011,11 +1060,37 @@ impl<'a> Builder<'a> {
             }
         }
         self.finish_built(resources);
+        self.share_styles();
         if self.reach.is_some() {
             self.keep_unchanged();
             self.forget_orphans();
         }
         (self.nodes, self.calcs, self.slots)
+    }
+
+    /// Make the equal styles of the boxes built this frame one, a box
+    /// keeping one it shares with boxes built before. Equal styles come
+    /// from one computed style, which Stylo shares between elements styled
+    /// alike: they are looked for among the boxes of the same one.
+    fn share_styles(&mut self) {
+        let mut shared: HashMap<usize, Vec<SharedStyle>> = HashMap::new();
+        for (index, node) in self.nodes.iter_mut().enumerate() {
+            if !self.built.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(node) = node.written().filter(|node| node.in_tree) else {
+                continue;
+            };
+            let source = node
+                .style_source
+                .as_ref()
+                .map_or(0, |source| &**source as *const ComputedValues as usize);
+            let alike = shared.entry(source).or_default();
+            match alike.iter().find(|style| **style == node.style) {
+                Some(style) => node.style = style.clone(),
+                None => alike.push(node.style.clone()),
+            }
+        }
     }
 
     /// Build `parent`'s box: its children's boxes, or its paragraph. Returns
@@ -1039,7 +1114,8 @@ impl<'a> Builder<'a> {
                         height: Dimension::length(viewport.1),
                     },
                     ..Style::DEFAULT
-                };
+                }
+                .into();
             }
         }
         // A replaced element shows its image, never what it holds: a host
@@ -1266,7 +1342,8 @@ impl<'a> Builder<'a> {
                             style: Style {
                                 display: Display::Block,
                                 ..Style::DEFAULT
-                            },
+                            }
+                            .into(),
                             key: Some(BoxKey::Placeholder(child.to_bits())),
                             ..BoxData::default()
                         }));
@@ -1285,7 +1362,7 @@ impl<'a> Builder<'a> {
                         self.calcs.record(&computed);
                         let node = self.claim(child);
                         node.in_tree = true;
-                        node.style = style;
+                        node.style = style.into();
                         node.order = computed.clone_order();
                     }
                     children.push(taffy_id(child));
@@ -1373,7 +1450,8 @@ impl<'a> Builder<'a> {
             style: Style {
                 display: Display::Block,
                 ..Style::DEFAULT
-            },
+            }
+            .into(),
             shape_key: Some(shape_key(parent, &paragraph)),
             key: Some(BoxKey::Anonymous(
                 parent.to_bits(),
@@ -1397,7 +1475,7 @@ impl<'a> Builder<'a> {
                     self.calcs.record(&computed);
                     let node = self.claim(id);
                     node.in_tree = true;
-                    node.style = taffy_style(&computed);
+                    node.style = taffy_style(&computed).into();
                 }
                 self.stack.push((id, container));
                 taffy_id(id)
@@ -1424,7 +1502,7 @@ impl<'a> Builder<'a> {
                 self.calcs.record(&computed);
                 let node = self.claim(id);
                 node.in_tree = true;
-                node.style = taffy_style(&computed);
+                node.style = taffy_style(&computed).into();
                 node.block_level =
                     computed.get_box().original_display.outside() == DisplayOutside::Block;
             }
@@ -2383,7 +2461,7 @@ impl<'t> LayoutTree<'t> {
                 };
             return compute_leaf_layout(
                 inputs,
-                &style,
+                &*style,
                 |ptr, basis| calcs.resolve(ptr, basis),
                 |known, _| Size {
                     width: known.width.unwrap_or(natural.width),
@@ -2399,7 +2477,7 @@ impl<'t> LayoutTree<'t> {
             let calcs = self.calcs;
             return compute_leaf_layout(
                 inputs,
-                &self.node(id).style,
+                &*self.node(id).style,
                 |ptr, basis| calcs.resolve(ptr, basis),
                 |_, _| Size {
                     width: CHECK_CONTROL_SIZE,
@@ -2438,7 +2516,7 @@ impl<'t> LayoutTree<'t> {
         let mut measured: Option<Arc<InlineLayout>> = None;
         let mut output = compute_leaf_layout(
             inputs,
-            &style,
+            &*style,
             |ptr, basis| calcs.resolve(ptr, basis),
             |known, available| {
                 let max_advance = known.width.or(match available.width {
