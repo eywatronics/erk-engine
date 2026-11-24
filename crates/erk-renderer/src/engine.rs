@@ -1136,6 +1136,19 @@ mod tests {
         assert_eq!(engine.stats().shaped, 1);
     }
 
+    #[test]
+    fn an_atomic_inline_grown_taller_makes_its_line_taller() {
+        let mut engine = verifying(
+            "<p>a <span id=s style='display: inline-block; width: 10px; height: 10px'></span> b</p>",
+        );
+        let atom = engine.query(None, "#s").unwrap().unwrap();
+        // The same text and widths, broken at the same width: only the line
+        // box's height changes, which the oracle sees.
+        engine.set_style_property(atom, "height", "40px").unwrap();
+        assert!(laid_out(&mut engine));
+        assert_eq!(engine.stats().shaped, 0);
+    }
+
     /// How many boxes the last frame laid out, checked against the oracle.
     fn boxes_laid_out(engine: &mut Engine) -> usize {
         assert!(engine.prepare().0.is_some());

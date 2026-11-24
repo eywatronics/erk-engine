@@ -113,7 +113,8 @@ pub(crate) struct ShapedText {
     pub(crate) marker: Option<bool>,
     /// The ids of the inline boxes that are atomic inlines, not edges.
     pub(crate) atom_boxes: Vec<u64>,
-    pub(crate) layout: InlineLayout,
+    /// The layout the box holds and the shape cache keeps: one per paragraph.
+    pub(crate) layout: Arc<InlineLayout>,
     pub(crate) decorations: Vec<DecorationRect>,
     /// Where its text may paint or take the pointer, from the top of the
     /// content box down (`display::text_band`).
@@ -640,7 +641,7 @@ struct BoxData {
     /// Set for paragraphs: blocks laid out as one run of inline content.
     paragraph: Option<Paragraph>,
     /// A paragraph's lines as its final layout broke them.
-    shaped: Option<InlineLayout>,
+    shaped: Option<Arc<InlineLayout>>,
     /// Where a paragraph's box is from frame to frame, for the shape cache.
     shape_key: Option<ShapeKey>,
     /// For a replaced element (`<img>`): its image, once it has arrived.
@@ -2431,7 +2432,7 @@ impl<'t> LayoutTree<'t> {
         let field_height = self.nodes[index].field_height;
         let option_labels = std::mem::take(&mut self.nodes[index].option_labels);
         let calcs = self.calcs;
-        let mut measured: Option<InlineLayout> = None;
+        let mut measured: Option<Arc<InlineLayout>> = None;
         let mut output = compute_leaf_layout(
             inputs,
             &style,

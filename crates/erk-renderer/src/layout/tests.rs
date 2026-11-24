@@ -31,6 +31,32 @@ fn lay_out(body: &str) -> (Document, Layouts) {
     (doc, layouts)
 }
 
+/// The text a paragraph draws is the layout the shape cache keeps for the
+/// next frame, not a copy of it (M5.13): its glyphs are held once.
+#[test]
+fn a_paragraph_s_lines_are_held_once() {
+    let doc = Document::parse_html("<body><p>bir iki üç dört</p></body>");
+    let styles = StyleEngine::with_font_metrics(
+        WIDTH,
+        HEIGHT,
+        std::sync::Arc::new(crate::text::EmbeddedFontMetrics),
+    )
+    .style(&doc);
+    let mut text = TextEngine::new();
+    let layouts = layout(
+        &doc,
+        &styles,
+        &crate::resources::Resources::default(),
+        &mut text,
+        (WIDTH, HEIGHT),
+        None,
+    )
+    .0;
+    let p = all(&doc, &local_name!("p"))[0];
+    let drawn = &layouts.text(p).expect("the paragraph's text").layout;
+    assert!(text.keeps(drawn));
+}
+
 /// Elements with the given tag, in tree order.
 fn all(doc: &Document, tag: &LocalName) -> Vec<NodeId> {
     let mut found = Vec::new();
