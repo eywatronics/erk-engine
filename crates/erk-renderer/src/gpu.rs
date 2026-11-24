@@ -73,12 +73,29 @@ pub(crate) const WINDOW_BACKENDS: wgpu::Backends =
 /// private on a small page and 641 MB on a page of 10 000 cards, against
 /// 181 and 476 MB with `MemoryUsage`, with painting as fast (M5.13): Erk's
 /// GPU path paints a viewport-sized frame from strips.
-fn device_descriptor() -> wgpu::DeviceDescriptor<'static> {
+///
+/// It also asks for [`VIEW_BINDINGS`] non-sampler bindings, or the
+/// adapter's limit if lower, where wgpu's default limits ask for a million.
+fn device_descriptor(adapter: &wgpu::Limits) -> wgpu::DeviceDescriptor<'static> {
     wgpu::DeviceDescriptor {
         memory_hints: wgpu::MemoryHints::MemoryUsage,
+        required_limits: wgpu::Limits {
+            max_non_sampler_bindings: adapter.max_non_sampler_bindings.min(VIEW_BINDINGS),
+            ..wgpu::Limits::default()
+        },
         ..wgpu::DeviceDescriptor::default()
     }
 }
+
+/// How many non-sampler bindings (views of buffers and textures) the
+/// device may hold at once. On DX12 wgpu makes a shader-visible descriptor
+/// heap that large when the device is made: with wgpu's default, a
+/// million, the shell's window held 180–199 MB on a small page and 370 MB
+/// on a page of 10 000 cards; with this, 152–156 and 344–351 MB (two runs,
+/// 2026-11-24, M5.13; 4096 saved no more than the noise). vello_hybrid
+/// binds a few textures and buffers per pipeline; the room left is for
+/// images, many to a page, and costs 2 MB.
+const VIEW_BINDINGS: u32 = 65_536;
 
 /// The formats vello_hybrid writes as they are: its colours are already
 /// sRGB-encoded, so an `…Srgb` format would encode them twice.
@@ -170,8 +187,9 @@ impl Gpu {
         format: wgpu::TextureFormat,
         output: Output,
     ) -> Result<Self, String> {
-        let (device, queue) = block_on(adapter.request_device(&device_descriptor()))
-            .map_err(|error| format!("no device: {error}"))?;
+        let (device, queue) =
+            block_on(adapter.request_device(&device_descriptor(&adapter.limits())))
+                .map_err(|error| format!("no device: {error}"))?;
         let (renderer, resources) = Renderer::new(
             &device,
             &RenderTargetConfig {
@@ -499,9 +517,35 @@ mod tests {
         // small page's window held 343 MB, 181 MB with this one, painting
         // as fast (M5.13).
         assert!(matches!(
-            device_descriptor().memory_hints,
+            device_descriptor(&wgpu::Limits::default()).memory_hints,
             wgpu::MemoryHints::MemoryUsage
         ));
+    }
+
+    #[test]
+    fn the_device_asks_for_few_view_bindings() {
+        // DX12's shader-visible view heap is as large as this limit: wgpu's
+        // default, a million, held 32 MB in every window (M5.13).
+        // An adapter with more than the defaults, as a desktop GPU has.
+        let limits = |adapter: u32| {
+            device_descriptor(&wgpu::Limits {
+                max_non_sampler_bindings: adapter,
+                max_texture_dimension_2d: 32_768,
+                ..wgpu::Limits::default()
+            })
+            .required_limits
+        };
+        assert_eq!(limits(1_000_000).max_non_sampler_bindings, VIEW_BINDINGS);
+        // Never more than the adapter has: the device would not be made.
+        assert_eq!(limits(1_000).max_non_sampler_bindings, 1_000);
+        // The rest as before.
+        assert_eq!(
+            wgpu::Limits {
+                max_non_sampler_bindings: wgpu::Limits::default().max_non_sampler_bindings,
+                ..limits(1_000_000)
+            },
+            wgpu::Limits::default()
+        );
     }
 
     const LOGO: &[u8] = include_bytes!("../tests/reference/images/logo.png");
