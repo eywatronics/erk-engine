@@ -57,8 +57,8 @@ pub(crate) fn picker_layout(
             language.clone(),
             None,
         )];
-        let paragraph = Paragraph::new(&tokens, &style);
-        let layout = text.shape(&paragraph, None, None, &[]);
+        let paragraph = Paragraph::new(&tokens, &style, &language);
+        let layout = text.shape(&paragraph, None, &[]);
         let decorations = layout.decorations(&paragraph);
         let relative = Vec::new();
         Arc::new(ShapedText {

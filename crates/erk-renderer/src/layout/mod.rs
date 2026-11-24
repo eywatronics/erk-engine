@@ -639,7 +639,8 @@ struct BoxData {
     children: Vec<taffy::NodeId>,
     style: Style<Atom>,
     /// Set for paragraphs: blocks laid out as one run of inline content.
-    paragraph: Option<Paragraph>,
+    /// Shared with the shape cache, which compares it with the next.
+    paragraph: Option<Arc<Paragraph>>,
     /// A paragraph's lines as its final layout broke them.
     shaped: Option<Arc<InlineLayout>>,
     /// Where a paragraph's box is from frame to frame, for the shape cache.
@@ -1063,13 +1064,14 @@ impl<'a> Builder<'a> {
         // place of what it holds in the document (M5.8).
         if let (Some(field), Some(computed)) = (text_field(doc, parent), &parent_style) {
             let shown = field.shown(doc, parent);
+            let lang = text_language(doc, parent);
             let tokens = [InlineToken::Text(
                 shown,
                 computed.clone(),
-                text_language(doc, parent),
+                lang.clone(),
                 None,
             )];
-            let paragraph = Paragraph::new(&tokens, computed);
+            let paragraph = Paragraph::new(&tokens, computed, &lang);
             // A textarea is `rows` lines high, two by default; Stylo
             // cannot give `lh` for `line-height: normal`, so it is
             // measured here, as the text's lines are.
@@ -1079,7 +1081,7 @@ impl<'a> Builder<'a> {
             node.field = true;
             node.field_height = rows;
             node.shape_key = Some(shape_key(parent, &paragraph));
-            node.paragraph = Some(paragraph);
+            node.paragraph = Some(Arc::new(paragraph));
             return Vec::new();
         }
         let contains = parent_style
@@ -1219,12 +1221,12 @@ impl<'a> Builder<'a> {
                 }
             }
             if let Some(computed) = parent_style {
-                let paragraph = Paragraph::new(&tokens, &computed);
+                let paragraph = Paragraph::new(&tokens, &computed, &text_language(doc, parent));
                 if !paragraph.is_empty() {
                     let children = self.add_atoms(atoms, container);
                     let node = &mut self.nodes[parent_index];
                     node.shape_key = Some(shape_key(parent, &paragraph));
-                    node.paragraph = Some(paragraph);
+                    node.paragraph = Some(Arc::new(paragraph));
                     self.set_children(parent_index, children);
                 }
             }
@@ -1300,17 +1302,18 @@ impl<'a> Builder<'a> {
                 .options(parent)
                 .into_iter()
                 .map(|option| {
+                    let lang = text_language(doc, parent);
                     let tokens = [InlineToken::Text(
                         doc.option_label(option),
                         style.clone(),
-                        text_language(doc, parent),
+                        lang.clone(),
                         None,
                     )];
                     // An option in a group counts as indented, as Chrome's
                     // list draws it, whatever the group's own label.
                     let in_group = doc.node(option).and_then(|node| node.parent()) != Some(parent);
                     let indent = if in_group { OPTGROUP_INDENT } else { 0.0 };
-                    (Paragraph::new(&tokens, style), indent)
+                    (Paragraph::new(&tokens, style, &lang), indent)
                 })
                 .collect();
             let label_box = &mut self.nodes[usize::from(*label_box)];
@@ -1355,7 +1358,7 @@ impl<'a> Builder<'a> {
         let Some(style) = parent_style else {
             return;
         };
-        let paragraph = Paragraph::new(&tokens, style);
+        let paragraph = Paragraph::new(&tokens, style, &text_language(self.doc, parent));
         if paragraph.is_empty() {
             return;
         }
@@ -1376,7 +1379,7 @@ impl<'a> Builder<'a> {
                 parent.to_bits(),
                 shape_key(parent, &paragraph),
             )),
-            paragraph: Some(paragraph),
+            paragraph: Some(Arc::new(paragraph)),
             anonymous_parent: Some(parent.index() as usize),
             ..BoxData::default()
         }));
@@ -1482,7 +1485,7 @@ impl<'a> Builder<'a> {
             let anchors: Vec<usize> = self.nodes[index]
                 .paragraph
                 .as_ref()
-                .map(Paragraph::anchors)
+                .map(|paragraph| paragraph.anchors())
                 .unwrap_or_default();
             for element in anchors {
                 self.nodes[element].static_position = Some(StaticPosition::Line(index));
@@ -2449,11 +2452,11 @@ impl<'t> LayoutTree<'t> {
                     .width
                     .map_or(available.width, AvailableSpace::Definite);
                 let atoms = self.measure_atoms(&paragraph, space);
-                let shaped = self.text.shape(&paragraph, key, max_advance, &atoms);
+                let shaped = self.shape(&paragraph, key, max_advance, &atoms);
                 // A select's label box: as wide as its widest option.
                 let widest = option_labels
                     .iter()
-                    .map(|(label, indent)| indent + self.text.shape(label, None, None, &[]).width())
+                    .map(|(label, indent)| indent + self.text.shape(label, None, &[]).width())
                     .fold(0.0_f32, f32::max);
                 let size = Size {
                     width: known.width.unwrap_or_else(|| shaped.width().max(widest)),
@@ -2482,9 +2485,7 @@ impl<'t> LayoutTree<'t> {
             // again at the final width.
             let shaped = match measured {
                 Some(shaped) if shaped.broken_at(Some(content_width)) => shaped,
-                _ => self
-                    .text
-                    .shape(&paragraph, key, Some(content_width), &atoms),
+                _ => self.shape(&paragraph, key, Some(content_width), &atoms),
             };
             let inset = Point {
                 x: padding.left + border.left,
@@ -2503,6 +2504,21 @@ impl<'t> LayoutTree<'t> {
         self.nodes[index].paragraph = Some(paragraph);
         self.nodes[index].option_labels = option_labels;
         output
+    }
+
+    /// `paragraph` shaped at `max_advance`: kept from frame to frame when
+    /// its box lasts (`key`).
+    fn shape(
+        &mut self,
+        paragraph: &Arc<Paragraph>,
+        key: Option<ShapeKey>,
+        max_advance: Option<f32>,
+        atoms: &[AtomBox],
+    ) -> Arc<InlineLayout> {
+        match key {
+            Some(key) => self.text.shape_kept(paragraph, key, max_advance, atoms),
+            None => self.text.shape(paragraph, max_advance, atoms),
+        }
     }
 
     /// Lay out each atomic inline of `paragraph` in `space` and return the

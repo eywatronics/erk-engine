@@ -172,6 +172,14 @@ impl TextStyle {
         }
     }
 
+    /// This style for text in `lang` (none when it is unknown).
+    fn in_language(mut self, lang: &LanguageIdentifier) -> Self {
+        if *lang != LanguageIdentifier::UNKNOWN {
+            self.language = fonts::language(&lang.to_string());
+        }
+        self
+    }
+
     /// The used line height in pixels.
     fn line_height_px(&self) -> f32 {
         match self.line_height {
@@ -494,15 +502,32 @@ struct OpenElement {
 }
 
 impl Paragraph {
+    /// The base style's language, and each styled range's text and
+    /// language.
+    #[cfg(test)]
+    pub(crate) fn languages(&self) -> (Option<Language>, Vec<(&str, Option<Language>)>) {
+        (
+            self.base.language,
+            self.spans
+                .iter()
+                .map(|(range, style)| (&self.text[range.clone()], style.language))
+                .collect(),
+        )
+    }
+
     /// A paragraph of `tokens` in a block styled like `block`. Whitespace is
     /// collapsed across the tokens as `white-space: normal` does. A collapsed
     /// space stays inside the element it was written in: `a <b>b</b>` puts
     /// the space before the `<b>`, `<b>a </b>b` inside it.
+    ///
+    /// `lang` is the block's language: its root inline box's, which text in
+    /// the same language shares without a styled range of its own.
     pub(crate) fn new<S: AsRef<ComputedValues>>(
         tokens: &[InlineToken<S>],
         block: &ComputedValues,
+        lang: &LanguageIdentifier,
     ) -> Self {
-        let base = TextStyle::of(block);
+        let base = TextStyle::of(block).in_language(lang);
         let mut paragraph = Self {
             text: String::new(),
             base,
@@ -558,10 +583,7 @@ impl Paragraph {
                         .clone_text_transform()
                         .case();
                     let raw = case::transform(raw, case, lang, previous);
-                    let mut style = TextStyle::of(style.as_ref());
-                    if *lang != LanguageIdentifier::UNKNOWN {
-                        style.language = fonts::language(&lang.to_string());
-                    }
+                    let mut style = TextStyle::of(style.as_ref()).in_language(lang);
                     style.brush.raise = open.last().map_or(0.0, |element| element.raise);
                     style.brush.relative = open.last().map_or(0, |element| element.relative);
                     // `white-space`: `pre-line` keeps newlines, `pre` and
@@ -1267,6 +1289,22 @@ fn token_collapse<S: AsRef<ComputedValues>>(token: &InlineToken<S>) -> Option<Wh
     }
 }
 
+/// The width of each of `paragraph`'s inline boxes, which Parley takes when
+/// it shapes: an edge's spacer, nothing for an anchor, an atom's from
+/// `atoms`, in order.
+fn inline_box_widths(paragraph: &Paragraph, atoms: &[AtomBox]) -> Vec<f32> {
+    let mut atom_widths = atoms.iter();
+    paragraph
+        .items
+        .iter()
+        .map(|item| match item.kind {
+            InlineItemKind::Spacer { width, .. } => width,
+            InlineItemKind::Anchor(_) => 0.0,
+            InlineItemKind::Atom(..) => atom_widths.next().map_or(0.0, |atom| atom.width),
+        })
+        .collect()
+}
+
 /// Break `layout`'s lines at `max_advance`, keeping each inline element's
 /// edges with its text, as browsers do. Erk's element edges (border,
 /// padding, margin) are inline boxes, and Parley breaks next to an inline
@@ -1670,7 +1708,8 @@ pub(crate) struct ShapeCache {
 }
 
 struct ShapedEntry {
-    paragraph: Paragraph,
+    /// The paragraph its box holds, not a copy.
+    paragraph: Arc<Paragraph>,
     /// The width of each inline box, which Parley takes when it shapes.
     boxes: Vec<f32>,
     /// The sizes of the atomic inlines it was last laid out with.
@@ -1682,8 +1721,9 @@ struct ShapedEntry {
     /// A justified paragraph's layout before any line breaking. Parley
     /// widens a justified line's spaces and narrows them back before
     /// breaking again, and the sum is not exact: the lines would drift from
-    /// a fresh layout's. Other alignments only move whole lines.
-    unbroken: Option<Layout<TextBrush>>,
+    /// a fresh layout's. Other alignments only move whole lines. Boxed: the
+    /// table holds a slot for every paragraph, justified or not.
+    unbroken: Option<Box<Layout<TextBrush>>>,
     used: bool,
 }
 
@@ -1808,68 +1848,80 @@ impl TextEngine {
     /// strut, the text's own extent and each box's extent above and below
     /// the baseline (CSS 2 §10.8); the lines after them move down.
     ///
-    /// A paragraph whose box at `key` was laid out alike before gets the
-    /// layout it had back: one layout, held by the box and the cache alike.
+    /// Nothing is kept: for text whose box does not last (a select's
+    /// labels, the picker's rows).
     pub(crate) fn shape(
         &mut self,
         paragraph: &Paragraph,
-        key: Option<ShapeKey>,
         max_advance: Option<f32>,
         atoms: &[AtomBox],
     ) -> Arc<InlineLayout> {
-        let mut atom_widths = atoms.iter();
-        let boxes: Vec<f32> = paragraph
-            .items
-            .iter()
-            .map(|item| match item.kind {
-                InlineItemKind::Spacer { width, .. } => width,
-                InlineItemKind::Anchor(_) => 0.0,
-                InlineItemKind::Atom(..) => atom_widths.next().map_or(0.0, |atom| atom.width),
-            })
-            .collect();
-        let kept = key
-            .and_then(|key| self.cache.entries.get_mut(&key))
+        self.cache.shaped += 1;
+        let mut layout = self.build(paragraph, &inline_box_widths(paragraph, atoms));
+        break_lines(&mut layout, paragraph, max_advance);
+        Arc::new(Self::lines(layout, paragraph, max_advance, atoms))
+    }
+
+    /// [`Self::shape`] for the paragraph of the box at `key`, kept from
+    /// frame to frame: a paragraph laid out alike before gets the layout it
+    /// had back, and one whose text is the same is not shaped again. The
+    /// cache holds the box's paragraph and layout, not copies.
+    pub(crate) fn shape_kept(
+        &mut self,
+        paragraph: &Arc<Paragraph>,
+        key: ShapeKey,
+        max_advance: Option<f32>,
+        atoms: &[AtomBox],
+    ) -> Arc<InlineLayout> {
+        let boxes = inline_box_widths(paragraph, atoms);
+        let kept = self
+            .cache
+            .entries
+            .get_mut(&key)
             .filter(|entry| entry.paragraph == *paragraph && entry.boxes == boxes);
         let hit = kept.is_some();
         let mut layout = match kept {
             Some(entry) => {
                 entry.used = true;
+                // An equal paragraph built again: the box's, and the old
+                // one goes.
+                if !Arc::ptr_eq(&entry.paragraph, paragraph) {
+                    entry.paragraph = paragraph.clone();
+                }
                 if entry.shaped.max_advance == max_advance && entry.atoms == atoms {
                     return entry.shaped.clone();
                 }
-                entry
-                    .unbroken
-                    .clone()
-                    .unwrap_or_else(|| entry.shaped.layout.clone())
+                match &entry.unbroken {
+                    Some(unbroken) => (**unbroken).clone(),
+                    None => entry.shaped.layout.clone(),
+                }
             }
             None => {
                 self.cache.shaped += 1;
                 self.build(paragraph, &boxes)
             }
         };
-        let unbroken = (key.is_some() && !hit && paragraph.align == Alignment::Justify)
-            .then(|| layout.clone());
+        let unbroken =
+            (!hit && paragraph.align == Alignment::Justify).then(|| Box::new(layout.clone()));
         break_lines(&mut layout, paragraph, max_advance);
         let shaped = Arc::new(Self::lines(layout, paragraph, max_advance, atoms));
-        if let Some(key) = key {
-            match self.cache.entries.get_mut(&key) {
-                Some(entry) if hit => {
-                    entry.atoms = atoms.to_vec();
-                    entry.shaped = shaped.clone();
-                }
-                _ => {
-                    self.cache.entries.insert(
-                        key,
-                        ShapedEntry {
-                            paragraph: paragraph.clone(),
-                            boxes,
-                            atoms: atoms.to_vec(),
-                            shaped: shaped.clone(),
-                            unbroken,
-                            used: true,
-                        },
-                    );
-                }
+        match self.cache.entries.get_mut(&key) {
+            Some(entry) if hit => {
+                entry.atoms = atoms.to_vec();
+                entry.shaped = shaped.clone();
+            }
+            _ => {
+                self.cache.entries.insert(
+                    key,
+                    ShapedEntry {
+                        paragraph: paragraph.clone(),
+                        boxes,
+                        atoms: atoms.to_vec(),
+                        shaped: shaped.clone(),
+                        unbroken,
+                        used: true,
+                    },
+                );
             }
         }
         shaped
@@ -1882,6 +1934,15 @@ impl TextEngine {
             .entries
             .values()
             .any(|entry| Arc::ptr_eq(&entry.shaped, shaped))
+    }
+
+    /// Whether the cache keeps `paragraph` itself, not a copy.
+    #[cfg(test)]
+    pub(crate) fn keeps_paragraph(&self, paragraph: &Arc<Paragraph>) -> bool {
+        self.cache
+            .entries
+            .values()
+            .any(|entry| Arc::ptr_eq(&entry.paragraph, paragraph))
     }
 
     /// `layout`, already broken into lines at `max_advance`, aligned and
@@ -2108,7 +2169,7 @@ impl TextEngine {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
-        let layout = self.shape(paragraph, None, max_advance, &[]);
+        let layout = self.shape(paragraph, max_advance, &[]);
         Size {
             width: known.width.unwrap_or_else(|| layout.width()),
             height: known.height.unwrap_or(layout.height),
@@ -2160,12 +2221,7 @@ mod tests {
     #[test]
     fn turkish_letters_all_have_glyphs() {
         let mut engine = TextEngine::new();
-        let shaped = engine.shape(
-            &paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0),
-            None,
-            None,
-            &[],
-        );
+        let shaped = engine.shape(&paragraph("İstanbul Işık ğüşöç ĞÜŞÖÇ", 400.0), None, &[]);
         let layout = &shaped.layout;
         let mut glyphs = 0;
         for line in layout.lines() {
@@ -2188,8 +2244,8 @@ mod tests {
             "Erk sayfayı önce çizer, sonra izole eder, en son betik çalıştırır.",
             400.0,
         );
-        let one_line = engine.shape(&text, None, None, &[]);
-        let wrapped = engine.shape(&text, None, Some(120.0), &[]);
+        let one_line = engine.shape(&text, None, &[]);
+        let wrapped = engine.shape(&text, Some(120.0), &[]);
         let (one_line, wrapped) = (&one_line.layout, &wrapped.layout);
 
         assert_eq!(one_line.len(), 1);
@@ -2222,12 +2278,45 @@ mod tests {
     #[test]
     fn a_paragraph_laid_out_alike_again_is_the_layout_it_had() {
         let mut engine = TextEngine::new();
-        let text = paragraph("Erk sayfayı önce çizer, sonra izole eder.", 400.0);
-        let first = engine.shape(&text, Some((1, 1)), Some(120.0), &[]);
-        let again = engine.shape(&text, Some((1, 1)), Some(120.0), &[]);
+        let text = Arc::new(paragraph(
+            "Erk sayfayı önce çizer, sonra izole eder.",
+            400.0,
+        ));
+        let first = engine.shape_kept(&text, (1, 1), Some(120.0), &[]);
+        let again = engine.shape_kept(&text, (1, 1), Some(120.0), &[]);
         // The box and the cache hold one layout, not a copy each.
         assert!(Arc::ptr_eq(&first, &again));
         assert!(engine.keeps(&first));
+    }
+
+    #[test]
+    fn the_cache_holds_the_paragraph_its_box_holds() {
+        let mut engine = TextEngine::new();
+        let text = paragraph("Erk sayfayı önce çizer, sonra izole eder.", 400.0);
+        let (first, built_again) = (Arc::new(text.clone()), Arc::new(text));
+        engine.shape_kept(&first, (1, 1), Some(120.0), &[]);
+        assert!(engine.keeps_paragraph(&first), "not a copy");
+        // The box built again holds an equal paragraph: the cache takes it
+        // and lets the old one go, whether the lines are the same or not.
+        engine.shape_kept(&built_again, (1, 1), Some(120.0), &[]);
+        assert!(engine.keeps_paragraph(&built_again));
+        assert_eq!(Arc::strong_count(&first), 1);
+        let third = Arc::new((*built_again).clone());
+        engine.shape_kept(&third, (1, 1), Some(200.0), &[]);
+        assert!(engine.keeps_paragraph(&third));
+        assert_eq!(engine.shaped(), 1, "shaped once");
+    }
+
+    /// The table holds a slot per paragraph and a quarter more or so: what
+    /// a slot holds inline is paid 20 000 times over on the card page
+    /// (M5.13: 632 bytes, 20 MB).
+    #[test]
+    fn a_shape_cache_entry_is_small() {
+        assert!(
+            std::mem::size_of::<ShapedEntry>() <= 96,
+            "{}",
+            std::mem::size_of::<ShapedEntry>()
+        );
     }
 
     #[test]
@@ -2246,10 +2335,11 @@ mod tests {
             Alignment::Justify,
         ] {
             text.align = align;
+            let shared = Arc::new(text.clone());
             let mut engine = TextEngine::new();
             for width in [Some(120.0), Some(200.0), None, Some(90.0), Some(200.0)] {
-                let kept = engine.shape(&text, Some((1, 1)), width, &[]);
-                let fresh = TextEngine::new().shape(&text, None, width, &[]);
+                let kept = engine.shape_kept(&shared, (1, 1), width, &[]);
+                let fresh = TextEngine::new().shape(&text, width, &[]);
                 assert!(kept.layout.len() > 1 || width.is_none(), "{width:?}");
                 assert_eq!(glyphs(&kept), glyphs(&fresh), "{align:?} {width:?}");
                 assert_eq!(
@@ -2265,8 +2355,8 @@ mod tests {
     #[test]
     fn bold_uses_the_bold_face() {
         let mut engine = TextEngine::new();
-        let regular = engine.shape(&paragraph("Merhaba dünya", 400.0), None, None, &[]);
-        let bold = engine.shape(&paragraph("Merhaba dünya", 700.0), None, None, &[]);
+        let regular = engine.shape(&paragraph("Merhaba dünya", 400.0), None, &[]);
+        let bold = engine.shape(&paragraph("Merhaba dünya", 700.0), None, &[]);
         // Noto Sans Bold's advances are wider than Regular's; a synthesized
         // bold of the Regular face would keep Regular's advances.
         assert!(bold.width() > regular.width() + 1.0);
@@ -2285,7 +2375,7 @@ mod tests {
             },
         );
         let word = engine
-            .shape(&paragraph("uzunkelime", 400.0), None, None, &[])
+            .shape(&paragraph("uzunkelime", 400.0), None, &[])
             .width();
         assert!((min.width - word).abs() < 0.5);
     }
