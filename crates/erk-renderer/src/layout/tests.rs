@@ -43,18 +43,23 @@ fn a_paragraph_s_lines_are_held_once() {
     )
     .style(&doc);
     let mut text = TextEngine::new();
-    let layouts = layout(
+    let (layouts, state) = layout(
         &doc,
         &styles,
         &crate::resources::Resources::default(),
         &mut text,
         (WIDTH, HEIGHT),
         None,
-    )
-    .0;
+    );
     let p = all(&doc, &local_name!("p"))[0];
     let drawn = &layouts.text(p).expect("the paragraph's text").layout;
     assert!(text.keeps(drawn));
+    // So is the paragraph the box holds.
+    let held = state.nodes[p.index() as usize]
+        .paragraph
+        .as_ref()
+        .expect("a paragraph");
+    assert!(text.keeps_paragraph(held));
 }
 
 /// Elements with the given tag, in tree order.
@@ -1291,6 +1296,33 @@ fn tree_of(html: &str) -> (Document, super::LayoutState) {
         None,
     );
     (doc, state)
+}
+
+/// Text in its block's own language is in the paragraph's base style: no
+/// styled range repeats it (M5.13: B16 found one over every paragraph of
+/// a page with `<html lang>`, 305 bytes each). Text in another language
+/// keeps its own.
+#[test]
+fn text_in_its_block_s_language_needs_no_styled_range() {
+    let (doc, state) = tree_of(
+        "<html lang=tr><body><p>bir iki</p><p>üç <span lang=en>four</span></p></body></html>",
+    );
+    let paragraphs: Vec<&crate::text::Paragraph> = all(&doc, &local_name!("p"))
+        .into_iter()
+        .map(|p| {
+            &**state.nodes[p.index() as usize]
+                .paragraph
+                .as_ref()
+                .expect("a paragraph")
+        })
+        .collect();
+    let (turkish, english) = (crate::fonts::language("tr"), crate::fonts::language("en"));
+    assert!(turkish.is_some() && english.is_some());
+    assert_eq!(paragraphs[0].languages(), (turkish, vec![]));
+    assert_eq!(
+        paragraphs[1].languages(),
+        (turkish, vec![("four", english)])
+    );
 }
 
 #[test]
