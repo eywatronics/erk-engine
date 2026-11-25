@@ -1536,3 +1536,16 @@ On ikinci PR: yerleşimin sonucu yuvalar için değil kutular için yer tutuyor.
 | Test | `the_result_holds_room_for_boxes_not_slots`: 2000 gizli öğe, aralarında 2000 boşluk ve yirmi kutuda sonucun yığını yuva başına 4 bayt artı kutular; kutuların yerleşimi ve metni yerinde, gizlilerin kutusu yok |
 | Mutasyonlar | 5 mutasyonun 5'i yakalandı: her yuvaya kutu (yeni test), anonim paragrafların düşmesi (22 test), resimlerin düşmesi (2), yuvanın yerinin bir kayması (139), kutunun metninin düşmesi. Sonuncusu betikte kaçmış göründü: tüm kütüphane testleri koşarken süreç "FAILED" yazmadan düştü; elle yalnızca yeni testle koşunca yakalandı |
 | Kalan | Kartlı sayfanın yığını 123,4 MB: Erk'in yerleşimi 44,1 (`BoxData` 944 bayt × 30 004: Taffy önbelleği 384, iki `Layout` 184, paragrafın sonucu 104, seyrek alanlar ~116), Parley 27,9, DOM 17,9, Erk'in metni 13,6 |
+
+On üçüncü PR: kutunun seyrek alanları ayrı tutuluyor.
+
+| Konu | Not |
+|---|---|
+| Değişiklik | Yalnızca resimlerin, Erk'in çizdiği kontrollerin, mutlak konumlu öğelerin, metin alanlarının ve `select` etiketinin kullandığı alanlar (`replaced`, `static_position`, `field`, `field_height`, `check_control`, `option_labels`) `BoxData`'dan `Option<Box<Rare>>`'a taşındı; ilk yazılınca yapılıyor. `check_control` her öğe için yazılıyordu: artık yalnızca çizilen kontrolde, yoksa her kutu `Rare` yapardı. `pushed`, `found` ve `order` kutuda kaldı: blok çocuğu olan her blok ilk ikisini, her esnek öğe üçüncüsünü dolduruyor (seyrek değiller) |
+| Boyut | `BoxData` 944 → 888 bayt. Kartlı sayfada hiçbir kutunun seyrek alanı yok |
+| Yığın (B16, kartlı sayfa) | 123,4 → 121,8 MB; Erk'in yerleşimi 44,1 → 42,5 MB |
+| Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 160,9 MB (önceki PR 162,3), Electron 207,7 (%77). DX12: 282,5 / 222,6 (%127). `m2-demo.html` GPU kapalı %26, DX12 %109. Electron bu turda yine yüksek (208–223 MB) |
+| Test | `only_the_boxes_that_have_rare_fields_hold_them`: kart kutularında yok; resim, onay kutusu, mutlak konumlu öğe, `select` etiketi ve `textarea`'da var; en çok altı kutuda; `BoxData` ≤ 888 bayt |
+| Testin açığı | Metin alanının taban çizgisini koruyan `a_text_field_sits_on_the_line_of_the_text_around_it` (M5.8), `field` bayrağı hiç okunmasa da geçiyordu: alan alt kenarına oturunca satır büyüyor, alan yine satırın tepesinde başlıyordu. Test artık satırın alansız metninkinden yüksek olmadığını da denetliyor (bayraksız 27, bayrakla 22 piksel) |
+| Mutasyonlar | 5 mutasyonun 5'i yakalandı: her öğenin `check_control` yazması (yeni test), `check_control`'ün okunmaması (10 test), `field`'ın okunmaması (güçlendirilen test; ilk turda kaçtı), `select` etiketlerinin geri konmaması (yeni test), statik konumların kaydırılmaması (arena büyüme testi) |
+| Kalan | `BoxData`'nın 888 baytının 384'ü Taffy'nin önbelleği (dokuz ölçüm girdisi, her kutuda): kartlı sayfada ~11,5 MB. Küçültmek önbelleğin eşleştirmesini Erk'te yeniden yazmayı gerektiriyor (Taffy'nin anahtarı `CacheKey` özel); Taffy'nin `Cache`'iyle aynı sonucu verdiği sabit tohumlu bir denklik testiyle |
