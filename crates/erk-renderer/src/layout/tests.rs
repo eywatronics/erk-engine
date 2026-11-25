@@ -1467,6 +1467,61 @@ fn only_the_slots_that_make_a_box_hold_one() {
 }
 
 #[test]
+fn only_the_boxes_that_have_rare_fields_hold_them() {
+    // Cards hold none (M5.13); an image, a checkbox, an absolutely
+    // positioned element, a select's label and a textarea each hold theirs.
+    let (doc, state) = tree_of(
+        "<body><div class=card><div>Kart 1</div><div>bir cümle</div></div>\
+         <img id=img><input id=check type=checkbox>\
+         <div style='position: relative'><span id=abs style='position: absolute'>x</span></div>\
+         <select id=select><option>bir</option><option>iki</option></select>\
+         <textarea id=area></textarea></body>",
+    );
+    let by_id = |id: &str| {
+        let mut stack = vec![doc.root()];
+        while let Some(node) = stack.pop() {
+            if doc
+                .node(node)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| element.attr(&local_name!("id")) == Some(id))
+            {
+                return node.index() as usize;
+            }
+            stack.extend(doc.children(node));
+        }
+        panic!("no #{id}");
+    };
+    let rare = |at: usize| state.nodes[at].rare.as_deref();
+    for div in all(&doc, &local_name!("div")).into_iter().take(3) {
+        assert!(rare(div.index() as usize).is_none(), "a card's box");
+    }
+    assert!(rare(by_id("img")).is_some_and(|rare| rare.replaced.is_some()));
+    assert!(rare(by_id("check")).is_some_and(|rare| rare.check_control));
+    assert!(rare(by_id("abs")).is_some_and(|rare| rare.static_position.is_some()));
+    assert!(rare(by_id("area")).is_some_and(|rare| rare.field && rare.field_height.is_some()));
+    // The select's label is an anonymous box after the arena's slots.
+    let labels = state.nodes[state.slots..]
+        .iter()
+        .filter_map(|node| node.rare.as_deref())
+        .filter(|rare| rare.option_labels.len() == 2)
+        .count();
+    assert_eq!(labels, 1, "the select's label holds its options");
+    // Every box with rare fields is one of those.
+    let holding = state
+        .nodes
+        .iter()
+        .filter(|node| node.rare.is_some())
+        .count();
+    assert!(holding <= 6, "{holding} boxes hold rare fields");
+    // 944 bytes with the rare fields in it.
+    assert!(
+        size_of::<super::BoxData>() <= 888,
+        "a box is {} bytes",
+        size_of::<super::BoxData>()
+    );
+}
+
+#[test]
 fn room_made_for_the_arena_holds_no_box() {
     // The arena outgrew the room kept: the anonymous boxes move up, and
     // the slots between stay empty; the boxes keep naming their children.

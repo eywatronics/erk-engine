@@ -1739,6 +1739,16 @@ mod tests {
         // One line: the field's box is the line's height, at its top.
         assert!((field.y - line.y).abs() < 1.0, "{field:?} in {line:?}");
         assert!(field.height <= line.height + 0.5, "{field:?} in {line:?}");
+        // And the line is no taller than the text's alone: on its bottom
+        // edge (CSS 2 §10.8.1 for a box that clips) the field would push
+        // the line down by its text's descent.
+        let plain = verifying("<p id=p style='font: 16px sans-serif; margin: 0'>ad</p>");
+        let p = plain.query(None, "#p").unwrap().unwrap();
+        let alone = plain.node_box(p).unwrap().unwrap();
+        assert!(
+            line.height <= alone.height + 0.5,
+            "{line:?} against the text alone {alone:?}"
+        );
     }
 
     /// Press `key` (down and up) as a host does that prevents nothing: its

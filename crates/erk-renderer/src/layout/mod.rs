@@ -339,10 +339,7 @@ pub(crate) fn layout(
             layout: node.layout,
             text: text[index].take(),
             anonymous: Vec::new(),
-            image: node
-                .replaced
-                .as_ref()
-                .and_then(|replaced| replaced.image.clone()),
+            image: node.replaced().and_then(|replaced| replaced.image.clone()),
         });
     }
     for (index, node) in nodes.iter().enumerate().skip(reserved) {
@@ -422,7 +419,7 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
     let absolute = absolute_positions(doc, nodes);
     let round = |value: f32| (value + 0.5).floor();
     for index in 0..nodes.len() {
-        let Some(source) = nodes[index].static_position else {
+        let Some(source) = nodes[index].static_position() else {
             continue;
         };
         let inset = nodes[index].style.inset;
@@ -740,27 +737,14 @@ struct BoxData {
     shaped: Option<Arc<InlineLayout>>,
     /// Where a paragraph's box is from frame to frame, for the shape cache.
     shape_key: Option<ShapeKey>,
-    /// For a replaced element (`<img>`): its image, once it has arrived.
-    replaced: Option<Replaced>,
-    /// For an absolutely positioned element: where it would have been, and
-    /// whether it was block-level before it was taken out of the flow.
-    static_position: Option<StaticPosition>,
+    /// Whether an absolutely positioned element was block-level before it
+    /// was taken out of the flow.
     block_level: bool,
     /// The CSS `order` of a flex or grid item.
     order: i32,
-    /// Whether the box is a text field's: its baseline is its text's, even
-    /// where it clips what overflows (M5.8, as browsers lay fields out).
-    field: bool,
-    /// A textarea's content height when its own is auto: `rows` lines of
-    /// its line height (HTML §15.5.16), whatever it holds.
-    field_height: Option<f32>,
-    /// Whether the box is a checkbox's or radio button's Erk draws: its
-    /// baseline is its border box's bottom, as Chrome sets it (M5.10).
-    check_control: bool,
-    /// For the anonymous box that shows a drop-down `select`'s label: the
-    /// label of each of its options and the room before it, which the box
-    /// is as wide as the widest of, as Chrome sizes a select (M5.10).
-    option_labels: Vec<(Paragraph, f32)>,
+    /// What few boxes have: images, controls, absolutely positioned
+    /// elements. `None` for the rest.
+    rare: Option<Box<Rare>>,
     /// For an anonymous paragraph box, the arena index of its block.
     anonymous_parent: Option<usize>,
     /// The element whose box this slot holds, when it was built.
@@ -786,6 +770,63 @@ struct BoxData {
     cache: Cache,
     unrounded: Layout,
     layout: Layout,
+}
+
+/// The fields of a box few boxes have, held apart: on B16's page of
+/// 10 000 cards no box has one, and held in each box they made it 944
+/// bytes, 888 without (M5.13).
+#[derive(Default)]
+struct Rare {
+    /// For a replaced element (`<img>`): its image, once it has arrived.
+    replaced: Option<Replaced>,
+    /// For an absolutely positioned element: where it would have been.
+    static_position: Option<StaticPosition>,
+    /// Whether the box is a text field's: its baseline is its text's, even
+    /// where it clips what overflows (M5.8, as browsers lay fields out).
+    field: bool,
+    /// A textarea's content height when its own is auto: `rows` lines of
+    /// its line height (HTML §15.5.16), whatever it holds.
+    field_height: Option<f32>,
+    /// Whether the box is a checkbox's or radio button's Erk draws: its
+    /// baseline is its border box's bottom, as Chrome sets it (M5.10).
+    check_control: bool,
+    /// For the anonymous box that shows a drop-down `select`'s label: the
+    /// label of each of its options and the room before it, which the box
+    /// is as wide as the widest of, as Chrome sizes a select (M5.10).
+    option_labels: Vec<(Paragraph, f32)>,
+}
+
+impl BoxData {
+    /// The box's rare fields, made when one is first written.
+    fn rare_mut(&mut self) -> &mut Rare {
+        self.rare.get_or_insert_with(Box::default)
+    }
+
+    fn replaced(&self) -> Option<&Replaced> {
+        self.rare.as_ref()?.replaced.as_ref()
+    }
+
+    fn static_position(&self) -> Option<StaticPosition> {
+        self.rare.as_ref()?.static_position
+    }
+
+    fn field(&self) -> bool {
+        self.rare.as_ref().is_some_and(|rare| rare.field)
+    }
+
+    fn field_height(&self) -> Option<f32> {
+        self.rare.as_ref()?.field_height
+    }
+
+    fn check_control(&self) -> bool {
+        self.rare.as_ref().is_some_and(|rare| rare.check_control)
+    }
+
+    fn option_labels(&self) -> &[(Paragraph, f32)] {
+        self.rare
+            .as_ref()
+            .map_or(&[], |rare| rare.option_labels.as_slice())
+    }
 }
 
 struct LayoutTree<'t> {
@@ -872,11 +913,13 @@ impl LayoutState {
             for child in &mut node.children {
                 *child = taffy::NodeId::from(shift(usize::from(*child)));
             }
-            node.static_position = node.static_position.map(|position| match position {
-                StaticPosition::Placeholder(at) => StaticPosition::Placeholder(shift(at)),
-                StaticPosition::Line(at) => StaticPosition::Line(shift(at)),
-                other => other,
-            });
+            if let Some(rare) = &mut node.rare {
+                rare.static_position = rare.static_position.map(|position| match position {
+                    StaticPosition::Placeholder(at) => StaticPosition::Placeholder(shift(at)),
+                    StaticPosition::Line(at) => StaticPosition::Line(shift(at)),
+                    other => other,
+                });
+            }
         }
         self.nodes
             .splice(old..old, (0..delta).map(|_| LayoutNode::default()));
@@ -1200,8 +1243,9 @@ impl<'a> Builder<'a> {
             let rows = (field == TextField::Area)
                 .then(|| rows(doc, parent) as f32 * crate::text::line_height_of(computed));
             let node = &mut self.nodes[parent_index];
-            node.field = true;
-            node.field_height = rows;
+            let rare = node.rare_mut();
+            rare.field = true;
+            rare.field_height = rows;
             node.shape_key = Some(shape_key(parent, &paragraph));
             node.paragraph = Some(Arc::new(paragraph));
             return Vec::new();
@@ -1375,7 +1419,7 @@ impl<'a> Builder<'a> {
                         // sole item (CSS Flexbox §4.1); otherwise it starts at
                         // the container's content edge.
                         if container != parent {
-                            self.write(child).static_position =
+                            self.write(child).rare_mut().static_position =
                                 Some(StaticPosition::ContentStart(parent_index));
                         }
                     } else if run.has_content() {
@@ -1393,7 +1437,7 @@ impl<'a> Builder<'a> {
                             key: Some(BoxKey::Placeholder(child.to_bits())),
                             ..BoxData::default()
                         }));
-                        self.write(child).static_position =
+                        self.write(child).rare_mut().static_position =
                             Some(StaticPosition::Placeholder(placeholder));
                         children.push(taffy::NodeId::from(placeholder));
                     }
@@ -1440,7 +1484,7 @@ impl<'a> Builder<'a> {
                 })
                 .collect();
             let label_box = &mut self.nodes[usize::from(*label_box)];
-            label_box.option_labels = labels;
+            label_box.rare_mut().option_labels = labels;
             // Chrome's room around the label, which is not the select's
             // padding: a page's padding comes on top of it. A margin, as
             // anonymous boxes have no padding where they are painted. With
@@ -1577,10 +1621,15 @@ impl<'a> Builder<'a> {
                 if is_replaced(doc, id) {
                     self.replace(id, resources);
                 }
-                self.nodes[index].check_control = self.nodes[index]
+                // Written only where it is one, so that the other boxes
+                // make no rare fields.
+                if self.nodes[index]
                     .style_source
                     .as_ref()
-                    .is_some_and(|style| is_check_control(doc, id, style));
+                    .is_some_and(|style| is_check_control(doc, id, style))
+                {
+                    self.nodes[index].rare_mut().check_control = true;
+                }
                 // A button's content is centred in it, block by block, as
                 // Chrome lays it out, unless the page aligns it (M5.10).
                 if shows_label(doc, id) {
@@ -1591,7 +1640,7 @@ impl<'a> Builder<'a> {
                         style.align_content = Some(taffy::AlignContent::CENTER);
                     }
                 }
-                if self.nodes[index].check_control && in_block_flow(doc, styles, id) {
+                if self.nodes[index].check_control() && in_block_flow(doc, styles, id) {
                     // Taffy's block layout would stretch an auto width to
                     // the container; a drawn control keeps its natural one
                     // (CSS 2 §10.3.4, as an image).
@@ -1612,7 +1661,7 @@ impl<'a> Builder<'a> {
                 .map(|paragraph| paragraph.anchors())
                 .unwrap_or_default();
             for element in anchors {
-                self.nodes[element].static_position = Some(StaticPosition::Line(index));
+                self.nodes[element].rare_mut().static_position = Some(StaticPosition::Line(index));
             }
         }
     }
@@ -1654,7 +1703,7 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        self.nodes[index].replaced = Some(Replaced { image });
+        self.nodes[index].rare_mut().replaced = Some(Replaced { image });
     }
 
     /// Give the boxes built this frame that are unchanged since the last
@@ -1706,10 +1755,10 @@ impl<'a> Builder<'a> {
                 then.in_tree
                     && node.style == then.style
                     && node.paragraph == then.paragraph
-                    && node.field_height == then.field_height
-                    && node.check_control == then.check_control
-                    && node.option_labels == then.option_labels
-                    && match (&node.replaced, &then.replaced) {
+                    && node.field_height() == then.field_height()
+                    && node.check_control() == then.check_control()
+                    && node.option_labels() == then.option_labels()
+                    && match (node.replaced(), then.replaced()) {
                         (Some(now), Some(then)) => match (&now.image, &then.image) {
                             (Some(now), Some(then)) => Arc::ptr_eq(now, then),
                             (None, None) => true,
@@ -2482,7 +2531,7 @@ impl<'t> LayoutTree<'t> {
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
         self.computed[usize::from(id)] = true;
-        if let Some(replaced) = &self.node(id).replaced {
+        if let Some(replaced) = self.node(id).replaced() {
             // Sized by its style, else by its image's natural size; an image
             // that has not arrived has none.
             let natural = replaced.image.as_ref().map_or(Size::ZERO, |image| Size {
@@ -2515,7 +2564,7 @@ impl<'t> LayoutTree<'t> {
                 },
             );
         }
-        if self.node(id).check_control {
+        if self.node(id).check_control() {
             // A drawn checkbox or radio button: a leaf whose natural size
             // is Chrome's. Taffy's leaf layout puts a size the style or
             // the parent gives (a stretched flex item) first, each axis
@@ -2556,8 +2605,12 @@ impl<'t> LayoutTree<'t> {
         };
         let style = self.nodes[index].style.clone();
         let key = self.nodes[index].shape_key;
-        let field_height = self.nodes[index].field_height;
-        let option_labels = std::mem::take(&mut self.nodes[index].option_labels);
+        let field_height = self.nodes[index].field_height();
+        let option_labels = self.nodes[index]
+            .rare
+            .as_mut()
+            .map(|rare| std::mem::take(&mut rare.option_labels))
+            .unwrap_or_default();
         let calcs = self.calcs;
         let mut measured: Option<Arc<InlineLayout>> = None;
         let mut output = compute_leaf_layout(
@@ -2626,7 +2679,9 @@ impl<'t> LayoutTree<'t> {
             self.nodes[index].shaped = Some(shaped);
         }
         self.nodes[index].paragraph = Some(paragraph);
-        self.nodes[index].option_labels = option_labels;
+        if let Some(rare) = self.nodes[index].rare.as_mut() {
+            rare.option_labels = option_labels;
+        }
         output
     }
 
@@ -2662,11 +2717,11 @@ impl<'t> LayoutTree<'t> {
             // edge (CSS 2 §10.8.1).
             let visible = (style.overflow.x == Overflow::Visible
                 && style.overflow.y == Overflow::Visible)
-                || self.nodes[atom].field;
+                || self.nodes[atom].field();
             let baseline = visible
                 .then(|| output.baselines.last.or(output.baselines.first))
                 .flatten();
-            let above = if self.nodes[atom].check_control {
+            let above = if self.nodes[atom].check_control() {
                 margin.top + output.size.height
             } else {
                 baseline.map_or(outer_height, |baseline| margin.top + baseline)
