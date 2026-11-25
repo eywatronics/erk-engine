@@ -253,8 +253,10 @@ cargo run -p erk-shell -- --screenshot out.png examples/merhaba.html
 ```
 
 The window draws on the GPU (wgpu and vello_hybrid) when the machine can,
-and says so on stderr; `--cpu` draws with vello_cpu instead. Screenshots,
-golden images and the reference tests always use vello_cpu.
+and says so on stderr; `--cpu` draws with vello_cpu instead. `--gl` draws
+on the GPU through OpenGL rather than the platform's own API (DX12 on
+Windows): less memory, slower painting. Screenshots, golden images and the
+reference tests always use vello_cpu.
 
 ## Project layout
 

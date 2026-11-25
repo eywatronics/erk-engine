@@ -47,7 +47,7 @@ use erk::{
 
 /// The ABI's version: `(major << 16) | minor`. Within a major version
 /// functions, constants and trailing structure fields are only added.
-pub const ERK_ABI_VERSION: u32 = 19;
+pub const ERK_ABI_VERSION: u32 = 20;
 
 /// What a call did: `ERK_OK`, or why it failed.
 pub type ErkStatus = i32;
@@ -190,6 +190,10 @@ pub const ERK_APP_HEADLESS: u32 = 1;
 pub const ERK_APP_EMBEDDED_FONTS: u32 = 2;
 /// Draw the window on the CPU even where a GPU is available.
 pub const ERK_APP_CPU: u32 = 4;
+/// Draw the window on the GPU through OpenGL rather than the platform's
+/// own graphics API (on Windows DX12): less memory, slower painting; on
+/// the CPU where there is no GL. `ERK_APP_CPU` wins. ABI 20.
+pub const ERK_APP_GL: u32 = 8;
 
 /// What an app starts with. Fields past `struct_size` take their defaults.
 #[repr(C)]
@@ -928,6 +932,7 @@ pub extern "C" fn erk_app_create(config: *const ErkConfig, out: *mut *mut ErkApp
             },
             system_fonts: flags & ERK_APP_EMBEDDED_FONTS == 0,
             gpu: flags & ERK_APP_CPU == 0,
+            gl: flags & ERK_APP_GL != 0,
         };
         let mut app = if flags & ERK_APP_HEADLESS != 0 {
             App::headless(config)

@@ -43,9 +43,13 @@ jobs:
       # The GPU path's tests (M2.5) need an adapter and the hosted runners
       # have no GPU: Linux gets Mesa's software Vulkan (lavapipe); Windows
       # has WARP, DirectX's software adapter, built in; macOS has Metal.
+      # Mesa's GL (llvmpipe, through EGL) is for the GL backend's test
+      # (M5.13), which requires it on Linux.
       - name: Software GPU (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          mesa-vulkan-drivers libegl1 libegl-mesa0 libgl1-mesa-dri
 
       - name: Check formatting
         run: cargo fmt --all -- --check
