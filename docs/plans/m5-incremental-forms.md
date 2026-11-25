@@ -1511,3 +1511,16 @@ Onuncu PR: host pencereyi OpenGL'le çizdirebiliyor (sahibin kararı, 2026-11-24
 | Testler | `gl_paints_what_the_cpu_paints`: tüm sayfa (resimler, gradyanlar, gölge, dönüşüm) GL'de CPU'yla aynı; bu makinede 144 000 pikselin 14'ü farklı (Vulkan'la aynı), 2 ölçekte hiçbiri. Linux CI'ı Mesa'nın GL'ini (llvmpipe, EGL) kuruyor ve testi orada zorunlu tutuyor; Windows'un WARP'ında ve macOS'ta GL yok, test bunu yazıp çıkıyor. `a_gl_atlas_starts_with_two_small_layers`; kabuğun `--gl` ayrıştırması |
 | Mutasyonlar | 7 mutasyonun 7'si yakalandı: GL'de tek katman, katmanın küçültülmemesi, en çok bir katman, her arka uca GL'in atlası, cihazın arka ucu yok sayması (yalnızca GL'in çizim testi yakaladı: resimler eksik), `--gl`'in GL'siz ve CPU'da çizmesi. Pencerenin seçimi (`window.rs`) ve C bayrağının eşlemesi pencere gerektiriyor, testsiz; GL penceresi kabukta elle açıldı ve logu "Intel(R) UHD Graphics (Gl)" diyor |
 | Karar | GL seçenek olarak kalıyor, varsayılan DX12 (sahibin kararı, 2026-11-25). GL bellekte DX12'den ~90 MB az, ama tam sayfayı 3–5 kat yavaş boyuyor ve adaptör seçilemiyor |
+
+On birinci PR: Parley'in tutulan düzeninde kullanılmayan yer.
+
+| Konu | Not |
+|---|---|
+| Bulgu | B16 kartlı sayfada (main, b694677) canlı yığının 170,7 MB'ının 67,6'sını Parley'e veriyordu: kümeler 32,8 MB (paragraf başına 1,6 KB, ~40 küme), glifler 13,4, satırlar 7,9 + 3,7 MB. Parley düzenin dizilerini şekillerken büyütüyor ve kullanmadığı kapasiteyi tutuyor; Erk düzeni şekil önbelleğinde kareler boyu saklıyor |
+| Düzeltme | Yeni şekillenen düzen satırlarına kırıldıktan sonra kopyalanıyor (`Layout` `Clone`, `Vec::clone` uzunluğu kadar ayırıyor) ve kopya tutuluyor. Önbellekten gelen düzen zaten kopya. Reddedilen: Parley'in dizilerini daraltmak (alanlar `pub(crate)`, fork gerekir); düzeni hiç tutmamak (genişlik değişince yeniden şekillemek, #118'in kazancını geri verir) |
+| Yığın (B16, kartlı sayfa) | 170,7 → 131,0 MB; Parley 67,6 → 27,9 MB. Eleman başına 5,8 → 4,5 KB |
+| Süre (B14, sayfanın açılışı, sırayla iki tur) | Kopyayla 859 / 1532 ms, kopyasız 854 / 1573 ms (ikinci turda makine gürültülü); fark gürültünün içinde |
+| Karşılaştırma (`compare.ps1`, DX12 ve `-Gl`) | `erk-10000.html` GPU kapalı: Erk 171,4 MB, Electron 198,8 (%86; önceki tur %123). GPU açık: DX12 293,9 / 222,0 (%132), GL 207,1 / 224,8 (%92). `m2-demo.html` GPU açık GL ile %48, DX12 ile %113; kapalı %26. Electron bu turda kartlı sayfada 222–225 MB ölçüldü (önceki tur 189–190): oranlar onunla da oynuyor. Çıta (%50) tutmuyor; Erk kartlı sayfada ilk kez Electron'un altında |
+| Test | `crates/erk-ffi/tests/text_memory.rs`, `a_laid_out_card_keeps_little`: sayaçlı global ayırıcıyla (ayrı test ikilisi, sayaç yalnızca bu testin) kartlı sayfa gibi 500 ve 1500 kartlık iki sayfanın canlı yığın farkından kart başı pay. 19 477 bayt (kopyasız 27 685), sınır 20 KB. M5.13-F'nin bütçesi değil (o B16'nın kalıcı belleği, `.github/memory-budget.txt`), bu düzeltmenin muhafızı |
+| Mutasyonlar | 2 mutasyonun 2'si yakalandı: yeni düzenin kopyalanmaması, yalnızca önbellekten gelenin kopyalanması |
+| Kalan | Kartlı sayfanın yığını 131 MB: Erk'in yerleşimi 51,8 (`BoxData` 944 bayt × 30 004: Taffy önbelleği 384, iki `Layout` 184, paragrafın sonucu 104, seyrek alanlar ~116), Parley 27,9, DOM 17,9 (arenanın 15 MB'lık tek bloğu), Erk'in metni 13,6 |
