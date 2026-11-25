@@ -1562,3 +1562,16 @@ On dördüncü PR: kutunun yerleşim önbelleği yazılanı tutuyor.
 | Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 153,9 MB (önceki PR 160,9), Electron 202,4 (%76). DX12: 272,1 / 221,5 (%123). `m2-demo.html` kapalı %26, DX12 %111. Çıta (%50) tutmuyor |
 | Mutasyonlar | 10 mutasyonun 9'u yakalandı: belirlilik karşılaştırılmaması, ebeveynin iki boyutunun karşılaştırılması, her eksenin yanıtlaması, ikinci şansın düşmesi, kenar boşluğu taşıyan ölçümün tutulması, isabetin kullanıldı sayılmaması, son yerleşimin her girdiye yanıtı (denklik testi); yuvaların `Vec` gibi büyümesi, temizlemenin yeri tutması (yer testi). Kaçan: yatay ve dikey eksen bitlerinin takası, eşdeğer mutant (saklanan ve sorulan anahtarda aynı takas; eşleştirme iki eksene simetrik) |
 | Kalan | Kartlı sayfanın yığını 114,2 MB: Erk'in yerleşimi 35,0 (`BoxData` ~616 bayt: iki `Layout` 184, paragrafın sonucu 104, önbellek ~112), Parley 27,9, DOM 17,9 (arenanın 15 MB'lık tek bloğu), Erk'in metni 13,6, stiller 9,1 |
+
+On beşinci PR: DOM arenası kullandığı kadar yer tutuyor.
+
+| Konu | Not |
+|---|---|
+| Bulgu | Arena düğümleri tek bir `Vec`'te tutuyor ve `Vec` iki katına çıkarak büyüyor: kartlı sayfanın ~90 000 düğümü için 131 072 yuva × 120 bayt, 15 MB'ın ~5 MB'ı boş |
+| Değişiklik | Arena dolunca çeyreği kadar (en az 64 yuva) büyüyor (`reserve_exact`); ayrıştırma bitince (`Sink::finish`, yeni belge de `load_html` de) boşta kalan yer bırakılıyor (`Arena::shrink_to_fit`). Yalnızca kırpmak yetmezdi: kırpılmış arenaya host'un eklediği tek düğüm onu iki katına çıkarırdı. Çeyreklik büyüme yuvaları daha sık kopyalıyor, her yuvayı yine sınırlı sayıda (~4 kez, ikiye katlamada ~1) |
+| Yığın (B16, kartlı sayfa) | 114,2 → 109,5 MB; DOM 17,9 → 13,2 MB. Ayrıştırma sonrası 18,3 → 13,6 MB, tepesi 20,1 → 17,3 MB. Eleman başına 3,9 → 3,7 KB |
+| Süre (B14, sayfanın açılışı, beş tur, sıra değişerek) | Çeyrek / ikiye katlama: 1079 / 960, 859 / 827, 1061 / 1150, 1262 / 1221, 1055 / 1607 ms. Tutarlı fark yok (kuramsal maliyet: ~10 MB'ın üç kez fazla kopyalanması, birkaç ms). B1: 26,9 / 23,2 ve 19,0 / 19,2 ms |
+| Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 149,3 MB (önceki PR 153,9), Electron 174,4 (%86). DX12: 267,9 / 189,9 (%141). `m2-demo.html` kapalı %27, DX12 %131. Electron bu turda düşük (174–190 MB) |
+| Testler | `an_arena_grows_by_a_quarter`: 100 000 eklemede boş yer hiçbir an çeyrekten (ve 64'ten) fazla değil, kırpınca yok. `a_parsed_document_holds_room_for_its_nodes_alone`: 2000 kartlık sayfa yeni belgeye de eski belgeye de ayrıştırılınca arenanın yeri yuva sayısı kadar |
+| Mutasyonlar | 3 mutasyonun 3'ü yakalandı: arenanın ikiye katlanması, ayrıştırmanın yeri tutması, kırpmanın yuvaları bırakmaması |
+| Kalan | Kartlı sayfanın yığını 109,5 MB: Erk'in yerleşimi 35,0, Parley 27,9, Erk'in metni 13,6, DOM 13,2, stiller 9,1 |

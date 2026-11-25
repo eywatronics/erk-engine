@@ -81,7 +81,11 @@ impl TreeSink for Sink {
     type ElemName<'a> = Ref<'a, QualName>;
 
     fn finish(self) -> Document {
-        self.doc.into_inner()
+        // The arena grew as the parser went; a document is mostly as
+        // large as its page made it.
+        let mut doc = self.doc.into_inner();
+        doc.shrink_to_fit();
+        doc
     }
 
     // Parse errors are recoverable by definition; the tree builder has
@@ -243,5 +247,24 @@ impl TreeSink for Sink {
             .get(*handle)
             .as_element()
             .is_some_and(|element| element.mathml_annotation_xml_integration_point)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_parsed_document_holds_room_for_its_nodes_alone() {
+        // The arena grew as the parser went; what it did not fill is given
+        // back (M5.13), whether the page was parsed into a new document or
+        // loaded into an old one.
+        let page = "<div class=card><div>Kart</div><div>bir cümle</div></div>\n".repeat(2000);
+        let doc = Document::parse_html(&page);
+        assert!(doc.capacity_hint() > 10_000);
+        assert_eq!(doc.room(), doc.capacity_hint());
+        let mut loaded = Document::parse_html("<p>a</p>");
+        loaded.load_html(&page);
+        assert_eq!(loaded.room(), loaded.capacity_hint());
     }
 }

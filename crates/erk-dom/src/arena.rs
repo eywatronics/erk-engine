@@ -71,6 +71,13 @@ impl<T> Arena<T> {
             };
         }
         let index = u32::try_from(self.slots.len()).expect("arena holds at most u32::MAX values");
+        if self.slots.len() == self.slots.capacity() {
+            // A Vec doubles: the page of 10 000 cards (some 90 000 nodes)
+            // held 131 072 slots of 120 bytes, 5 MB of them empty (M5.13).
+            // A quarter more at a time copies the slots more often, still
+            // a bounded number of times each.
+            self.slots.reserve_exact(self.slots.len() / 4 + MIN_GROWTH);
+        }
         let generation = NonZeroU32::MIN;
         self.slots.push(Slot {
             generation,
@@ -131,11 +138,44 @@ impl<T> Arena<T> {
     pub fn capacity_hint(&self) -> usize {
         self.slots.len()
     }
+
+    /// Give back the room made for slots no value has taken: after a
+    /// parse, which grew the arena as it went.
+    pub fn shrink_to_fit(&mut self) {
+        self.slots.shrink_to_fit();
+        self.free.shrink_to_fit();
+    }
+
+    /// How many slots there is room for.
+    #[cfg(test)]
+    pub(crate) fn room(&self) -> usize {
+        self.slots.capacity()
+    }
 }
+
+/// The fewest slots an arena grows by.
+const MIN_GROWTH: usize = 64;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_arena_grows_by_a_quarter() {
+        // Never more than a quarter (and the fewest slots it grows by)
+        // empty, where a doubling Vec leaves up to half (M5.13).
+        let mut arena = Arena::new();
+        for value in 0..100_000u32 {
+            arena.insert(value);
+            let (len, room) = (arena.capacity_hint(), arena.room());
+            assert!(
+                room <= len + len / 4 + MIN_GROWTH,
+                "{room} slots of room for {len}"
+            );
+        }
+        arena.shrink_to_fit();
+        assert_eq!(arena.room(), arena.capacity_hint());
+    }
 
     #[test]
     fn an_id_survives_its_number_and_a_zero_generation_is_no_id() {
