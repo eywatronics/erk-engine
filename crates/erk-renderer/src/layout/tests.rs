@@ -31,6 +31,32 @@ fn lay_out(body: &str) -> (Document, Layouts) {
     (doc, layouts)
 }
 
+/// The result holds a box's layout, text and image for the boxes alone:
+/// most slots have none (M5.13). Here 2000 hidden elements, 2000 runs of
+/// white space between them and twenty boxes.
+#[test]
+fn the_result_holds_room_for_boxes_not_slots() {
+    let hidden = "<i style='display: none'></i> ".repeat(2000);
+    let shown = "<div>kutu</div>".repeat(20);
+    let (doc, layouts) = lay_out(&format!("{hidden}{shown}"));
+    let slots = doc.capacity_hint();
+    assert!(slots > 4000, "{slots} slots");
+    let held = layouts.held_bytes();
+    // A slot's place in the boxes, four bytes, and some 30 boxes (the
+    // twenty, the document's, its root's, the body's, their paragraphs).
+    let bound = slots * 4 + 30 * (size_of::<Layout>() + 64);
+    assert!(held <= bound, "{held} bytes held for {slots} slots");
+    // What they hold is still there.
+    let divs = all(&doc, &local_name!("div"));
+    assert_eq!(divs.len(), 20);
+    for div in divs {
+        assert!(layouts.get(div).is_some());
+        assert!(layouts.text(div).is_some());
+    }
+    let hidden = all(&doc, &local_name!("i"));
+    assert!(hidden.iter().all(|i| layouts.get(*i).is_none()));
+}
+
 /// The text a paragraph draws is the layout the shape cache keeps for the
 /// next frame, not a copy of it (M5.13): its glyphs are held once.
 #[test]

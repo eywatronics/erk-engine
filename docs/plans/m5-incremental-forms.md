@@ -1524,3 +1524,15 @@ On birinci PR: Parley'in tutulan düzeninde kullanılmayan yer.
 | Test | `crates/erk-ffi/tests/text_memory.rs`, `a_laid_out_card_keeps_little`: sayaçlı global ayırıcıyla (ayrı test ikilisi, sayaç yalnızca bu testin) kartlı sayfa gibi 500 ve 1500 kartlık iki sayfanın canlı yığın farkından kart başı pay. 19 477 bayt (kopyasız 27 685), sınır 20 KB. M5.13-F'nin bütçesi değil (o B16'nın kalıcı belleği, `.github/memory-budget.txt`), bu düzeltmenin muhafızı |
 | Mutasyonlar | 2 mutasyonun 2'si yakalandı: yeni düzenin kopyalanmaması, yalnızca önbellekten gelenin kopyalanması |
 | Kalan | Kartlı sayfanın yığını 131 MB: Erk'in yerleşimi 51,8 (`BoxData` 944 bayt × 30 004: Taffy önbelleği 384, iki `Layout` 184, paragrafın sonucu 104, seyrek alanlar ~116), Parley 27,9, DOM 17,9 (arenanın 15 MB'lık tek bloğu), Erk'in metni 13,6 |
+
+On ikinci PR: yerleşimin sonucu yuvalar için değil kutular için yer tutuyor.
+
+| Konu | Not |
+|---|---|
+| Bulgu | `Layouts` arenanın her yuvası için bir `Option<Layout>` (96 bayt), metin, anonim paragraf listesi ve resim tutuyordu: yuva başına 136 bayt. Yuvaların çoğunun kutusu yok (metin düğümleri, öğeler arasındaki boşluk): kartlı sayfada ~90 000 yuva, 30 000 kutu; 11,7 MB yuvalara gidiyordu (B16: 8,24 MB `nodes`, 2,06 MB `anonymous`, `text` ve `images` 0,7'şer) |
+| Değişiklik | Yuva kutusunun sırasını tutuyor (`at`, 4 bayt, `NO_BOX`); kutular (`LaidOut`) yerleşimini, metnini, anonim paragraflarını ve resmini birlikte. `Layouts`'a yalnızca yöntemleriyle erişiliyor, başka hiçbir şey değişmedi. Resim artık yalnızca kutusu olan `<img>` için tutuluyor: display list onu yalnızca bir kutuyu boyarken okuyor. Reddedilen: `Layouts`'u `LayoutState`'in kutularından okumak (o iş parçacığına bağlı, calc işaretçileri yüzünden `Send` değil) |
+| Yığın (B16, kartlı sayfa) | 131,0 → 123,4 MB; Erk'in yerleşimi 51,8 → 44,1 MB. Eleman başına 4,5 → 4,2 KB |
+| Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 162,3 MB (önceki PR 171,4), Electron 177,9 (%91). GL: 202,8 / 186,8 (%109). DX12: 283,9 / 190,9 (%149). Electron bu turda yine 178–191 MB ölçüldü (önceki tur 199–225): oran Erk düşerken yükseldi; Erk'in kendi değerine bakılıyor. `m2-demo.html` GL %56, CPU %26 |
+| Test | `the_result_holds_room_for_boxes_not_slots`: 2000 gizli öğe, aralarında 2000 boşluk ve yirmi kutuda sonucun yığını yuva başına 4 bayt artı kutular; kutuların yerleşimi ve metni yerinde, gizlilerin kutusu yok |
+| Mutasyonlar | 5 mutasyonun 5'i yakalandı: her yuvaya kutu (yeni test), anonim paragrafların düşmesi (22 test), resimlerin düşmesi (2), yuvanın yerinin bir kayması (139), kutunun metninin düşmesi. Sonuncusu betikte kaçmış göründü: tüm kütüphane testleri koşarken süreç "FAILED" yazmadan düştü; elle yalnızca yeni testle koşunca yakalandı |
+| Kalan | Kartlı sayfanın yığını 123,4 MB: Erk'in yerleşimi 44,1 (`BoxData` 944 bayt × 30 004: Taffy önbelleği 384, iki `Layout` 184, paragrafın sonucu 104, seyrek alanlar ~116), Parley 27,9, DOM 17,9, Erk'in metni 13,6 |
