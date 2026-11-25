@@ -61,6 +61,17 @@ impl Document {
         self.nodes.capacity_hint()
     }
 
+    /// Give back the arena's room no node has taken (after a parse).
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.nodes.shrink_to_fit();
+    }
+
+    /// How many nodes the arena has room for.
+    #[cfg(test)]
+    pub(crate) fn room(&self) -> usize {
+        self.nodes.room()
+    }
+
     pub fn children(&self, parent: NodeId) -> Children<'_> {
         Children {
             doc: self,
