@@ -73,17 +73,33 @@ use crate::text::{
 
 /// The result of laying out one document.
 pub(crate) struct Layouts {
-    nodes: Vec<Option<Layout>>,
-    text: Vec<Option<Arc<ShapedText>>>,
-    /// Anonymous paragraph boxes, by the index of the block they belong to.
-    anonymous: Vec<Vec<AnonymousText>>,
-    /// The decoded image of each `<img>` whose image has arrived.
-    images: Vec<Option<Arc<Image>>>,
+    /// Where each arena slot's box is in `boxes`, [`NO_BOX`] for a node
+    /// that generates none. Most slots have none (text nodes, the white
+    /// space between elements): B16's page of 10 000 cards has some 90 000
+    /// slots and 30 000 boxes, and 11.7 MB went to slots before boxes alone
+    /// were kept (M5.13).
+    at: Vec<u32>,
+    boxes: Vec<LaidOut>,
     /// How many paragraphs were shaped: those the shape cache did not hold.
     shaped: usize,
     /// How many boxes were laid out: those whose inputs or descendants
     /// changed since the layout before (M5.4).
     laid_out: usize,
+}
+
+/// What [`Layouts::at`] holds for a slot with no box.
+const NO_BOX: u32 = u32::MAX;
+
+/// A box as layout left it.
+struct LaidOut {
+    /// Its final (pixel-rounded) layout, relative to its parent box.
+    layout: Layout,
+    /// A paragraph box's text.
+    text: Option<Arc<ShapedText>>,
+    /// The anonymous paragraph boxes among its children, in tree order.
+    anonymous: Vec<AnonymousText>,
+    /// An `<img>`'s decoded image, once it has arrived.
+    image: Option<Arc<Image>>,
 }
 
 /// An anonymous paragraph box: a run of inline content between the block
@@ -134,20 +150,38 @@ impl Layouts {
     /// `None` for nodes that generate no box. An atomic inline's parent box
     /// is the block it sits in, whichever inline elements are between.
     pub(crate) fn get(&self, id: NodeId) -> Option<&Layout> {
-        self.nodes.get(id.index() as usize)?.as_ref()
+        self.laid_out(id).map(|laid_out| &laid_out.layout)
+    }
+
+    /// `id`'s box, if it generates one.
+    fn laid_out(&self, id: NodeId) -> Option<&LaidOut> {
+        let at = *self.at.get(id.index() as usize)?;
+        self.boxes.get(at as usize)
     }
 
     /// The shaped, line-broken text of a paragraph, positioned relative to
     /// its content box.
     pub(crate) fn text(&self, id: NodeId) -> Option<&ShapedText> {
-        self.text.get(id.index() as usize)?.as_deref()
+        self.laid_out(id)?.text.as_deref()
     }
 
     /// The anonymous paragraph boxes among `id`'s children, in tree order.
     pub(crate) fn anonymous(&self, id: NodeId) -> &[AnonymousText] {
-        self.anonymous
-            .get(id.index() as usize)
-            .map_or(&[], Vec::as_slice)
+        self.laid_out(id)
+            .map_or(&[], |laid_out| laid_out.anonymous.as_slice())
+    }
+
+    /// The heap the result holds for its slots and boxes, their texts and
+    /// images shared and not counted.
+    #[cfg(test)]
+    pub(crate) fn held_bytes(&self) -> usize {
+        self.at.capacity() * size_of::<u32>()
+            + self.boxes.capacity() * size_of::<LaidOut>()
+            + self
+                .boxes
+                .iter()
+                .map(|laid_out| laid_out.anonymous.capacity() * size_of::<AnonymousText>())
+                .sum::<usize>()
     }
 
     /// Whether `styles` split every paragraph's text into the same runs of
@@ -156,8 +190,16 @@ impl Layouts {
     /// wherever they had not they still have not. Then a fresh layout would
     /// split the glyph runs where these are split (M5.4).
     pub(crate) fn colours_split_alike(&self, doc: &Document, styles: &Styles) -> bool {
-        let anonymous = self.anonymous.iter().flatten().map(|text| &text.text);
-        self.text.iter().flatten().chain(anonymous).all(|shaped| {
+        let own = self
+            .boxes
+            .iter()
+            .filter_map(|laid_out| laid_out.text.as_ref());
+        let anonymous = self
+            .boxes
+            .iter()
+            .flat_map(|laid_out| &laid_out.anonymous)
+            .map(|text| &text.text);
+        own.chain(anonymous).all(|shaped| {
             let now = source_colours(doc, styles, &shaped.sources);
             now.len() == shaped.colours.len()
                 && now
@@ -169,7 +211,7 @@ impl Layouts {
 
     /// The image an `<img>` shows, if it has arrived.
     pub(crate) fn image(&self, id: NodeId) -> Option<&Arc<Image>> {
-        self.images.get(id.index() as usize)?.as_ref()
+        self.laid_out(id)?.image.as_ref()
     }
 }
 
@@ -285,36 +327,40 @@ pub(crate) fn layout(
             Some(shaped)
         })
         .collect();
-    let mut anonymous: Vec<Vec<AnonymousText>> = (0..slots).map(|_| Vec::new()).collect();
+    let mut at = vec![NO_BOX; slots.min(nodes.len())];
+    let mut boxes =
+        Vec::with_capacity(nodes.iter().take(slots).filter(|node| node.in_tree).count());
+    for (index, node) in nodes.iter().enumerate().take(slots) {
+        if !node.in_tree {
+            continue;
+        }
+        at[index] = boxes.len() as u32;
+        boxes.push(LaidOut {
+            layout: node.layout,
+            text: text[index].take(),
+            anonymous: Vec::new(),
+            image: node
+                .replaced
+                .as_ref()
+                .and_then(|replaced| replaced.image.clone()),
+        });
+    }
     for (index, node) in nodes.iter().enumerate().skip(reserved) {
-        if let (Some(parent), Some(shaped)) = (node.anonymous_parent, text[index].take()) {
-            anonymous[parent].push(AnonymousText {
+        let block = node.anonymous_parent.and_then(|parent| at.get(parent));
+        if let (Some(&block), Some(shaped)) = (block, text[index].take())
+            && let Some(block) = boxes.get_mut(block as usize)
+        {
+            block.anonymous.push(AnonymousText {
                 layout: node.layout,
                 text: shaped,
             });
         }
     }
-    text.truncate(slots);
-    let images = nodes
-        .iter()
-        .take(slots)
-        .map(|node| {
-            node.replaced
-                .as_ref()
-                .and_then(|replaced| replaced.image.clone())
-        })
-        .collect();
     let layouts = Layouts {
         laid_out: laid_out_count,
         shaped: shaped_count,
-        nodes: nodes
-            .iter()
-            .take(slots)
-            .map(|node| node.in_tree.then_some(node.layout))
-            .collect(),
-        text,
-        anonymous,
-        images,
+        at,
+        boxes,
     };
     (
         layouts,
