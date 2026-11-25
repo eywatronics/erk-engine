@@ -392,7 +392,9 @@ impl ApplicationHandler<UserEvent> for Host<'_> {
         };
         // Made here, on the window's thread: some platforms give a window's
         // handle only there.
-        let raster = if self.app.config.gpu {
+        let raster = if self.app.config.gpu && self.app.config.gl {
+            RasterThread::on_window_gl(window.clone(), sink)
+        } else if self.app.config.gpu {
             RasterThread::on_window(window.clone(), sink)
         } else {
             RasterThread::cpu(sink)

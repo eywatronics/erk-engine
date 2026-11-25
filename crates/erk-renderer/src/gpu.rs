@@ -83,6 +83,33 @@ fn atlas_config() -> AtlasConfig {
     AtlasConfig::default()
 }
 
+/// `atlas` as `backend` can sample it. wgpu's GL backend makes a texture
+/// of one layer a plain `TEXTURE_2D` (wgpu issues #1614, #1574), where
+/// vello_hybrid samples its atlas as an array: on GL no image was drawn
+/// (M5.13). There the atlas starts with two layers, and they are at most
+/// [`GL_ATLAS_SIDE`] on a side, since both are made up front.
+fn on_backend(atlas: AtlasConfig, backend: wgpu::Backend) -> AtlasConfig {
+    if backend != wgpu::Backend::Gl {
+        return atlas;
+    }
+    AtlasConfig {
+        atlas_size: (
+            atlas.atlas_size.0.min(GL_ATLAS_SIDE),
+            atlas.atlas_size.1.min(GL_ATLAS_SIDE),
+        ),
+        initial_atlas_count: atlas.initial_atlas_count.max(2),
+        max_atlases: atlas.max_atlases.max(2),
+        ..atlas
+    }
+}
+
+/// The side of an atlas layer on GL. Both layers are made up front, on
+/// every page, images or not: vello_hybrid's 4096 would hold 128 MB. The
+/// shell's window (2026-11-25, M5.13, two runs) held 62–66 MB on a small
+/// page with 1024, 86–91 MB with 2048; GL is the option for less memory.
+/// A larger image is drawn from a smaller copy ([`fitted`]).
+const GL_ATLAS_SIDE: u32 = 1024;
+
 /// `image` made small enough for an atlas of `limit`, averaging the pixels
 /// each new one covers; `None` when it fits. vello_hybrid panics on an
 /// image larger than its atlas (M5.13: a 5000-pixel-wide image stopped the
@@ -143,6 +170,15 @@ pub(crate) const WINDOW_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 #[cfg(not(windows))]
 pub(crate) const WINDOW_BACKENDS: wgpu::Backends =
     wgpu::Backends::PRIMARY.union(wgpu::Backends::GL);
+
+/// The backends a window is drawn with when the host asks for GL: wgpu's
+/// GL backend alone, through the system's OpenGL (on Windows WGL and
+/// `opengl32.dll`). Measured on Windows (the shell's window, 2026-11-24,
+/// M5.13), the process held some 57 MB on a small page, against 152 MB on
+/// DX12 and 27 MB on the CPU; painting the whole page took 22–27 ms
+/// against DX12's 5–7 and the CPU's 34–36. On that machine wgpu's GL
+/// opens the integrated GPU, and which adapter it opens cannot be chosen.
+pub(crate) const GL_BACKENDS: wgpu::Backends = wgpu::Backends::GL;
 
 /// The device Erk paints with. wgpu's default memory hint, `Performance`,
 /// lets its allocator take GPU memory in big blocks up front. Measured on
@@ -279,6 +315,8 @@ impl Gpu {
         let (device, queue) =
             block_on(adapter.request_device(&device_descriptor(&adapter.limits())))
                 .map_err(|error| format!("no device: {error}"))?;
+        let info = adapter.get_info();
+        let atlas = on_backend(atlas, info.backend);
         // vello_hybrid keeps each side of a layer within the device's limit.
         let largest = device.limits().max_texture_dimension_2d;
         let atlas_limit = (
@@ -300,7 +338,6 @@ impl Gpu {
                 ..RenderSettings::default()
             },
         );
-        let info = adapter.get_info();
         Ok(Self {
             device,
             queue,
@@ -711,8 +748,9 @@ mod tests {
       </div>
     </body>"#;
 
-    /// The page through both rasterizers: CPU pixels, GPU pixels.
-    fn both(width: u16, height: u16, scale: f32) -> (Vec<u8>, Vec<u8>) {
+    /// The page through both rasterizers, the GPU's `gpu`: CPU pixels, GPU
+    /// pixels.
+    fn both(gpu: &mut Gpu, width: u16, height: u16, scale: f32) -> (Vec<u8>, Vec<u8>) {
         let mut page = Page::parse(PAGE);
         let mut resources = PageResources::default();
         let (_, requests) = page.prepare(width, height, scale, &mut resources, &mut |_| {});
@@ -732,9 +770,6 @@ mod tests {
         let mut tables = Tables::default();
         tables.apply(resources.table_updates(&list));
         let cpu = crate::paint::paint(&list, &tables, width, height, crate::device_scale(scale));
-        let mut gpu =
-            Gpu::offscreen(wgpu::Backends::all()).expect("a GPU adapter, or WARP or lavapipe");
-        eprintln!("adapter: {}", gpu.adapter);
         gpu.render(&list, &tables, width, height, crate::device_scale(scale))
             .unwrap();
         (cpu.data_as_u8_slice().to_vec(), gpu.read_back())
@@ -934,8 +969,69 @@ mod tests {
 
     #[test]
     fn the_gpu_paints_what_the_cpu_paints() {
+        let mut gpu =
+            Gpu::offscreen(wgpu::Backends::all()).expect("a GPU adapter, or WARP or lavapipe");
+        paints_what_the_cpu_paints(&mut gpu);
+    }
+
+    /// On GL too, images and all: GL drew none before its atlas had two
+    /// layers (M5.13). Linux's CI has Mesa's GL; elsewhere a machine
+    /// without GL (Windows' WARP, macOS) has nothing to try.
+    #[test]
+    fn gl_paints_what_the_cpu_paints() {
+        let mut gpu = match Gpu::offscreen(wgpu::Backends::GL) {
+            Ok(gpu) => gpu,
+            Err(error) if !cfg!(target_os = "linux") => {
+                eprintln!("no GL adapter here: {error}");
+                return;
+            }
+            Err(error) => panic!("Mesa's GL: {error}"),
+        };
+        assert!(gpu.adapter.ends_with("(Gl)"), "{}", gpu.adapter);
+        paints_what_the_cpu_paints(&mut gpu);
+    }
+
+    #[test]
+    fn a_gl_atlas_starts_with_two_small_layers() {
+        let gl = on_backend(atlas_config(), wgpu::Backend::Gl);
+        assert_eq!(gl.initial_atlas_count, 2);
+        assert_eq!(gl.atlas_size, (GL_ATLAS_SIDE, GL_ATLAS_SIDE));
+        assert_eq!(gl.max_atlases, atlas_config().max_atlases);
+        // A smaller atlas stays as small; one of a layer gets two.
+        let small = AtlasConfig {
+            initial_atlas_count: 1,
+            max_atlases: 1,
+            atlas_size: (64, 32),
+            ..AtlasConfig::default()
+        };
+        let gl = on_backend(small, wgpu::Backend::Gl);
+        assert_eq!(
+            (gl.initial_atlas_count, gl.max_atlases, gl.atlas_size),
+            (2, 2, (64, 32))
+        );
+        // Elsewhere the atlas is as asked.
+        for backend in [
+            wgpu::Backend::Dx12,
+            wgpu::Backend::Vulkan,
+            wgpu::Backend::Metal,
+        ] {
+            let other = on_backend(small, backend);
+            assert_eq!(
+                (
+                    other.initial_atlas_count,
+                    other.max_atlases,
+                    other.atlas_size
+                ),
+                (1, 1, (64, 32)),
+                "{backend:?}"
+            );
+        }
+    }
+
+    fn paints_what_the_cpu_paints(gpu: &mut Gpu) {
+        eprintln!("adapter: {}", gpu.adapter);
         for (width, height, scale) in [(400, 360, 1.0), (500, 400, 2.0)] {
-            let (cpu, gpu) = both(width, height, scale);
+            let (cpu, gpu) = both(gpu, width, height, scale);
             assert_eq!(cpu.len(), gpu.len());
             let pixels = cpu.len() / 4;
             let off = cpu

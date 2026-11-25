@@ -56,8 +56,8 @@ fn text_of(app: *mut ErkApp, node: ErkNodeId) -> Result<String, ErkStatus> {
 const PAGE: &str = r#"<body style="margin: 0"><button id="b" style="display: block; width: 100px; height: 40px">düğme</button><p id="p">metin</p>"#;
 
 #[test]
-fn the_abi_version_is_0_19() {
-    assert_eq!(erk_abi_version(), 19);
+fn the_abi_version_is_0_20() {
+    assert_eq!(erk_abi_version(), 20);
 }
 
 #[test]

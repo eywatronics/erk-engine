@@ -24,12 +24,17 @@ and Electron is not a dependency of Erk. Before the first run:
 
 .EXAMPLE
 pwsh tests/memory-compare/compare.ps1
+
+.EXAMPLE
+pwsh tests/memory-compare/compare.ps1 -Gl -Save target/memory-compare-gl.json
 #>
 param(
     [string]$Erk = "$PSScriptRoot\..\..\target\release\erk.exe",
     [string]$Chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe",
     [string]$Electron = "$PSScriptRoot\electron\node_modules\electron\dist\electron.exe",
     [int]$Settle = 40,
+    # Erk's GPU runs draw through OpenGL (`--gl`) rather than DX12.
+    [switch]$Gl,
     # Report from the measurements a run saved, without measuring again.
     [string]$From,
     [string]$Save = "$PSScriptRoot\..\..\target\memory-compare.json"
@@ -96,7 +101,7 @@ foreach ($page in $pages) {
     foreach ($gpu in @($true, $false)) {
         $profile = Join-Path $profiles ([guid]::NewGuid())
         $runs = @(
-            @{ engine = "Erk"; exe = $Erk; args = @(if (-not $gpu) { "--cpu" }) + @("`"$($page.path)`"") },
+            @{ engine = "Erk"; exe = $Erk; args = @(if (-not $gpu) { "--cpu" } elseif ($Gl) { "--gl" }) + @("`"$($page.path)`"") },
             @{ engine = "Chrome"; exe = $Chrome; args = @("--user-data-dir=`"$profile`"", "--no-first-run",
                     "--no-default-browser-check", "--disable-extensions", "--window-size=800,600",
                     "--app=$url") + @(if (-not $gpu) { "--disable-gpu" }) },

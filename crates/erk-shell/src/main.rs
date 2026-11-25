@@ -29,10 +29,12 @@ const SCREENSHOT_HEIGHT: u32 = 600;
 const SCREENSHOT_TURNS: u64 = 8;
 
 enum Command {
-    /// `gpu`: draw on the GPU when the machine can (`--cpu` turns it off).
+    /// `gpu`: draw on the GPU when the machine can (`--cpu` turns it
+    /// off); `gl`: through OpenGL (`--gl`).
     Window {
         page: PathBuf,
         gpu: bool,
+        gl: bool,
     },
     Screenshot {
         out: PathBuf,
@@ -51,15 +53,19 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String>
         (Some(page), None, None, None) if !page.starts_with("--") => Ok(Command::Window {
             page: page.into(),
             gpu: true,
+            gl: false,
         }),
-        (Some(flag), Some(page), None, None) if flag == "--cpu" && !page.starts_with("--") => {
+        (Some(flag), Some(page), None, None)
+            if (flag == "--cpu" || flag == "--gl") && !page.starts_with("--") =>
+        {
             Ok(Command::Window {
                 page: page.into(),
-                gpu: false,
+                gpu: flag == "--gl",
+                gl: flag == "--gl",
             })
         }
         _ => Err(
-            "usage: erk [--cpu] <file.html>\n       erk --screenshot <out.png> <file.html>"
+            "usage: erk [--cpu | --gl] <file.html>\n       erk --screenshot <out.png> <file.html>"
                 .to_owned(),
         ),
     }
@@ -74,8 +80,8 @@ fn main() -> ExitCode {
         }
     };
     let result = match command {
-        Command::Window { page, gpu } => {
-            read_page(&page).and_then(|html| window(&page, &html, gpu))
+        Command::Window { page, gpu, gl } => {
+            read_page(&page).and_then(|html| window(&page, &html, gpu, gl))
         }
         Command::Screenshot { out, page } => {
             read_page(&page).and_then(|html| screenshot(&page, &html, &out))
@@ -101,7 +107,7 @@ fn log(_: LogLevel, message: &str) {
 }
 
 /// Open `page` (already read as `html`) in a window and run until it closes.
-fn window(page: &Path, html: &str, gpu: bool) -> Result<(), String> {
+fn window(page: &Path, html: &str, gpu: bool, gl: bool) -> Result<(), String> {
     let title = format!(
         "Erk — {}",
         page.file_name().map_or_else(
@@ -112,6 +118,7 @@ fn window(page: &Path, html: &str, gpu: bool) -> Result<(), String> {
     let mut app = App::new(Config {
         title,
         gpu,
+        gl,
         log_level: LogLevel::Info,
         ..Config::default()
     })
@@ -163,13 +170,30 @@ mod tests {
     fn a_single_path_opens_a_window() {
         assert!(matches!(
             parse(&["sayfa.html"]),
-            Ok(Command::Window { gpu: true, .. })
+            Ok(Command::Window {
+                gpu: true,
+                gl: false,
+                ..
+            })
         ));
         assert!(matches!(
             parse(&["--cpu", "sayfa.html"]),
-            Ok(Command::Window { gpu: false, .. })
+            Ok(Command::Window {
+                gpu: false,
+                gl: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(&["--gl", "sayfa.html"]),
+            Ok(Command::Window {
+                gpu: true,
+                gl: true,
+                ..
+            })
         ));
         assert!(parse(&["--cpu"]).is_err());
+        assert!(parse(&["--gl"]).is_err());
         assert!(parse(&["--gpu", "sayfa.html"]).is_err());
     }
 

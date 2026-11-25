@@ -11,7 +11,7 @@
  The ABI's version: `(major << 16) | minor`. Within a major version
  functions, constants and trailing structure fields are only added.
  */
-#define ERK_ABI_VERSION 19
+#define ERK_ABI_VERSION 20
 
 #define ERK_RESOURCE_IMAGE 1
 
@@ -41,6 +41,13 @@
  Draw the window on the CPU even where a GPU is available.
  */
 #define ERK_APP_CPU 4
+
+/*
+ Draw the window on the GPU through OpenGL rather than the platform's
+ own graphics API (on Windows DX12): less memory, slower painting; on
+ the CPU where there is no GL. `ERK_APP_CPU` wins. ABI 20.
+ */
+#define ERK_APP_GL 8
 
 #define ERK_INPUT_POINTER_MOVE 1
 

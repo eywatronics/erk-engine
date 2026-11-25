@@ -116,6 +116,12 @@ pub struct Config {
     /// Draw the window on the GPU when the machine can; it falls back to the
     /// CPU when it cannot.
     pub gpu: bool,
+    /// With `gpu`, draw through OpenGL rather than the platform's own
+    /// graphics API (on Windows DX12). Measured on Windows (M5.13), the
+    /// process held some 95 MB less on a small page and the whole page
+    /// painted 3–5 times slower, still faster than the CPU. Without GL the
+    /// window is drawn on the CPU.
+    pub gl: bool,
 }
 
 impl Default for Config {
@@ -128,6 +134,7 @@ impl Default for Config {
             log_level: LogLevel::Warning,
             system_fonts: true,
             gpu: true,
+            gl: false,
         }
     }
 }

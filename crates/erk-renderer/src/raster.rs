@@ -255,6 +255,18 @@ impl RasterThread {
         )
     }
 
+    /// [`RasterThread::on_window`] through OpenGL rather than the
+    /// platform's own graphics API (on Windows DX12): less memory, slower
+    /// painting ([`crate::gpu::GL_BACKENDS`]). Without GL it paints on the
+    /// CPU.
+    #[cfg(feature = "gpu")]
+    pub fn on_window_gl(
+        window: impl crate::gpu::Window,
+        sink: impl FnMut(Painted) + Send + 'static,
+    ) -> Self {
+        Self::on_window_with(std::sync::Arc::new(window), crate::gpu::GL_BACKENDS, sink)
+    }
+
     #[cfg(feature = "gpu")]
     pub(crate) fn on_window_with(
         window: std::sync::Arc<dyn crate::gpu::Window>,
