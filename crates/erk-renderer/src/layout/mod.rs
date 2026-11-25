@@ -40,6 +40,7 @@
 //! position is made relative to its nearest DOM ancestor with a box, which
 //! is what painting and the host walk.
 
+mod cache;
 mod calc;
 pub(crate) mod picker;
 
@@ -52,7 +53,7 @@ use erk_style::style::values::specified::box_::{DisplayInside, DisplayOutside};
 use erk_style::{ComputedValues, Styles};
 use icu_locale_core::LanguageIdentifier;
 use taffy::{
-    AvailableSpace, Baselines, BlockContext, Cache, CacheTree, Dimension, Display, Layout,
+    AvailableSpace, Baselines, BlockContext, CacheTree, Dimension, Display, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
     LayoutPartialTree, LengthPercentage, LengthPercentageAuto, Line, Overflow, Point,
     RequestedAxis, ResolveOrZero, RoundTree, RunMode, Size, SizingMode, Style, TraversePartialTree,
@@ -61,6 +62,8 @@ use taffy::{
 };
 
 use std::collections::HashMap;
+
+use cache::BoxCache;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -767,7 +770,7 @@ struct BoxData {
     /// names its `calc()` values by their address in it, and an address
     /// compared with the next frame's must not have been reused.
     style_source: Option<StyleArc>,
-    cache: Cache,
+    cache: BoxCache,
     unrounded: Layout,
     layout: Layout,
 }
