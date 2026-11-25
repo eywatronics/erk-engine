@@ -1904,6 +1904,12 @@ impl TextEngine {
         let unbroken =
             (!hit && paragraph.align == Alignment::Justify).then(|| Box::new(layout.clone()));
         break_lines(&mut layout, paragraph, max_advance);
+        // Parley grows a new layout's clusters and glyphs as it shapes and
+        // keeps the room it did not use; a clone holds what is there. On
+        // the page of 10 000 cards Parley's share of the heap went from
+        // 67.6 to 27.9 MB (B16, M5.13). A layout from the cache is a clone
+        // already.
+        let layout = if hit { layout } else { layout.clone() };
         let shaped = Arc::new(Self::lines(layout, paragraph, max_advance, atoms));
         match self.cache.entries.get_mut(&key) {
             Some(entry) if hit => {
