@@ -300,13 +300,14 @@ pub(crate) fn layout(
             // A box whose paragraph and inputs are unchanged breaks its lines
             // as before; only where it lands can round its size otherwise,
             // and a relative offset in percent follows the size.
+            let content = content_size(&node.layout);
             if let Some((at, kept)) = &node.result
-                && *at == node.layout
+                && *at == content
             {
                 return Some(kept.clone());
             }
             let layout = node.shaped.clone()?;
-            let relative = relative_offsets(paragraph, &node.layout);
+            let relative = relative_offsets(paragraph, content);
             let decorations = layout.decorations(paragraph);
             let shaped = Arc::new(ShapedText {
                 band: crate::display::text_band(&layout, &relative, &decorations),
@@ -326,7 +327,7 @@ pub(crate) fn layout(
                 decorations,
                 layout,
             });
-            node.result = Some((node.layout, shaped.clone()));
+            node.result = Some((content, shaped.clone()));
             Some(shaped)
         })
         .collect();
@@ -489,23 +490,29 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
     }
 }
 
+/// The size of the content box of a box laid out as `layout`.
+fn content_size(layout: &Layout) -> Size<f32> {
+    Size {
+        width: layout.size.width
+            - layout.border.left
+            - layout.border.right
+            - layout.padding.left
+            - layout.padding.right,
+        height: layout.size.height
+            - layout.border.top
+            - layout.border.bottom
+            - layout.padding.top
+            - layout.padding.bottom,
+    }
+}
+
 /// The offsets of `paragraph`'s relatively positioned inline elements, in
-/// the content box of the block laid out as `layout`.
-fn relative_offsets(paragraph: &Paragraph, layout: &Layout) -> Vec<(f32, f32)> {
-    let width = layout.size.width
-        - layout.border.left
-        - layout.border.right
-        - layout.padding.left
-        - layout.padding.right;
-    let height = layout.size.height
-        - layout.border.top
-        - layout.border.bottom
-        - layout.padding.top
-        - layout.padding.bottom;
+/// a content box of size `content`.
+fn relative_offsets(paragraph: &Paragraph, content: Size<f32>) -> Vec<(f32, f32)> {
     paragraph
         .relative
         .iter()
-        .map(|offset| offset.resolve(width.max(0.0), height.max(0.0)))
+        .map(|offset| offset.resolve(content.width.max(0.0), content.height.max(0.0)))
         .collect()
 }
 
@@ -524,7 +531,7 @@ fn move_relative_atoms(nodes: &mut [LayoutNode]) {
         if paragraph.moved_atoms.is_empty() {
             continue;
         }
-        let offsets = relative_offsets(paragraph, &nodes[index].layout);
+        let offsets = relative_offsets(paragraph, content_size(&nodes[index].layout));
         let moved = paragraph.moved_atoms.clone();
         for (atom, relative) in moved {
             let Some(&(dx, dy)) = usize::from(relative)
@@ -762,10 +769,14 @@ struct BoxData {
     found: Vec<(usize, usize)>,
     /// Which box this is from frame to frame (M5.4).
     key: Option<BoxKey>,
-    /// A paragraph's text as the result gives it, and the final layout it
-    /// was made for: a box not laid out again with the same final layout
-    /// gives the same (M5.4).
-    result: Option<(Layout, Arc<ShapedText>)>,
+    /// A paragraph's text as the result gives it, and the size of the
+    /// content box it was made for: a box not laid out again whose content
+    /// box has that size gives the same (M5.4). The text is placed from the
+    /// content box's corner, and a relative offset in percent reads its
+    /// size alone; a box that only moves keeps its text. The final layout
+    /// held here instead was 92 bytes in each of the card page's 30 000
+    /// boxes (M5.13).
+    result: Option<(Size<f32>, Arc<ShapedText>)>,
     /// An element's computed style, held while the box is: Taffy's style
     /// names its `calc()` values by their address in it, and an address
     /// compared with the next frame's must not have been reused.

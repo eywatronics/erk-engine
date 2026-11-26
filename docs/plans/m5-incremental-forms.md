@@ -1562,3 +1562,16 @@ On dördüncü PR: kutunun yerleşim önbelleği yazılanı tutuyor.
 | Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 153,9 MB (önceki PR 160,9), Electron 202,4 (%76). DX12: 272,1 / 221,5 (%123). `m2-demo.html` kapalı %26, DX12 %111. Çıta (%50) tutmuyor |
 | Mutasyonlar | 10 mutasyonun 9'u yakalandı: belirlilik karşılaştırılmaması, ebeveynin iki boyutunun karşılaştırılması, her eksenin yanıtlaması, ikinci şansın düşmesi, kenar boşluğu taşıyan ölçümün tutulması, isabetin kullanıldı sayılmaması, son yerleşimin her girdiye yanıtı (denklik testi); yuvaların `Vec` gibi büyümesi, temizlemenin yeri tutması (yer testi). Kaçan: yatay ve dikey eksen bitlerinin takası, eşdeğer mutant (saklanan ve sorulan anahtarda aynı takas; eşleştirme iki eksene simetrik) |
 | Kalan | Kartlı sayfanın yığını 114,2 MB: Erk'in yerleşimi 35,0 (`BoxData` ~616 bayt: iki `Layout` 184, paragrafın sonucu 104, önbellek ~112), Parley 27,9, DOM 17,9 (arenanın 15 MB'lık tek bloğu), Erk'in metni 13,6, stiller 9,1 |
+
+On altıncı PR: paragrafın sonucu içerik kutusunun boyutunu tutuyor.
+
+| Konu | Not |
+|---|---|
+| Bulgu | Kutunun `result` alanı, paragrafın metnini bir sonraki karede yeniden vermek için yapıldığı son yerleşimi tutuyordu: her kutuda `Option<(Layout, Arc<ShapedText>)>`, 104 bayt. `ShapedText` kutudan yalnızca içerik kutusunun boyutunu okuyor (yüzdeli göreli ofsetler); metin içerik kutusunun köşesinden yerleşiyor |
+| Değişiklik | `result: Option<(Size<f32>, Arc<ShapedText>)>`, 16 bayt; karşılaştırma içerik kutusunun boyutuyla (`content_size`). `BoxData` 624 → 536 bayt. Yan etki: yalnızca yeri değişen bir paragraf (üstündeki blok büyüdü) metnini yeniden yapmıyor. Reddedilen: metnin satırlarını (`shaped`) da işaretçiyle karşılaştırmak; esnek ve ızgara kutularında ölçüm geçişleri şekil önbelleğinin girdisini değiştirir, aynı satırlar yeni bir `Arc`'la gelir ve metin boşuna yeniden yapılırdı |
+| Muhafız | `a_paragraph_that_only_moves_keeps_its_text`: üstteki blok büyüyünce paragraf 20 px iniyor ve aynı `ShapedText`'i (`Arc::ptr_eq`) veriyor; kabı daralınca yeni bir metin ve `left: 50%`'nin ofseti 200'den 100'e iniyor; `BoxData` ≤ 536 bayt |
+| Yığın (B16, kartlı sayfa) | 114,2 → 111,7 MB (`main` üzerinde, DOM arenası PR'ı olmadan); Erk'in yerleşimi 35,0 → 32,5 MB |
+| Süre (A/B, `mod.rs` değiştirilerek, sırayla üç tur) | B1 medyan: içerik boyutu 19,4 / 22,3 / 23,4 ms, tam yerleşim 23,1 / 31,1 / 22,3 ms. B14: 897 / 1237 / 1038 ms'ye karşı 1213 / 1179 / 1051 ms. Gürültü içinde |
+| Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 151,6 MB (önce 153,9), Electron 175,2 (%87). DX12: 271,9 / 189,8 (%143). Çıta (%50) tutmuyor |
+| Mutasyonlar | 2 mutasyonun 2'si yakalandı: yeri değişen kutunun metni yeniden yapması (yeni test), metnin içerik boyutuna bakmaması (yeni test ve üç motor testi) |
+| Kalan | `BoxData` 536 bayt: iki `Layout` 184 (yuvarlanmamışı kareler arası gerekli; yuvarlanmışı her kare yeniden yazılıyor ve sonuçta bir kopyası daha var), önbellek 120, `BoxKey` 32. Parley'in 19 MB'ı `ClusterData` (karakter başına 20 bayt), yapısal |
