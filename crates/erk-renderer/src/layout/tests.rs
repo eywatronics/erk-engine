@@ -1571,3 +1571,79 @@ fn room_made_for_the_arena_holds_no_box() {
         assert!(moved.children.iter().all(|child| usize::from(*child) < old));
     }
 }
+
+/// A paragraph box not laid out again keeps the text made for it while its
+/// content box keeps its size, wherever the box lands; when the size
+/// changes, a relative offset in percent follows it (M5.4). The box holds
+/// the size it was made for, not its whole layout (M5.13).
+#[test]
+fn a_paragraph_that_only_moves_keeps_its_text() {
+    let mut doc = Document::parse_html(
+        "<body style='margin: 0'><div id=c style='width: 400px'>\
+         <div id=a style='height: 10px'></div>\
+         <p id=p style='margin: 0'>metin <span style='position: relative; left: 50%'>kayan</span></p>\
+         </div></body>",
+    );
+    let by_id = |doc: &Document, id: &str| {
+        let mut stack = vec![doc.root()];
+        while let Some(node) = stack.pop() {
+            if doc
+                .node(node)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| element.attr(&local_name!("id")) == Some(id))
+            {
+                return node;
+            }
+            stack.extend(doc.children(node));
+        }
+        panic!("no #{id}");
+    };
+    let (c, a, p) = (by_id(&doc, "c"), by_id(&doc, "a"), by_id(&doc, "p"));
+    let mut text = TextEngine::new();
+    let mut frame = |doc: &Document, previous: Option<(super::LayoutState, Vec<NodeId>)>| {
+        let styles = StyleEngine::with_font_metrics(
+            WIDTH,
+            HEIGHT,
+            std::sync::Arc::new(crate::text::EmbeddedFontMetrics),
+        )
+        .style(doc);
+        let touched = previous.as_ref().map(|(_, deep)| super::Touched {
+            deep: deep.clone(),
+            shallow: Vec::new(),
+        });
+        layout(
+            doc,
+            &styles,
+            &crate::resources::Resources::default(),
+            &mut text,
+            (WIDTH, HEIGHT),
+            previous.map(|(state, _)| state).zip(touched.as_ref()),
+        )
+    };
+    let held = |layouts: &Layouts| layouts.laid_out(p).unwrap().text.clone().unwrap();
+    let (first, state) = frame(&doc, None);
+    let before = held(&first);
+    assert_eq!(first.get(p).unwrap().location.y, 10.0);
+    assert_eq!(before.relative, [(200.0, 0.0)]);
+
+    // The block above grows: the paragraph moves down, as wide as it was.
+    doc.set_attr(a, "style", "height: 30px").unwrap();
+    let (moved, state) = frame(&doc, Some((state, vec![a])));
+    assert_eq!(moved.get(p).unwrap().location.y, 30.0);
+    assert!(
+        std::sync::Arc::ptr_eq(&before, &held(&moved)),
+        "a paragraph that only moved made its text again"
+    );
+
+    // Its container narrows: the offset in percent follows the width.
+    doc.set_attr(c, "style", "width: 200px").unwrap();
+    let (narrow, _) = frame(&doc, Some((state, vec![c])));
+    let after = held(&narrow);
+    assert!(!std::sync::Arc::ptr_eq(&before, &after));
+    assert_eq!(after.relative, [(100.0, 0.0)]);
+    assert!(
+        size_of::<super::BoxData>() <= 536,
+        "a box is {} bytes",
+        size_of::<super::BoxData>()
+    );
+}
