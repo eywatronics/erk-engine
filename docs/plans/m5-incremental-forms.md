@@ -1575,3 +1575,16 @@ On altıncı PR: paragrafın sonucu içerik kutusunun boyutunu tutuyor.
 | Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 151,6 MB (önce 153,9), Electron 175,2 (%87). DX12: 271,9 / 189,8 (%143). Çıta (%50) tutmuyor |
 | Mutasyonlar | 2 mutasyonun 2'si yakalandı: yeri değişen kutunun metni yeniden yapması (yeni test), metnin içerik boyutuna bakmaması (yeni test ve üç motor testi) |
 | Kalan | `BoxData` 536 bayt: iki `Layout` 184 (yuvarlanmamışı kareler arası gerekli; yuvarlanmışı her kare yeniden yazılıyor ve sonuçta bir kopyası daha var), önbellek 120, `BoxKey` 32. Parley'in 19 MB'ı `ClusterData` (karakter başına 20 bayt), yapısal |
+
+On yedinci PR: yuvarlanmış yerleşim karenin.
+
+| Konu | Not |
+|---|---|
+| Bulgu | Her kutu iki `Layout` tutuyordu (184 bayt). Yuvarlanmamışı kareler arası gerekli: Taffy'nin önbelleği atladığı torunları ondan okur. Yuvarlanmışı ise Taffy'nin `round_layout`'u her kare bütün ağaç için yuvarlanmamıştan yeniden yazıyor; kare bitince `Layouts`'taki `LaidOut` bir kopyasını daha tutuyor. Kutudaki 92 bayt kareler arası boşuna duruyordu |
+| Değişiklik | `Placed`: yalnızca kutusu olan yuvalar için yoğun bir `Vec<Layout>` ve yuva başına 4 baytlık yer dizini, kare boyunca. `set_final_layout`, mutlak piksele oturtma, statik konum, göreli atomlar ve DOM'a göre konumlama ona yazıyor; `LaidOut` ve `AnonymousText` ondan alıyor, sonra bırakılıyor. Kutusu olmayan yuva boş bir kutunun yerleşimini okuyor (eskiden de öyleydi), ona yazılan bir şey yok sayılıyor (eskiden kutu yapardı; yazan yol yok). `BoxData` 536 → 448 bayt |
+| Muhafız | `a_box_not_laid_out_again_is_rounded_again`: kesirli yükseklikler ve dolgu (10,4 / 0,6 / 5,5 px); son kutu büyüyünce üstteki kutular yeniden yerleşmiyor (`laid_out` azalıyor), ama yerleri ve yuvarlanmış boyları ilk karedekiyle aynı; `BoxData` ≤ 448 bayt |
+| Yığın (B16, kartlı sayfa) | 111,7 → 109,1 MB (on altıncı PR'ın üzerinde, DOM arenası olmadan); Erk'in yerleşimi 32,5 → 30,0 MB. Eleman başına 3,7 KB |
+| Süre (A/B, `mod.rs` değiştirilerek, sıra her turda değişerek) | B1 üç tur: karede 18,2 / 21,0 / 22,6 ms, kutuda 19,2 / 17,9 / 22,8 ms. B14 yedi tur: karede medyan 893 ms (789–954), kutuda 852 ms (783–928); karede olan 7 turun 3'ünü kazandı. Aralıklar örtüşüyor, açık bir gerileme yok |
+| Karşılaştırma | `erk-10000.html` GPU kapalı: Erk 148,5 MB (önce 151,6), Electron 174,1 (%85). DX12: 263,4 / 190,5 (%138). `m2-demo.html` kapalı %27. Çıta (%50) tutmuyor |
+| Mutasyonlar | 3 mutasyonun 3'ü yakalandı: yalnızca bu kare yerleşen kutuların yuvarlanması (yeni test ve 63 test daha), alanın kutuya geri konması (yeni testin boyut sınırı), mutlak piksele oturtmanın yazmaması (`positions_snap_to_absolute_pixels`) |
+| Kalan | `BoxData` 448 bayt: yuvarlanmamış `Layout` 92, önbellek ~120, `BoxKey` 32, `found` 24 (kartlı sayfada hep boş), iki `Option<usize>` 32. Parley 27,9 MB (`ClusterData`, yapısal), DOM 17,9, Erk'in metni 13,6, stiller 9,1 |

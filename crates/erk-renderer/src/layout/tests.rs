@@ -1647,3 +1647,69 @@ fn a_paragraph_that_only_moves_keeps_its_text() {
         size_of::<super::BoxData>()
     );
 }
+
+/// A box holds its unrounded layout alone: Taffy rounds the whole tree
+/// again every frame, and the final layout lives in the frame (M5.13). A
+/// box Taffy's cache skips still lands where a whole layout puts it, at a
+/// fraction of a pixel rounded the same way.
+#[test]
+fn a_box_not_laid_out_again_is_rounded_again() {
+    let html = "<body style='margin: 0'><div id=a style='height: 10.4px'></div>\
+                <div id=b style='height: 20.3px; padding-top: 0.6px'>\
+                <div id=d style='height: 5.5px'></div></div>\
+                <div id=e style='height: 3px'></div></body>";
+    let mut doc = Document::parse_html(html);
+    let by_id = |doc: &Document, id: &str| {
+        let mut stack = vec![doc.root()];
+        while let Some(node) = stack.pop() {
+            if doc
+                .node(node)
+                .and_then(|node| node.as_element())
+                .is_some_and(|element| element.attr(&local_name!("id")) == Some(id))
+            {
+                return node;
+            }
+            stack.extend(doc.children(node));
+        }
+        panic!("no #{id}");
+    };
+    let (b, d, e) = (by_id(&doc, "b"), by_id(&doc, "d"), by_id(&doc, "e"));
+    let mut text = TextEngine::new();
+    let mut frame = |doc: &Document, previous: Option<(super::LayoutState, Vec<NodeId>)>| {
+        let styles = StyleEngine::with_font_metrics(
+            WIDTH,
+            HEIGHT,
+            std::sync::Arc::new(crate::text::EmbeddedFontMetrics),
+        )
+        .style(doc);
+        let touched = previous.as_ref().map(|(_, deep)| super::Touched {
+            deep: deep.clone(),
+            shallow: Vec::new(),
+        });
+        layout(
+            doc,
+            &styles,
+            &crate::resources::Resources::default(),
+            &mut text,
+            (WIDTH, HEIGHT),
+            previous.map(|(state, _)| state).zip(touched.as_ref()),
+        )
+    };
+    let (first, state) = frame(&doc, None);
+    let (at_b, at_d) = (*first.get(b).unwrap(), *first.get(d).unwrap());
+    assert_eq!(at_b.location.y, 10.0);
+    assert_eq!((at_d.location.y, at_d.size.height), (1.0, 6.0));
+
+    // The last box grows; the ones above it are not laid out again.
+    doc.set_attr(e, "style", "height: 9px").unwrap();
+    let (second, _) = frame(&doc, Some((state, vec![e])));
+    assert!(second.laid_out < first.laid_out, "{}", second.laid_out);
+    assert_eq!(*second.get(b).unwrap(), at_b);
+    assert_eq!(*second.get(d).unwrap(), at_d);
+    assert_eq!(second.get(e).unwrap().size.height, 9.0);
+    assert!(
+        size_of::<super::BoxData>() <= 448,
+        "a box is {} bytes",
+        size_of::<super::BoxData>()
+    );
+}

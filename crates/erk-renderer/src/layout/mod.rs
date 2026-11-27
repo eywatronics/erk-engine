@@ -93,6 +93,57 @@ pub(crate) struct Layouts {
 /// What [`Layouts::at`] holds for a slot with no box.
 const NO_BOX: u32 = u32::MAX;
 
+/// Each box's final (pixel-rounded) layout, this frame's (M5.13). Taffy
+/// rounds the whole tree again every frame from the unrounded layouts,
+/// which a box keeps for its cache; the final layout held in each box as
+/// well was 92 bytes in each of the card page's 30 000 boxes, held from
+/// frame to frame for nothing. It is held here while the frame is laid
+/// out, for the boxes written to alone, and [`Layouts`] keeps it.
+struct Placed {
+    /// Each slot's place in `layouts`, or [`NO_BOX`] for a slot with no box.
+    at: Vec<u32>,
+    layouts: Vec<Layout>,
+}
+
+/// What a slot with no box reads: an empty box's layout.
+const NO_LAYOUT: Layout = Layout::new();
+
+impl Placed {
+    fn new(nodes: &[LayoutNode]) -> Self {
+        let mut at = Vec::with_capacity(nodes.len());
+        let mut boxes = 0;
+        for node in nodes {
+            if node.0.is_some() {
+                at.push(boxes);
+                boxes += 1;
+            } else {
+                at.push(NO_BOX);
+            }
+        }
+        Self {
+            at,
+            layouts: vec![Layout::new(); boxes as usize],
+        }
+    }
+
+    /// The final layout of the box in slot `index`, if it has one to write.
+    fn get_mut(&mut self, index: usize) -> Option<&mut Layout> {
+        let at = *self.at.get(index).filter(|at| **at != NO_BOX)?;
+        self.layouts.get_mut(at as usize)
+    }
+}
+
+impl std::ops::Index<usize> for Placed {
+    type Output = Layout;
+
+    fn index(&self, index: usize) -> &Layout {
+        self.at
+            .get(index)
+            .and_then(|at| self.layouts.get(*at as usize))
+            .unwrap_or(&NO_LAYOUT)
+    }
+}
+
 /// A box as layout left it.
 struct LaidOut {
     /// Its final (pixel-rounded) layout, relative to its parent box.
@@ -269,8 +320,10 @@ pub(crate) fn layout(
     };
     let (nodes, calcs, reserved) = builder.run(resources);
     let computed = vec![false; nodes.len()];
+    let placed = Placed::new(&nodes);
     let mut tree = LayoutTree {
         nodes,
+        placed,
         calcs: &calcs,
         text,
         computed,
@@ -288,19 +341,24 @@ pub(crate) fn layout(
 
     let shaped_count = tree.text.shaped();
     let laid_out_count = tree.computed.iter().filter(|computed| **computed).count();
-    let LayoutTree { mut nodes, .. } = tree;
-    snap_locations(&mut nodes, usize::from(root));
-    place_at_static_positions(doc, &mut nodes);
-    move_relative_atoms(&mut nodes);
-    relative_to_dom(doc, &mut nodes);
+    let LayoutTree {
+        mut nodes,
+        mut placed,
+        ..
+    } = tree;
+    snap_locations(&nodes, &mut placed, usize::from(root));
+    place_at_static_positions(doc, &nodes, &mut placed);
+    move_relative_atoms(&nodes, &mut placed);
+    relative_to_dom(doc, &nodes, &mut placed);
     let mut text: Vec<Option<Arc<ShapedText>>> = nodes
         .iter_mut()
-        .map(|node| {
+        .enumerate()
+        .map(|(index, node)| {
             let paragraph = node.paragraph.as_ref().filter(|_| node.in_tree)?;
             // A box whose paragraph and inputs are unchanged breaks its lines
             // as before; only where it lands can round its size otherwise,
             // and a relative offset in percent follows the size.
-            let content = content_size(&node.layout);
+            let content = content_size(&placed[index]);
             if let Some((at, kept)) = &node.result
                 && *at == content
             {
@@ -340,7 +398,7 @@ pub(crate) fn layout(
         }
         at[index] = boxes.len() as u32;
         boxes.push(LaidOut {
-            layout: node.layout,
+            layout: placed[index],
             text: text[index].take(),
             anonymous: Vec::new(),
             image: node.replaced().and_then(|replaced| replaced.image.clone()),
@@ -352,7 +410,7 @@ pub(crate) fn layout(
             && let Some(block) = boxes.get_mut(block as usize)
         {
             block.anonymous.push(AnonymousText {
-                layout: node.layout,
+                layout: placed[index],
                 text: shaped,
             });
         }
@@ -380,15 +438,16 @@ pub(crate) fn layout(
 /// (found by the Chrome reference test: a `<sup>` line's fraction moved a
 /// `vertical-align: middle` box further down the page). Sizes, borders and
 /// padding are already rounded that way by Taffy.
-fn snap_locations(nodes: &mut [LayoutNode], root: usize) {
+fn snap_locations(nodes: &[LayoutNode], placed: &mut Placed, root: usize) {
     let round = |value: f32| (value + 0.5).floor();
     let mut stack = vec![(root, 0.0_f32, 0.0_f32)];
     while let Some((index, parent_x, parent_y)) = stack.pop() {
         let unrounded = nodes[index].unrounded.location;
         let (x, y) = (parent_x + unrounded.x, parent_y + unrounded.y);
-        let location = &mut nodes[index].layout.location;
-        location.x = round(x) - round(parent_x);
-        location.y = round(y) - round(parent_y);
+        if let Some(layout) = placed.get_mut(index) {
+            layout.location.x = round(x) - round(parent_x);
+            layout.location.y = round(y) - round(parent_y);
+        }
         for child in &nodes[index].children {
             stack.push((usize::from(*child), x, y));
         }
@@ -396,11 +455,11 @@ fn snap_locations(nodes: &mut [LayoutNode], root: usize) {
 }
 
 /// Each box's absolute position, down the layout tree.
-fn absolute_positions(doc: &Document, nodes: &[LayoutNode]) -> Vec<Point<f32>> {
+fn absolute_positions(doc: &Document, nodes: &[LayoutNode], placed: &Placed) -> Vec<Point<f32>> {
     let mut absolute = vec![Point::ZERO; nodes.len()];
     let mut stack = vec![(doc.root().index() as usize, Point::ZERO)];
     while let Some((index, parent)) = stack.pop() {
-        let location = nodes[index].layout.location;
+        let location = placed[index].location;
         let here = Point {
             x: parent.x + location.x,
             y: parent.y + location.y,
@@ -419,8 +478,8 @@ fn absolute_positions(doc: &Document, nodes: &[LayoutNode]) -> Vec<Point<f32>> {
 /// boxes in flow after it, so moving it changes nothing else. An element
 /// whose static position is inside another such element sees that one's
 /// position before the move (rare; not handled).
-fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
-    let absolute = absolute_positions(doc, nodes);
+fn place_at_static_positions(doc: &Document, nodes: &[LayoutNode], placed: &mut Placed) {
+    let absolute = absolute_positions(doc, nodes, placed);
     let round = |value: f32| (value + 0.5).floor();
     for index in 0..nodes.len() {
         let Some(source) = nodes[index].static_position() else {
@@ -435,7 +494,7 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
             continue;
         }
         let content = |box_index: usize| {
-            let layout = &nodes[box_index].layout;
+            let layout = &placed[box_index];
             Point {
                 x: absolute[box_index].x + layout.border.left + layout.padding.left,
                 y: absolute[box_index].y + layout.border.top + layout.padding.top,
@@ -445,7 +504,12 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
             StaticPosition::Placeholder(placeholder) => absolute[placeholder],
             StaticPosition::ContentStart(container) => {
                 let mut point = content(container);
-                let (dx, dy) = sole_flex_item_offset(&nodes[container], &nodes[index]);
+                let (dx, dy) = sole_flex_item_offset(
+                    &nodes[container],
+                    &placed[container],
+                    &nodes[index],
+                    &placed[index],
+                );
                 point.x += round(dx);
                 point.y += round(dy);
                 point
@@ -475,17 +539,18 @@ fn place_at_static_positions(doc: &Document, nodes: &mut [LayoutNode]) {
                 }
             }
         };
-        let layout = nodes[index].layout;
+        let Some(layout) = placed.get_mut(index) else {
+            continue;
+        };
         let parent = Point {
             x: absolute[index].x - layout.location.x,
             y: absolute[index].y - layout.location.y,
         };
-        let location = &mut nodes[index].layout.location;
         if auto_x {
-            location.x = static_point.x + layout.margin.left - parent.x;
+            layout.location.x = static_point.x + layout.margin.left - parent.x;
         }
         if auto_y {
-            location.y = static_point.y + layout.margin.top - parent.y;
+            layout.location.y = static_point.y + layout.margin.top - parent.y;
         }
     }
 }
@@ -519,7 +584,7 @@ fn relative_offsets(paragraph: &Paragraph, content: Size<f32>) -> Vec<(f32, f32)
 /// Move each atomic inline that a relatively positioned inline element
 /// holds by the element's offset: after line breaking, which it changes
 /// nothing of.
-fn move_relative_atoms(nodes: &mut [LayoutNode]) {
+fn move_relative_atoms(nodes: &[LayoutNode], placed: &mut Placed) {
     for index in 0..nodes.len() {
         let Some(paragraph) = nodes[index]
             .paragraph
@@ -531,18 +596,18 @@ fn move_relative_atoms(nodes: &mut [LayoutNode]) {
         if paragraph.moved_atoms.is_empty() {
             continue;
         }
-        let offsets = relative_offsets(paragraph, content_size(&nodes[index].layout));
-        let moved = paragraph.moved_atoms.clone();
-        for (atom, relative) in moved {
+        let offsets = relative_offsets(paragraph, content_size(&placed[index]));
+        for &(atom, relative) in &paragraph.moved_atoms {
             let Some(&(dx, dy)) = usize::from(relative)
                 .checked_sub(1)
                 .and_then(|at| offsets.get(at))
             else {
                 continue;
             };
-            let location = &mut nodes[atom].layout.location;
-            location.x += dx;
-            location.y += dy;
+            if let Some(layout) = placed.get_mut(atom) {
+                layout.location.x += dx;
+                layout.location.y += dy;
+            }
         }
     }
 }
@@ -552,7 +617,12 @@ fn move_relative_atoms(nodes: &mut [LayoutNode]) {
 /// only flex item (CSS Flexbox §4.1), by `justify-content` along the main
 /// axis and `align-self` (or the container's `align-items`) across it.
 /// Nothing for a grid container.
-fn sole_flex_item_offset(container: &LayoutNode, item: &LayoutNode) -> (f32, f32) {
+fn sole_flex_item_offset(
+    container: &LayoutNode,
+    outer: &Layout,
+    item: &LayoutNode,
+    inner: &Layout,
+) -> (f32, f32) {
     use taffy::style::{AlignContentKeyword as Main, AlignItemsKeyword as Cross};
     let style = &container.style;
     if style.display != Display::Flex {
@@ -595,7 +665,6 @@ fn sole_flex_item_offset(container: &LayoutNode, item: &LayoutNode) -> (f32, f32
         Some(Cross::End | Cross::FlexEnd | Cross::SelfEnd) => 1.0,
         _ => 0.0,
     };
-    let (outer, inner) = (&container.layout, &item.layout);
     let free_x = outer.size.width
         - outer.border.left
         - outer.border.right
@@ -620,8 +689,8 @@ fn sole_flex_item_offset(container: &LayoutNode, item: &LayoutNode) -> (f32, f32
 /// which differs from the DOM for atomic inlines inside inline elements or
 /// anonymous boxes, and for absolutely positioned elements, whose parent is
 /// their containing block. Anonymous boxes stay relative to their block.
-fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
-    let absolute = absolute_positions(doc, nodes);
+fn relative_to_dom(doc: &Document, nodes: &[LayoutNode], placed: &mut Placed) {
+    let absolute = absolute_positions(doc, nodes, placed);
     // Down the DOM, with the absolute position of the nearest box above.
     let mut stack = vec![(doc.root(), Point::ZERO)];
     while let Some((id, above)) = stack.pop() {
@@ -629,10 +698,12 @@ fn relative_to_dom(doc: &Document, nodes: &mut [LayoutNode]) {
         let mut origin = above;
         if nodes[index].in_tree {
             let here = absolute[index];
-            nodes[index].layout.location = Point {
-                x: here.x - above.x,
-                y: here.y - above.y,
-            };
+            if let Some(layout) = placed.get_mut(index) {
+                layout.location = Point {
+                    x: here.x - above.x,
+                    y: here.y - above.y,
+                };
+            }
             origin = here;
         }
         for child in doc.children(id) {
@@ -783,7 +854,6 @@ struct BoxData {
     style_source: Option<StyleArc>,
     cache: BoxCache,
     unrounded: Layout,
-    layout: Layout,
 }
 
 /// The fields of a box few boxes have, held apart: on B16's page of
@@ -845,6 +915,8 @@ impl BoxData {
 
 struct LayoutTree<'t> {
     nodes: Vec<LayoutNode>,
+    /// The final layouts Taffy rounds this frame.
+    placed: Placed,
     calcs: &'t CalcTable,
     text: &'t mut TextEngine,
     /// The boxes laid out this time, Taffy's cache not having them.
@@ -2913,6 +2985,8 @@ impl RoundTree for LayoutTree<'_> {
     }
 
     fn set_final_layout(&mut self, id: taffy::NodeId, layout: &Layout) {
-        self.node_mut(id).layout = *layout;
+        if let Some(placed) = self.placed.get_mut(usize::from(id)) {
+            *placed = *layout;
+        }
     }
 }
